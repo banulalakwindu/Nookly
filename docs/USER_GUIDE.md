@@ -43,7 +43,8 @@
 - **Click** the notch to open it straight away.
 - The icons along the top of the open panel switch between features. The **mouse wheel** does too: roll down for the next panel, up for the previous one. On a list that scrolls (to-do, clipboard, lyrics) the wheel scrolls the list; over the icons it always switches.
 - It always opens on the panel you last picked, even after a restart. (A reminder can open another panel for a moment; next time it's back to yours.)
-- Don't use a panel? Hide it in **Settings > Panels**.
+- Don't use a panel? Switch it off in **Settings > Features**. When more panels are on than fit in the tab bar, the rest sit under **⋯**.
+- **Win+Alt+N** opens and closes the notch from anywhere (change it in Settings > Features).
 - The smaller styles (Compact, Pill, Hidden) wait a moment before opening, so reaching for browser tabs does not open them by accident.
 
 <img src="images/music.png" alt="Open panel">
@@ -226,7 +227,7 @@ The page always shows the place in use, by name, so you can see when it's wrong.
 
 ### Notes
 
-- A panel turned off in **Settings > Panels** drops out of the Widgets tab too.
+- A panel turned off in **Settings > Features** drops out of the Widgets tab too.
 - Clicking the closed notch opens the panel of what it's showing.
 - With the mascot in the **Slim** style: in the middle it takes the clock's place; at the left or right it takes that side, and the notch stays the same size. Only beside an item using both sides does the notch grow to make room.
 - **Bluetooth** shows the battery Windows knows for connected headsets, mice and keyboards. AirPods don't share theirs with Windows, so WindyLand listens for about 3 seconds once a minute to the battery broadcast AirPods send (left, right and case, in 10% steps). It only does this while the Bluetooth widget is on (or the Widgets tab is open) and AirPods are connected. Nothing is saved or sent. In a crowded place it may sometimes pick up someone else's AirPods.
@@ -342,13 +343,34 @@ Pick one in **Settings > Mascot**: Eyes, Cat, Ghost, Robot, Sparky (an electric 
   - With an auto-hidden taskbar, or during a full-screen game or video, the mascot hides and the notch comes back to its usual place.
   - To go back to the notch, click **Taskbar** again, or pick a style or position (or right-drag the notch).
 
+## Features: switch on only what you use
+
+<img src="images/settings-features.png" alt="Settings > Features">
+
+**Settings > Features** lists everything WindyLand can do, in four groups: **Everyday**, **Focus & health**, **Work & tools** and **System**. Click one to switch it on or off; rest the mouse on it to read what it does.
+
+- A feature that's off is really off: no tab, no reminders, and it does no work in the background, so it costs nothing.
+- **Start from** sets everything at once: **Minimal** (music, timer, to-do, calendar and widgets), **Student** (adds Pomodoro, water, shelf, clipboard and tools), **Work** (adds Pomodoro, shelf, clipboard, tools, AI agents and the system monitor) or **Everything**. Change any of it afterwards. A new install starts on Minimal, and the welcome tour lets you pick.
+- At least one panel always stays on.
+- With more panels on than fit in the tab bar, the rest sit under **⋯** at the end of the bar. The panel you're on always shows in the bar.
+
+**Shortcuts** (bottom of the Features page):
+
+| Shortcut | What it does |
+|---|---|
+| **Win+Alt+N** (on by default) | Opens the notch, or closes it |
+| Clipboard (none until you set one) | Opens clipboard history with search ready |
+| Screenshot (none until you set one) | Starts a screenshot (needs the Shelf on) |
+
+Click a shortcut, then press the keys you want: it needs Ctrl, Alt or Win (or use an F key alone). **Backspace** removes it, **Esc** cancels. If another app already uses those keys, it shows **In use**; pick others.
+
 ## Settings and your data
 
 <img src="images/settings.png" alt="Settings">
 
 <img src="images/settings-privacy.png" alt="Privacy and alerts">
 
-Open Settings with the **gear** at the end of the tab bar, a plain **right-click** on the notch, or a **left-click** on the tray icon. The notch opens into a large settings panel. Style, position, mascot and sound are on the left; the right side has three pages, **General**, **Privacy** and **Panels**:
+Open Settings with the **gear** at the end of the tab bar, a plain **right-click** on the notch, or a **left-click** on the tray icon. The notch opens into a large settings panel. Style, position, mascot and sound are on the left; the right side has four pages, **General**, **Look**, **Privacy** and **Features**:
 
 | Item | What it does |
 |---|---|
@@ -363,12 +385,13 @@ Open Settings with the **gear** at the end of the tab bar, a plain **right-click
 | Check for updates | Looks for a newer version now |
 | Check for updates automatically | Asks GitHub for the latest version about twice a day. On by default; also offered by the installer |
 | Open data folder | Opens `%APPDATA%\WindyLand` |
-| GitHub page / Privacy policy / Quit WindyLand | The privacy policy is [PRIVACY.md](../PRIVACY.md) |
+| Export settings / Import settings | Save your settings and data in one `.windyland` file, and load it on another PC. Import shows what's in the file and asks before replacing anything; then WindyLand starts again |
+| GitHub / Privacy / Quit | The privacy policy is [PRIVACY.md](../PRIVACY.md) |
 | **Privacy** page: Windows notifications | Show them in the notch, include message text, Windows banners, unmute apps |
 | Mic & camera dots | Dots while the mic or camera is in use |
 | Clipboard history | Record on/off, and Text, Text + files or Everything |
 | Show what I copy | A small preview of each copy (off by default) |
-| **Panels** page | Show or hide each panel. A hidden panel is off: no tab and no reminders. One always stays |
+| **Features** page | Switch features on or off, presets, keyboard shortcuts (see [Features](#features-switch-on-only-what-you-use)) |
 
 Right-clicking the tray icon shows a short menu: Settings, Welcome tour, Check for updates, About and Exit. Resting the mouse on any icon button shows what it does.
 

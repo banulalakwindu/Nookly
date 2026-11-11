@@ -227,6 +227,7 @@ pub mod glyph {
     pub const VOLUME: &str = "\u{E767}";
     pub const MUTE: &str = "\u{E74F}";
     pub const KEYBOARD: &str = "\u{E765}";
+    pub const MORE: &str = "\u{E712}";
     pub const CAPS: &str = "\u{E752}";
     pub const DROP: &str = "\u{EB42}";
     pub const COPY: &str = "\u{E8C8}";

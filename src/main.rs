@@ -15,6 +15,7 @@
 
 mod app;
 mod dragdrop;
+mod features;
 mod gfx;
 mod glass;
 mod http;

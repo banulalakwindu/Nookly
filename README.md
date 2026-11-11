@@ -42,7 +42,7 @@ built in, and a dot shows while any app uses your microphone or camera.
 **Prayer times** are calculated on your PC (no internet), for 16 Bangladesh
 cities or any latitude and longitude, with Karachi, MWL, ISNA, Egypt or Makkah
 methods, Shafi or Hanafi Asr, per-prayer minute nudges and optional reminders.
-Hide any panel you don't use in Settings > Panels, and roll the mouse wheel on
+Switch off any panel you don't use in Settings > Features (or start from a preset: Minimal, Student, Work, Everything), and roll the mouse wheel on
 the open notch to switch panels.
 
 <img src="docs/images/settings.png" alt="Settings">

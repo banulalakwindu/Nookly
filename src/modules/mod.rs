@@ -284,6 +284,9 @@ pub trait Module {
     }
     /// Called once a second, and right after background threads wake the app.
     fn tick(&mut self, ctx: &mut Ctx) {}
+    /// Called instead of `tick` while the panel is switched off in Settings >
+    /// Features: stop anything that would keep working in the background.
+    fn tick_off(&mut self, ctx: &mut Ctx) {}
     /// Draw the expanded panel into `r`.
     fn draw(&mut self, ui: &mut Ui, r: Rect) {}
     /// A registered hit was clicked.

@@ -57,6 +57,10 @@ const TOAST: usize = usize::MAX - 1;
 const SETTINGS: usize = usize::MAX - 2;
 /// Tab bar id of the gear button (other tab ids are module indexes).
 const GEAR: u32 = 1000;
+/// The ⋯ button for the tabs that don't fit.
+const MORE: u32 = 1001;
+/// Narrowest tab before the rest go under ⋯.
+const TAB_MIN: f32 = 26.0;
 /// Size of the settings panel content (DIPs).
 const SETTINGS_SIZE: (f32, f32) = (640.0, 286.0);
 /// Welcome tour panel content size, its hits' module index and action ids.
@@ -69,6 +73,7 @@ const O_BACK: u32 = 2;
 const O_SKIP: u32 = 3;
 const O_STYLE: u32 = 10; // + index into NotchStyle::ALL
 const O_EDGE: u32 = 20; // + index into Edge::ALL
+const O_PRESET: u32 = 30; // + index into features::PRESETS
 const ONBOARD_STEPS: u8 = 5;
 /// Tour step 3: how to use it.
 const TOUR_TIPS: [(&str, &str, &str); 3] = [
@@ -77,19 +82,13 @@ const TOUR_TIPS: [(&str, &str, &str); 3] = [
     (glyph::BACK, "Right-drag: move it", "Drop it on any edge of any screen."),
 ];
 /// Tour step 4: panels worth knowing about.
-const TOUR_PANELS: [(&str, &str, &str); 4] = [
-    ("\u{E99A}", "AI agents", "Hermes, Claude Code, Codex: working, needs you, done."),
-    ("\u{ECA5}", "Widgets", "Battery, AirPods, weather and more on the closed notch."),
-    ("\u{E90F}", "Tools", "Color picker, calculator, QR codes and converters."),
-    (glyph::PASTE, "Clipboard & Shelf", "Search, snippets, click to paste. Screenshots to the Shelf."),
-];
 
 /// Tour step 4: what's in Settings, at a glance.
 const TOUR_SETTINGS: [(&str, &str, &str); 8] = [
     ("\u{E771}", "Style & edge", "5 looks; steps aside for windows"),
     ("\u{E76E}", "Mascot", "In the notch or taskbar"),
     (glyph::VOLUME, "Sounds", "Pick a chime, or none"),
-    ("\u{E8A9}", "Panels", "Hide what you don't use"),
+    ("\u{E8A9}", "Features", "Switch on what you use"),
     (glyph::BELL, "Notifications", "Opt-in Windows alerts"),
     (glyph::PASTE, "Clipboard", "History and copy previews"),
     ("\u{E708}", "Prayer times", "Times and reminders"),
@@ -122,7 +121,13 @@ const S_MASCOT_ALWAYS: u32 = 105;
 const S_TASKBAR_PET: u32 = 113;
 const S_UPDATE_AUTO: u32 = 109;
 const S_MASCOT_POS: u32 = 106; // + 0 left, 1 centre, 2 right
-const S_PANEL: u32 = 120; // + module index
+const S_FEATURE: u32 = 300; // + index into features::FEATURES
+const S_PRESET: u32 = 330; // + index into features::PRESETS
+const S_HOTKEY: u32 = 340; // + index into features::HOTKEYS
+const S_EXPORT: u32 = 350;
+const S_IMPORT: u32 = 351;
+const S_IMPORT_OK: u32 = 352;
+const S_IMPORT_NO: u32 = 353;
 const S_CLOCK12: u32 = 110;
 const S_MAKE_ROOM: u32 = 111;
 const S_COPY_TOAST: u32 = 112;
@@ -203,6 +208,11 @@ enum Mode {
 pub enum Deferred {
     TrayMenu,
     Quit,
+    /// Settings > General: save settings and data to a file / load them.
+    Export,
+    Import,
+    /// Start a fresh WindyLand (after an import) and quit this one.
+    Restart,
     DragOut(Vec<String>),
 }
 
@@ -325,6 +335,16 @@ pub struct App {
     /// Screen x of the taskbar mascot's centre while the notch lives above
     /// it (taskbar mode), else None.
     dock_x: Option<i32>,
+    /// The ⋯ page (panels that don't fit in the tab bar) is open.
+    more_open: bool,
+    /// Recording a keyboard shortcut (index into features::HOTKEYS).
+    recording: Option<usize>,
+    /// Shortcuts Windows refused (another app has them).
+    hotkey_fail: [bool; 3],
+    /// An import waiting for "Replace" (the files in it).
+    import_pending: Option<Vec<(String, String)>>,
+    /// Hovered feature on the Features page (its description shows).
+    feature_hover: Option<usize>,
 }
 
 thread_local! {
@@ -508,13 +528,24 @@ impl App {
                 deferred: Vec::new(),
                 pet: None,
                 dock_x: None,
+                more_open: false,
+                recording: None,
+                hotkey_fail: [false; 3],
+                import_pending: None,
+                feature_hover: None,
             };
             app.place();
             sound::set(app.settings.sound);
             if !app.settings.onboarded {
+                // A brand-new install starts small; the tour offers the rest.
+                if visible && crate::store::read("settings.txt").trim().is_empty() {
+                    crate::features::apply_preset(&mut app.settings, 0);
+                    app.settings.save();
+                }
                 app.start_onboarding();
             }
             if visible {
+                app.hotkey_fail = crate::features::register(hwnd, &app.settings);
                 use windows::Win32::UI::Accessibility::SetWinEventHook;
                 for (lo, hi) in [(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND), (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND)] {
                     let _ = SetWinEventHook(lo, hi, None, Some(on_foreground), 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
@@ -708,8 +739,13 @@ impl App {
                 self.on_mouse_leave();
             }
         }
+        // A panel switched off in Settings > Features does no work.
         for i in 0..self.modules.len() {
-            self.call(i, |m, c| m.tick(c));
+            if self.enabled(i) {
+                self.call(i, |m, c| m.tick(c));
+            } else {
+                self.call(i, |m, c| m.tick_off(c));
+            }
         }
         let tabs = self.tab_list();
         if !tabs.contains(&self.tab) {
@@ -1938,18 +1974,26 @@ impl App {
         let mut bar = self.content_rect(notch, 6.0, pad, pad).cut_top(tab_h, 8.0);
         let now = Now::get();
         let mouse = self.mouse;
-        let tabs = self.tab_list();
         // With many tabs the icons get a little narrower, so the panel's
-        // name still fits beside the clock.
+        // name still fits beside the clock; past that the rest go under ⋯.
         let clock_w = self.gfx.measure(&now.hhmm(), 14.0, Weight::Semi) + 10.0;
         let room = bar.w - (tab_h + 4.0 + TAB_GAP) - clock_w - 84.0;
-        let tw = (room / tabs.len().max(1) as f32 - TAB_GAP).clamp(24.0, tab_h).floor();
+        // How many fit is decided on the usual panel width, so the bar
+        // stays the same on wider panels (Widgets, Settings).
+        let (tabs, more) = self.bar_tabs(room.min(bar_room(tab_h)));
+        let slots = tabs.len() + more as usize;
+        let tw = (room / slots.max(1) as f32 - TAB_GAP).clamp(TAB_MIN, tab_h).floor();
         let slot = tw + TAB_GAP;
         self.tab_bar = bar;
         self.tab_slot = slot;
-        // The highlight pill glides to the selected tab (or the gear).
+        if !more {
+            self.more_open = false;
+        }
+        // The highlight pill glides to the selected tab (or ⋯, or the gear).
         let sel_off = if self.settings_open {
-            tabs.len() as f32 * slot + 4.0
+            slots as f32 * slot + 4.0
+        } else if self.more_open {
+            tabs.len() as f32 * slot
         } else {
             tabs.iter().position(|&i| i == self.tab).unwrap_or(0) as f32 * slot
         };
@@ -1984,7 +2028,7 @@ impl App {
             for &i in &tabs {
                 let tr = bar.cut_left(tw, TAB_GAP);
                 let m = &self.modules[i];
-                let sel = i == self.tab && !self.settings_open;
+                let sel = i == self.tab && !self.settings_open && !self.more_open;
                 let fg = if sel && gp < 1.0 {
                     m.accent().lerp(col::TEXT, gp)
                 } else if sel {
@@ -1995,6 +2039,11 @@ impl App {
                 // The icon stays still (no size change or hop): only its colour
                 // fades from the tab's accent to white.
                 ui.icon_btn(tr, m.icon(), i as u32, 14.0, fg, None, m.title());
+            }
+            if more {
+                let tr = bar.cut_left(tw, TAB_GAP);
+                let fg = if self.more_open && !self.settings_open { col::TEXT } else { col::DIM };
+                ui.icon_btn(tr, glyph::MORE, MORE, 14.0, fg, None, "More panels");
             }
             // Settings gear, set slightly apart from the tabs.
             bar.cut_left(4.0, 0.0);
@@ -2013,7 +2062,13 @@ impl App {
                 let d = bar.cut_right(10.0, 2.0);
                 ui.circle(d.cx(), d.cy(), 3.5, *c);
             }
-            let title = if self.settings_open { "Settings" } else { panel_name(self.modules[self.tab].title()) };
+            let title = if self.settings_open {
+                "Settings"
+            } else if self.more_open {
+                "More panels"
+            } else {
+                panel_name(self.modules[self.tab].title())
+            };
             let date = now.short_date();
             let title_w = ui.measure(title, 13.0, Weight::Semi) + 10.0;
             let date_w = ui.measure(&date, 12.0, Weight::Regular) + 8.0;
@@ -2054,6 +2109,8 @@ impl App {
         self.gfx.alpha = base * self.switch_alpha(t);
         if self.settings_open {
             self.draw_settings(r, t);
+        } else if self.more_open {
+            self.draw_more(r, t);
         } else {
             let i = self.tab;
             if self.modules[i].title() == "Widgets" {
@@ -2098,6 +2155,49 @@ impl App {
         }
     }
 
+    /// The tabs that fit in the bar (the open one always among them), and
+    /// whether the rest go under ⋯.
+    fn bar_tabs(&self, room: f32) -> (Vec<usize>, bool) {
+        let all = self.tab_list();
+        let cap = ((room + TAB_GAP) / (TAB_MIN + TAB_GAP)).floor().max(3.0) as usize;
+        if all.len() <= cap {
+            return (all, false);
+        }
+        let mut shown: Vec<usize> = all[..cap - 1].to_vec();
+        if !shown.contains(&self.tab) && all.contains(&self.tab) {
+            shown[cap - 2] = self.tab;
+        }
+        (shown, true)
+    }
+
+    /// The panels under ⋯, as big tiles.
+    fn draw_more(&mut self, r: Rect, t: f64) {
+        let (tab_h, _) = self.panel_metrics();
+        let clock_w = self.gfx.measure(&Now::get().hhmm(), 14.0, Weight::Semi) + 10.0;
+        let room = (self.tab_bar.w - (tab_h + 4.0 + TAB_GAP) - clock_w - 84.0).min(bar_room(tab_h));
+        let (shown, _) = self.bar_tabs(room);
+        let rest: Vec<usize> = self.tab_list().into_iter().filter(|i| !shown.contains(i)).collect();
+        let mouse = self.mouse;
+        let tiles: Vec<(usize, &'static str, &'static str, Color)> =
+            rest.iter().map(|&i| (i, panel_name(self.modules[i].title()), self.modules[i].icon(), self.modules[i].accent())).collect();
+        let mut ui = Ui { g: &mut self.gfx, hits: &mut self.hits, module: APP_HIT, mouse, t };
+        let per = tiles.len().clamp(1, 4);
+        let rows = (tiles.len() + per - 1) / per;
+        let grid = r.centered(r.w.min(118.0 * per as f32), (rows as f32 * 62.0 - 8.0).max(0.0));
+        for (k, (i, name, icon, accent)) in tiles.into_iter().enumerate() {
+            let row = Rect::new(grid.x, grid.y + (k / per) as f32 * 62.0, grid.w, 54.0);
+            let cell = row.columns(per, 8.0)[k % per];
+            let hov = ui.hovered(cell);
+            ui.fill_rr(cell, 12.0, if hov { col::BTN_HOVER } else { col::BTN });
+            let mut c = cell.inset(6.0);
+            let ic = c.cut_top(24.0, 2.0);
+            ui.circle(ic.cx(), ic.cy(), 12.0, accent.with_a(0.18));
+            ui.icon(icon, ic, 12.0, accent);
+            ui.text(name, c, 11.5, col::TEXT, Weight::Semi, Align::Center);
+            ui.hit_tip(cell, i as u32, name);
+        }
+    }
+
     /// Where module `i` draws inside the panel content rect `r`: its natural
     /// size, centred.
     fn module_rect(&self, i: usize, r: Rect) -> Rect {
@@ -2118,6 +2218,9 @@ impl App {
     /// The settings panel: look and position on the left, mascot picker
     /// below, general switches and links on the right.
     fn draw_settings(&mut self, r: Rect, t: f64) {
+        if self.settings_page == 2 {
+            return self.draw_features(r, t);
+        }
         let mouse = self.mouse;
         let st = self.settings.clone();
         let startup = self.startup_cache;
@@ -2127,10 +2230,7 @@ impl App {
         let accent = col::ACCENT;
         let page = self.settings_page;
         let muted = crate::modules::notifs::muted(&st.extra).len();
-        let panels: Vec<(usize, &'static str, &'static str, bool)> = (0..self.modules.len())
-            .filter(|&i| self.modules[i].has_tab())
-            .map(|i| (i, panel_name(self.modules[i].title()), self.modules[i].icon(), !st.panel_hidden(self.modules[i].title())))
-            .collect();
+        let importing = self.import_pending.as_ref().map(|f| f.iter().map(|(n, _)| n.trim_end_matches(".txt")).collect::<Vec<_>>().join(", "));
         let mut ui = Ui { g: &mut self.gfx, hits: &mut self.hits, module: SETTINGS, mouse, t };
         let mut left = Rect::new(r.x, r.y, 372.0_f32.min(r.w * 0.6), r.h);
         let mut right = Rect::new(left.r() + 20.0, r.y, r.r() - left.r() - 20.0, r.h);
@@ -2219,15 +2319,28 @@ impl App {
 
         // The right column has three pages.
         let seg = right.cut_top(26.0, 12.0);
-        for (cell, (i, name)) in seg.columns(4, 6.0).into_iter().zip([(0u8, "General"), (3, "Look"), (1, "Privacy"), (2, "Panels")]) {
-            ui.chip(cell, name, S_PAGE + i as u32, page == i, accent);
-        }
+        settings_pages(&mut ui, seg, page);
         let half = |rr: &mut Rect, gap: f32| {
             let row = rr.cut_top(26.0, gap);
             let c = row.columns(2, 8.0);
             (c[0], c[1])
         };
-        if page == 0 {
+        if page == 0 && importing.is_some() {
+            let names = importing.unwrap_or_default();
+            label(&mut ui, right.cut_top(16.0, 4.0), "Import settings");
+            ui.text_wrap(
+                "Replace your settings and data on this PC with the ones in the file? WindyLand starts again to load them.",
+                right.cut_top(48.0, 4.0),
+                12.0,
+                col::TEXT,
+                Weight::Regular,
+                Align::Left,
+            );
+            ui.text_wrap(&format!("In the file: {names}"), right.cut_top(32.0, 8.0), 10.5, col::DIM, Weight::Regular, Align::Left);
+            let (a, b) = half(&mut right, 6.0);
+            ui.button_accent(a, "Replace", S_IMPORT_OK, accent);
+            ui.button(b, "Cancel", S_IMPORT_NO);
+        } else if page == 0 {
             ui.toggle(right.cut_top(26.0, 2.0), "Start with Windows", startup, S_STARTUP, accent);
             ui.toggle(right.cut_top(26.0, 2.0), "Volume overlay", st.volume_overlay, S_VOLUME, accent);
             ui.toggle(right.cut_top(26.0, 2.0), "12-hour clock", st.clock12, S_CLOCK12, accent);
@@ -2237,30 +2350,15 @@ impl App {
             ui.button(a, if checking { "Checking..." } else { "Check for updates" }, S_UPDATES);
             ui.button(b, "Open data folder", S_DATA);
             let (a, b) = half(&mut right, 6.0);
-            ui.button(a, "GitHub page", S_GITHUB);
-            ui.button(b, "Privacy policy", S_POLICY);
-            let (a, _) = half(&mut right, 6.0);
-            ui.button_c(a, "Quit WindyLand", S_QUIT, col::RED.with_a(0.18), col::RED);
+            ui.button(a, "Export settings", S_EXPORT);
+            ui.button(b, "Import settings", S_IMPORT);
+            let row = right.cut_top(26.0, 6.0);
+            let c = row.columns(3, 8.0);
+            ui.button(c[0], "GitHub", S_GITHUB);
+            ui.button(c[1], "Privacy", S_POLICY);
+            ui.button_c(c[2], "Quit", S_QUIT, col::RED.with_a(0.18), col::RED);
             // (the last row's 6 DIP gap is not content)
             self.settings_room[0] = r.b() - right.y + 6.0;
-        } else if page == 2 {
-            label(&mut ui, right.cut_top(16.0, 4.0), "Show these panels");
-            let rows = (panels.len() + 1) / 2;
-            // Tighter rows: there are 14 panels.
-            let grid = right.cut_top(rows as f32 * 22.0 + (rows.max(1) - 1) as f32 * 4.0, 8.0);
-            for (row_i, row) in grid.rows(rows, 4.0).into_iter().enumerate() {
-                for (col_i, cell) in row.columns(2, 6.0).into_iter().enumerate() {
-                    let Some(&(i, name, icon, on)) = panels.get(row_i * 2 + col_i) else { continue };
-                    ui.chip(cell, "", S_PANEL + i as u32, on, accent);
-                    let mut c = cell.inset_xy(9.0, 0.0);
-                    let ic = c.cut_left(14.0, 6.0);
-                    let fg = if on { col::TEXT } else { col::FAINT };
-                    ui.icon(icon, ic, 11.5, fg);
-                    ui.text(name, c, 12.0, fg, Weight::Semi, Align::Left);
-                }
-            }
-            ui.text_wrap("A hidden panel is off: no tab, no reminders. Scroll the wheel on the open notch to switch panels.", right.cut_top(28.0, 0.0), 10.5, col::DIM, Weight::Regular, Align::Left);
-            self.settings_room[2] = r.b() - right.y;
         } else if page == 3 {
             label(&mut ui, right.cut_top(16.0, 4.0), "Theme");
             // Four to a row.
@@ -2330,6 +2428,194 @@ impl App {
         }
     }
 
+    /// Settings > Features, across the whole panel: presets on top, the
+    /// switches in four groups, what the hovered one does, and shortcuts.
+    fn draw_features(&mut self, r: Rect, t: f64) {
+        use crate::features::{background, current_preset, hotkey, hotkey_label, is_on, FEATURES, GROUPS, HOTKEYS, PRESETS};
+        let mouse = self.mouse;
+        let st = self.settings.clone();
+        let accent = col::ACCENT;
+        let preset = current_preset(&st);
+        let items: Vec<(usize, &'static str, &'static str, u8, bool)> = FEATURES
+            .iter()
+            .enumerate()
+            .filter_map(|(k, f)| {
+                let (name, icon) = match background(f.key) {
+                    Some(b) => b,
+                    None => {
+                        let m = self.modules.iter().find(|m| m.title() == f.key && m.has_tab())?;
+                        (feature_name(m.title()), m.icon())
+                    }
+                };
+                Some((k, name, icon, f.group, is_on(&st, f.key)))
+            })
+            .collect();
+        let recording = self.recording;
+        let fail = self.hotkey_fail;
+        let mut ui = Ui { g: &mut self.gfx, hits: &mut self.hits, module: SETTINGS, mouse, t };
+        let mut body = r;
+        let head = body.cut_top(26.0, 10.0);
+        let left_w = 372.0_f32.min(r.w * 0.6);
+        // The page chips sit where they do on the other pages.
+        let seg = Rect::new(head.x + left_w + 20.0, head.y, head.r() - head.x - left_w - 20.0, head.h);
+        settings_pages(&mut ui, seg, 2);
+        let mut pre = Rect::new(head.x, head.y, left_w, head.h);
+        ui.text("Start from", pre.cut_left(64.0, 6.0), 11.5, col::DIM, Weight::Semi, Align::Left);
+        let mut about: Option<String> = None;
+        for (k, cell) in pre.columns(PRESETS.len(), 6.0).into_iter().enumerate() {
+            ui.chip(cell, PRESETS[k].0, S_PRESET + k as u32, preset == Some(k), accent);
+            if ui.hovered(cell) {
+                about = Some(format!("{}: {}.", PRESETS[k].0, PRESETS[k].1));
+            }
+        }
+
+        let mut keys = body.cut_bottom(26.0, 0.0);
+        let desc = body.cut_bottom(16.0, 6.0);
+        for (g, mut col_r) in body.columns(GROUPS.len(), 12.0).into_iter().enumerate() {
+            ui.text(GROUPS[g], col_r.cut_top(15.0, 4.0), 11.5, col::DIM, Weight::Semi, Align::Left);
+            for &(k, name, icon, _, on) in items.iter().filter(|it| it.3 == g as u8) {
+                let row = col_r.cut_top(24.0, 3.0);
+                let hov = ui.hovered(row);
+                ui.fill_rr(row, 12.0, if hov { col::BTN_HOVER } else if on { col::BTN } else { col::BTN.with_a(0.45) });
+                let mut c = row.inset_xy(8.0, 0.0);
+                let sw = c.cut_right(24.0, 6.0).centered(24.0, 14.0);
+                ui.fill_rr(sw, 7.0, if on { accent } else { col::TEXT.with_a(0.18) });
+                let kx = if on { sw.r() - 7.0 } else { sw.x + 7.0 };
+                ui.circle(kx, sw.cy(), 5.0, if on { hex(0x010101) } else { col::TEXT });
+                let fg = if on { col::TEXT } else { col::DIM };
+                ui.icon(icon, c.cut_left(14.0, 6.0), 11.0, fg);
+                ui.text(name, c, 11.5, fg, Weight::Semi, Align::Left);
+                ui.hit(row, S_FEATURE + k as u32);
+                if hov {
+                    about = Some(FEATURES[k].what.to_string());
+                }
+            }
+        }
+        let note = about.unwrap_or_else(|| match preset {
+            Some(k) => format!("{}: {}. What's off doesn't run at all.", PRESETS[k].0, PRESETS[k].1),
+            None => "Your own mix. What's off doesn't run at all, so it costs nothing.".to_string(),
+        });
+        ui.text(&note, desc, 10.5, col::DIM, Weight::Regular, Align::Left);
+
+        ui.text("Shortcuts", keys.cut_left(64.0, 6.0), 11.5, col::DIM, Weight::Semi, Align::Left);
+        for (k, mut cell) in keys.columns(HOTKEYS.len(), 12.0).into_iter().enumerate() {
+            let chip = cell.cut_right(100.0, 6.0);
+            ui.text(HOTKEYS[k].1, cell, 11.5, col::TEXT, Weight::Regular, Align::Left);
+            let (label, sel) = if recording == Some(k) {
+                ("Press keys...".to_string(), true)
+            } else if fail[k] {
+                ("In use".to_string(), false)
+            } else {
+                (hotkey(&st, k).map_or("Add".to_string(), |(m, v)| hotkey_label(m, v)), false)
+            };
+            ui.chip(chip, &label, S_HOTKEY + k as u32, sel, accent);
+            if fail[k] && recording != Some(k) {
+                ui.stroke_rr(chip, chip.h / 2.0, col::RED.with_a(0.7), 1.0);
+            }
+        }
+        self.settings_room[2] = desc.y - body.y;
+    }
+
+    /// Record a shortcut: the window takes the keyboard until a key is
+    /// pressed (the old shortcut is off meanwhile, so it can be pressed).
+    fn start_recording(&mut self, k: usize) {
+        self.recording = Some(k);
+        unsafe {
+            for i in 0..crate::features::HOTKEYS.len() {
+                let _ = UnregisterHotKey(self.hwnd, 1 + i as i32);
+            }
+            let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, ex & !(WS_EX_NOACTIVATE.0 as isize));
+            let _ = SetForegroundWindow(self.hwnd);
+            let _ = SetFocus(self.hwnd);
+        }
+    }
+
+    fn stop_recording(&mut self) {
+        if self.recording.take().is_some() {
+            if self.keyboard.is_none() {
+                unsafe {
+                    let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
+                    SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, ex | WS_EX_NOACTIVATE.0 as isize);
+                }
+            }
+            self.sync_hotkeys();
+            self.request_frame();
+        }
+    }
+
+    fn sync_hotkeys(&mut self) {
+        if crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        self.hotkey_fail = crate::features::register(self.hwnd, &self.settings);
+    }
+
+    /// A key while recording a shortcut: Esc cancels, Backspace / Delete
+    /// removes it, a key with Ctrl, Alt or Win (or an F key) sets it.
+    fn record_key(&mut self, vk: u32) {
+        let Some(k) = self.recording else { return };
+        let down = |v: VIRTUAL_KEY| unsafe { GetKeyState(v.0 as i32) } < 0;
+        let mods = (down(VK_MENU) as u32) | (down(VK_CONTROL) as u32) << 1 | (down(VK_SHIFT) as u32) << 2 | ((down(VK_LWIN) || down(VK_RWIN)) as u32) << 3;
+        match vk {
+            0x1B => {}
+            0x08 | 0x2E if mods == 0 => {
+                crate::features::set_hotkey(&mut self.settings, k, None);
+                self.settings.save();
+            }
+            _ => match crate::features::recorded(mods, vk) {
+                Some(key) => {
+                    crate::features::set_hotkey(&mut self.settings, k, Some(key));
+                    self.settings.save();
+                }
+                None => return,
+            },
+        }
+        self.stop_recording();
+    }
+
+    /// A shortcut was pressed anywhere in Windows.
+    fn on_hotkey(&mut self, id: usize) {
+        let t = self.t();
+        match id {
+            1 => {
+                if self.expanded && self.onboarding.is_none() {
+                    self.expanded = false;
+                    self.settings_open = false;
+                    self.more_open = false;
+                    self.leave_at = None;
+                    if let Some(k) = self.keyboard {
+                        self.modules[k].blur();
+                        self.release_keyboard();
+                    }
+                } else {
+                    self.expanded = true;
+                    self.settings_open = false;
+                    if !self.hover {
+                        self.leave_at = Some(t + 8.0);
+                    }
+                }
+            }
+            2 | 3 => {
+                let (title, action) = if id == 2 { ("Clipboard", crate::modules::clipboard::A_SEARCH) } else { ("Shelf", crate::modules::shelf::A_SNIP) };
+                let Some(i) = self.modules.iter().position(|m| m.title() == title) else { return };
+                if !self.enabled(i) {
+                    self.push_toast(Toast::new("feature_off", glyph::SETTINGS, col::ACCENT, &format!("{} is off", feature_name(title)), "Switch it on in Settings > Features").secs(4.0));
+                } else if id == 2 {
+                    self.tab = i;
+                    self.settings_open = false;
+                    self.more_open = false;
+                    self.expanded = true;
+                    self.call(i, |m, c| m.action(action, (0.0, 0.0), c));
+                } else {
+                    self.call(i, |m, c| m.action(action, (0.0, 0.0), c));
+                }
+            }
+            _ => {}
+        }
+        self.request_frame();
+    }
+
     /// Apply a click in the settings panel.
     fn settings_action(&mut self, id: u32) {
         match id {
@@ -2388,13 +2674,40 @@ impl App {
                 self.sync_pet();
             }
             i if (S_MASCOT_POS..S_MASCOT_POS + 3).contains(&i) => self.settings.mascot_pos = (i - S_MASCOT_POS) as u8,
-            i if (S_PANEL..S_PANEL + self.modules.len() as u32).contains(&i) => {
-                let title = self.modules[(i - S_PANEL) as usize].title().to_string();
-                if self.settings.panel_hidden(&title) {
-                    self.settings.hidden_panels.retain(|t| *t != title);
-                } else if self.tab_list().len() > 1 {
-                    // At least one panel always stays.
-                    self.settings.hidden_panels.push(title);
+            i if (S_FEATURE..S_FEATURE + crate::features::FEATURES.len() as u32).contains(&i) => {
+                let key = crate::features::FEATURES[(i - S_FEATURE) as usize].key;
+                let on = crate::features::is_on(&self.settings, key);
+                let panel = crate::features::background(key).is_none();
+                // At least one panel always stays.
+                if on && panel && self.tab_list().len() <= 1 {
+                    return;
+                }
+                crate::features::set_on(&mut self.settings, key, !on);
+            }
+            i if (S_PRESET..S_PRESET + crate::features::PRESETS.len() as u32).contains(&i) => {
+                crate::features::apply_preset(&mut self.settings, (i - S_PRESET) as usize);
+            }
+            i if (S_HOTKEY..S_HOTKEY + crate::features::HOTKEYS.len() as u32).contains(&i) => {
+                let k = (i - S_HOTKEY) as usize;
+                if self.recording == Some(k) {
+                    self.stop_recording();
+                } else {
+                    self.start_recording(k);
+                }
+                self.request_frame();
+                return;
+            }
+            S_EXPORT => self.deferred.push(Deferred::Export),
+            S_IMPORT => self.deferred.push(Deferred::Import),
+            S_IMPORT_NO => self.import_pending = None,
+            S_IMPORT_OK => {
+                if let Some(files) = self.import_pending.take() {
+                    for (name, body) in files {
+                        crate::store::write(&name, &body);
+                    }
+                    // Start again on the imported data.
+                    self.deferred.push(Deferred::Restart);
+                    return;
                 }
             }
             S_POLICY => {
@@ -2466,6 +2779,10 @@ impl App {
             i if (O_EDGE..O_EDGE + Edge::ALL.len() as u32).contains(&i) => {
                 self.set_edge(Edge::ALL[(i - O_EDGE) as usize], true);
             }
+            i if (O_PRESET..O_PRESET + crate::features::PRESETS.len() as u32).contains(&i) => {
+                crate::features::apply_preset(&mut self.settings, (i - O_PRESET) as usize);
+                self.settings.save();
+            }
             _ => {}
         }
         self.request_frame();
@@ -2479,6 +2796,7 @@ impl App {
         let st = self.settings.clone();
         let accent = col::ACCENT;
         let mut r = self.content_rect(goal, 10.0, PAD, PAD + 4.0);
+        let tour_icons: Vec<(&'static str, &'static str)> = self.modules.iter().filter(|m| m.has_tab()).map(|m| (m.title(), m.icon())).collect();
         let mut ui = Ui { g: &mut self.gfx, hits: &mut self.hits, module: ONBOARD, mouse, t };
 
         // Header: title, step dots, Skip.
@@ -2497,7 +2815,7 @@ impl App {
             0 => ("First, how should the notch look when it's closed?", "Pick one. You can change it anytime in Settings."),
             1 => ("Where should it sit?", "Or right-drag the notch to any edge, on any screen."),
             2 => ("How to use it", "Three quick tips."),
-            3 => ("A few panels worth knowing", "Hide any of them in Settings > Panels."),
+            3 => ("What do you want in it?", "Switch anything on or off later in Settings > Features."),
             _ => (TOUR_Q_SETTINGS, "That's it. Enjoy!"),
         };
         ui.text(question, r.cut_top(20.0, 2.0), 12.5, col::DIM, Weight::Regular, Align::Left);
@@ -2577,8 +2895,31 @@ impl App {
                     ui.chip(cell, e.label(), O_EDGE + i as u32, st.edge == e, accent);
                 }
             }
-            2 | 3 => {
-                let cards: &[(&str, &str, &str)] = if step == 2 { &TOUR_TIPS } else { &TOUR_PANELS };
+            3 => {
+                // A card per preset, with the icons of what it switches on.
+                let picked = crate::features::current_preset(&st);
+                for (k, cell) in body.columns(crate::features::PRESETS.len(), 10.0).into_iter().enumerate() {
+                    let (name, what, list) = crate::features::PRESETS[k];
+                    let sel = picked == Some(k);
+                    let hov = ui.hovered(cell);
+                    ui.fill_rr(cell, 12.0, if sel { accent.with_a(0.2) } else if hov { col::BTN_HOVER } else { col::BTN });
+                    if sel {
+                        ui.stroke_rr(cell, 12.0, accent.with_a(0.85), 1.4);
+                    }
+                    let mut c = cell.inset(10.0);
+                    ui.text(name, c.cut_top(18.0, 2.0), 13.0, if sel { col::TEXT } else { col::DIM }, Weight::Semi, Align::Left);
+                    let mut icons = c.cut_bottom(16.0, 0.0);
+                    for &(key, icon) in &tour_icons {
+                        if list.contains(&key) && icons.w >= 16.0 {
+                            ui.icon(icon, icons.cut_left(14.0, 3.0), 10.5, if sel { accent } else { col::DIM });
+                        }
+                    }
+                    ui.text_wrap(what, c, 10.5, col::DIM, Weight::Regular, Align::Left);
+                    ui.hit_tip(cell, O_PRESET + k as u32, "");
+                }
+            }
+            2 => {
+                let cards: &[(&str, &str, &str)] = &TOUR_TIPS;
                 for (cell, &(g, title, sub)) in body.columns(cards.len(), 10.0).into_iter().zip(cards) {
                     ui.fill_rr(cell, 12.0, col::BTN);
                     let mut c = cell.inset(10.0);
@@ -2997,10 +3338,14 @@ impl App {
                     } else {
                         self.open_settings();
                     }
+                } else if hit.id == MORE {
+                    self.more_open = !self.more_open || self.settings_open;
+                    self.settings_open = false;
                 } else {
                     self.tab = hit.id as usize;
                     self.remember_tab();
                     self.settings_open = false;
+                    self.more_open = false;
                     if let Some(k) = self.keyboard {
                         self.modules[k].blur();
                         self.release_keyboard();
@@ -3095,6 +3440,7 @@ impl App {
         if next >= 0 && (next as usize) < tabs.len() {
             let i = tabs[next as usize];
             self.modules[self.tab].blur();
+            self.more_open = false;
             self.tab = i;
             self.remember_tab();
             self.leave_at = None;
@@ -3113,6 +3459,7 @@ impl App {
     }
 
     fn on_blur(&mut self) {
+        self.stop_recording();
         if let Some(k) = self.keyboard {
             self.modules[k].blur();
             self.release_keyboard();
@@ -3318,6 +3665,14 @@ impl App {
             WM_MOUSEWHEEL => {
                 let d = ((wp.0 >> 16) & 0xffff) as i16 as f32 / 120.0;
                 self.on_wheel(d);
+                Some(LRESULT(0))
+            }
+            WM_HOTKEY => {
+                self.on_hotkey(wp.0);
+                Some(LRESULT(0))
+            }
+            WM_KEYDOWN | WM_SYSKEYDOWN if self.recording.is_some() => {
+                self.record_key(wp.0 as u32);
                 Some(LRESULT(0))
             }
             WM_KEYDOWN => {
@@ -4205,9 +4560,9 @@ pub fn selftest() -> String {
                 }
             }
             let card_w = (ONBOARD_SIZE.0 - 8.0 - 10.0 * (TOUR_TIPS.len() as f32 - 1.0)) / TOUR_TIPS.len() as f32 - 20.0;
-            let panel_w = (ONBOARD_SIZE.0 - 8.0 - 10.0 * (TOUR_PANELS.len() as f32 - 1.0)) / TOUR_PANELS.len() as f32 - 20.0;
-            for (_, s, sub) in TOUR_PANELS {
-                if a.gfx.measure(s, 12.5, Weight::Semi) > panel_w || a.gfx.measure(sub, 11.0, Weight::Regular) > panel_w * 3.6 {
+            let preset_w = (ONBOARD_SIZE.0 - 8.0 - 10.0 * 3.0) / 4.0 - 20.0;
+            for (s, sub, _) in crate::features::PRESETS {
+                if a.gfx.measure(s, 13.0, Weight::Semi) > preset_w || a.gfx.measure(sub, 10.5, Weight::Regular) > preset_w * 3.6 {
                     tight.push(s);
                 }
             }
@@ -4571,10 +4926,12 @@ pub fn selftest() -> String {
             let tgt = a.target();
             a.cur = tgt;
             a.render(tgt, 0.0);
-            out += &snap(a, "settings page 3 (panels)");
-            let chips = a.hits.iter().filter(|h| h.module == SETTINGS && h.id >= S_PANEL).count();
+            out += &snap(a, "settings features page");
+            let fk = crate::features::FEATURES.iter().position(|f| f.key == "Water Reminder").unwrap_or(0) as u32;
+            let chips = a.hits.iter().filter(|h| h.module == SETTINGS && (S_FEATURE..S_FEATURE + crate::features::FEATURES.len() as u32).contains(&h.id)).count();
             let fits = a.gfx.bbox().map_or(false, |b| (b.3 as f32) < CANVAS_H * a.scale);
-            let hit = a.hits.iter().find(|h| h.module == SETTINGS && h.id == S_PANEL + wi as u32).copied();
+            let room = a.settings_room[2] >= 0.0;
+            let hit = a.hits.iter().find(|h| h.module == SETTINGS && h.id == S_FEATURE + fk).copied();
             if let Some(h) = hit {
                 a.on_down(h.rect.cx(), h.rect.cy());
                 a.on_up(h.rect.cx(), h.rect.cy());
@@ -4588,15 +4945,38 @@ pub fn selftest() -> String {
             a.call(wi, |_, c| c.toast(Toast::new("water", glyph::DROP, col::CYAN, "Time to drink", "test")));
             let quiet = a.toast.is_none() && a.queue.is_empty();
             out += &format!(
-                "{:<4} hiding a panel ({chips} panels listed) removes its tab and silences it, and saves {:?}\n",
-                if chips == a.modules.iter().filter(|m| m.has_tab()).count() && fits && saved && no_tab && quiet { "OK" } else { "FAIL" },
-                (fits, saved, no_tab, quiet)
+                "{:<4} switching a feature off ({chips} listed) removes its tab and silences it, and saves {:?}\n",
+                if chips == crate::features::FEATURES.len() && fits && room && saved && no_tab && quiet { "OK" } else { "FAIL" },
+                (fits, room, saved, no_tab, quiet)
             );
-            for i in a.tab_list() {
-                a.settings_action(S_PANEL + i as u32);
+            for (k, f) in crate::features::FEATURES.iter().enumerate() {
+                if crate::features::background(f.key).is_none() && crate::features::is_on(&a.settings, f.key) {
+                    a.settings_action(S_FEATURE + k as u32);
+                }
             }
             let one = a.tab_list().len() == 1 && a.tab_list().contains(&a.tab);
-            out += &format!("{:<4} the last visible panel can't be hidden\n", if one { "OK" } else { "FAIL" });
+            out += &format!("{:<4} the last panel that's on can't be switched off\n", if one { "OK" } else { "FAIL" });
+            // Presets switch on exactly their set and are recognised after.
+            let mut ok_p = true;
+            for k in 0..crate::features::PRESETS.len() {
+                a.settings_action(S_PRESET + k as u32);
+                let names: Vec<&str> = a.tab_list().iter().map(|&i| a.modules[i].title()).collect();
+                let want: Vec<&str> = crate::features::PRESETS[k].2.iter().copied().filter(|t| crate::features::background(t).is_none()).collect();
+                ok_p &= crate::features::current_preset(&a.settings) == Some(k) && names.len() == want.len() && want.iter().all(|t| names.contains(t));
+            }
+            out += &format!("{:<4} presets switch on exactly their panels and are recognised\n", if ok_p { "OK" } else { "FAIL" });
+            // A panel that's off isn't ticked: the clipboard records nothing.
+            let ci = find(a, "Clipboard").unwrap_or(0);
+            crate::features::set_on(&mut a.settings, "Clipboard", false);
+            a.settings.clip_on = true;
+            a.tick();
+            let clip_quiet = crate::modules::clipboard::recording() == Some(false);
+            crate::features::set_on(&mut a.settings, "Clipboard", true);
+            a.tick();
+            let clip_back = crate::modules::clipboard::recording() == Some(true);
+            a.settings.clip_on = false;
+            let _ = ci;
+            out += &format!("{:<4} a switched-off panel does no work (clipboard stops recording, starts again)\n", if clip_quiet && clip_back { "OK" } else { "FAIL" });
             a.settings.hidden_panels.clear();
             a.settings.save();
             a.tick();
@@ -6152,12 +6532,27 @@ pub fn render_docs(dir: &std::path::Path) -> String {
         shot(a, dir, "settings_privacy");
         a.settings_page = 3;
         shot(a, dir, "settings_look");
+        a.settings_page = 2;
+        shot(a, dir, "settings_features");
         a.settings_page = 0;
         a.settings_open = false;
         a.start_onboarding();
         shot(a, dir, "tour_style");
+        a.onboarding = Some(3);
+        shot(a, dir, "tour_presets");
         a.onboarding = None;
         a.expanded = true;
+        // Every panel on: the ones that don't fit go under ⋯.
+        {
+            let hidden = std::mem::take(&mut a.settings.hidden_panels);
+            let tab = a.tab;
+            a.tab = a.modules.iter().position(|m| m.title() == "Calendar").unwrap_or(0);
+            shot(a, dir, "tabs_overflow");
+            a.more_open = true;
+            shot(a, dir, "panel_more");
+            a.more_open = false;
+            (a.settings.hidden_panels, a.tab) = (hidden, tab);
+        }
 
         // Toasts.
         a.expanded = false;
@@ -6644,7 +7039,7 @@ fn settings_tip(id: u32) -> &'static str {
         i if (S_SOUND..S_SOUND + 10).contains(&i) => "Use this sound for reminders (plays it once)",
         90 => "Style, startup and updates",
         91 => "Notifications, mic dots and clipboard",
-        92 => "Show or hide panels",
+        92 => "Switch features on or off; presets and shortcuts",
         93 => "Theme and seconds on the clock",
         S_STARTUP => "Start WindyLand when you sign in to Windows",
         S_VOLUME => "Show a bar when you change the volume",
@@ -6666,7 +7061,11 @@ fn settings_tip(id: u32) -> &'static str {
         S_CLIP_MODE => "Record copied text only",
         71 => "Record copied text and files",
         72 => "Record text, files and pictures",
-        i if (S_PANEL..S_PANEL + 64).contains(&i) => "Show or hide this panel",
+        i if (S_FEATURE..S_FEATURE + 30).contains(&i) => "Switch it on or off; what's off doesn't run",
+        i if (S_PRESET..S_PRESET + 4).contains(&i) => "Switch on exactly this set (change any of it after)",
+        i if (S_HOTKEY..S_HOTKEY + 3).contains(&i) => "Click, then press the keys (Backspace removes it, Esc cancels)",
+        S_EXPORT => "Save your settings and data in one file, for another PC",
+        S_IMPORT => "Load settings and data saved with Export",
         _ => "",
     }
 }
@@ -6680,6 +7079,7 @@ fn onboard_tip(id: u32) -> &'static str {
         O_SETTINGS => "Finish and open Settings",
         i if (O_STYLE..O_STYLE + 5).contains(&i) => "Use this look for the closed notch",
         i if (O_EDGE..O_EDGE + 4).contains(&i) => "Put the notch on this screen edge",
+        i if (O_PRESET..O_PRESET + 4).contains(&i) => "Switch on these panels",
         _ => "",
     }
 }
@@ -6879,6 +7279,135 @@ fn widget_tests(a: &mut App) -> String {
     out += &widget_tests_2(a);
     out += &smart_hide_tests(a);
     out += &look_tests(a);
+    out += &feature_tests(a);
+    out
+}
+
+/// Self-test: tab overflow, shortcuts, export and import, the tour's presets.
+fn feature_tests(a: &mut App) -> String {
+    use crate::features::*;
+    let ok = |b: bool| if b { "OK" } else { "FAIL" };
+    let mut out = String::new();
+    let start = (a.expanded, a.settings_open, a.settings_page, a.tab, a.settings.hidden_panels.clone(), a.settings.extra.clone(), a.onboarding);
+    let draw = |a: &mut App| {
+        let tgt = a.target();
+        a.cur = tgt;
+        a.render(tgt, 0.0);
+    };
+    // Every panel on: what doesn't fit goes under ⋯, nothing is lost, and
+    // the open panel is always in the bar.
+    a.settings.hidden_panels.clear();
+    a.settings_open = false;
+    a.onboarding = None;
+    a.expanded = true;
+    let all = a.tab_list();
+    let last = *all.last().unwrap_or(&0);
+    a.tab = last;
+    a.more_open = false;
+    draw(a);
+    let bar_ids: Vec<u32> = a.hits.iter().filter(|h| h.module == APP_HIT && (h.id as usize) < a.modules.len()).map(|h| h.id).collect();
+    let more = a.hits.iter().find(|h| h.module == APP_HIT && h.id == MORE).copied();
+    let open_in_bar = bar_ids.contains(&(last as u32));
+    let mut overflow_ok = true;
+    if let Some(m) = more {
+        a.on_down(m.rect.cx(), m.rect.cy());
+        a.on_up(m.rect.cx(), m.rect.cy());
+        draw(a);
+        out += &snap(a, "more panels");
+        let tiles: Vec<u32> = a.hits.iter().filter(|h| h.module == APP_HIT && (h.id as usize) < a.modules.len()).map(|h| h.id).collect();
+        // The bar plus the tiles hold every panel once.
+        let mut seen: Vec<u32> = tiles.clone();
+        seen.sort();
+        seen.dedup();
+        overflow_ok = a.more_open && all.iter().all(|i| seen.contains(&(*i as u32)));
+        // Picking a tile opens it and closes the ⋯ page.
+        if let Some(h) = a.hits.iter().rev().find(|h| h.module == APP_HIT && (h.id as usize) < a.modules.len() && !bar_ids.contains(&h.id)).copied() {
+            a.on_down(h.rect.cx(), h.rect.cy());
+            a.on_up(h.rect.cx(), h.rect.cy());
+            overflow_ok &= a.tab == h.id as usize && !a.more_open;
+            draw(a);
+            overflow_ok &= a.hits.iter().any(|x| x.module == APP_HIT && x.id == h.id && x.rect.y < a.tab_bar.b());
+        } else {
+            overflow_ok = false;
+        }
+    }
+    out += &format!(
+        "{:<4} {} panels: {} in the tab bar{}, the open one always there\n",
+        ok(open_in_bar && overflow_ok && (more.is_some() || bar_ids.len() == all.len())),
+        all.len(),
+        bar_ids.len(),
+        if more.is_some() { ", the rest under ⋯" } else { "" }
+    );
+    // Minimal: no ⋯.
+    apply_preset(&mut a.settings, 0);
+    a.tab = a.tab_list()[0];
+    draw(a);
+    let no_more = !a.hits.iter().any(|h| h.module == APP_HIT && h.id == MORE);
+    out += &format!("{:<4} a few panels: no ⋯\n", ok(no_more));
+
+    // Shortcuts.
+    let def = hotkey(&a.settings, 0).map(|(m, v)| hotkey_label(m, v));
+    let rec = [recorded(9, 0x4E), recorded(4, 0x41), recorded(0, 0x41), recorded(0, 0x71), recorded(2, 0x11)];
+    let labels = (hotkey_label(2 | 4, 0x56), hotkey_label(0, 0x7B));
+    let keys_ok = def.as_deref() == Some("Win+Alt+N") && rec == [Some((9, 0x4E)), None, None, Some((0, 0x71)), None] && labels == ("Ctrl+Shift+V".to_string(), "F12".to_string());
+    out += &format!("{:<4} shortcuts: Win+Alt+N by default; Shift alone or a bare letter isn't one ({:?})\n", ok(keys_ok), labels);
+    set_hotkey(&mut a.settings, 1, Some((2 | 4, 0x56)));
+    set_hotkey(&mut a.settings, 0, None);
+    let set_ok = hotkey(&a.settings, 1) == Some((6, 0x56)) && hotkey(&a.settings, 0).is_none();
+    a.settings.save();
+    let back = crate::store::Settings::load();
+    out += &format!("{:<4} a changed or removed shortcut saves and loads\n", ok(set_ok && hotkey(&back, 1) == Some((6, 0x56)) && hotkey(&back, 0).is_none()));
+    // Recording: the click starts it, Esc cancels, a combination sets it.
+    a.settings_open = true;
+    a.settings_page = 2;
+    a.recording = Some(2);
+    a.record_key(0x1B);
+    let esc = a.recording.is_none() && hotkey(&a.settings, 2).is_none();
+    a.recording = Some(2);
+    a.record_key(0x41); // a bare letter: still waiting
+    let waits = a.recording == Some(2);
+    a.record_key(0x73); // F4
+    let f4 = a.recording.is_none() && hotkey(&a.settings, 2) == Some((0, 0x73));
+    out += &format!("{:<4} recording a shortcut: Esc cancels, a bare letter waits, F4 sets it\n", ok(esc && waits && f4));
+    draw(a);
+    out += &snap(a, "features page with shortcuts");
+    let chips: Vec<Rect> = a.hits.iter().filter(|h| h.module == SETTINGS && (S_HOTKEY..S_HOTKEY + 3).contains(&h.id)).map(|h| h.rect).collect();
+    let panel = a.edge_rect(a.cur.0, a.cur.1);
+    let in_panel = chips.len() == 3 && chips.iter().all(|c| c.b() <= panel.b() - 4.0);
+    out += &format!("{:<4} Features page: groups, description line and shortcuts fit ({} shortcut chips)\n", ok(in_panel && a.settings_room[2] >= 0.0), chips.len());
+
+    // Export and import.
+    let text = bundle();
+    let files = unbundle(&text);
+    let round = files.as_ref().map_or(false, |f| f.iter().any(|(n, b)| n == "settings.txt" && b.contains("hotkey_clip=6:86")));
+    let junk = unbundle("hello\nworld").is_none() && unbundle("WindyLand settings export 1\n=== WindyLand file: ../evil.txt ===\nx\n").is_none();
+    out += &format!("{:<4} export holds the data files; import takes only WindyLand's own files\n", ok(round && junk));
+    a.import_pending = files;
+    a.settings_page = 0;
+    draw(a);
+    out += &snap(a, "import confirm");
+    let asks = a.hits.iter().any(|h| h.module == SETTINGS && h.id == S_IMPORT_OK) && a.hits.iter().any(|h| h.module == SETTINGS && h.id == S_IMPORT_NO);
+    a.settings_action(S_IMPORT_NO);
+    out += &format!("{:<4} import asks before replacing anything; Cancel drops it\n", ok(asks && a.import_pending.is_none()));
+    // General page: the export row fits.
+    draw(a);
+    let gen_ok = a.settings_room[0] >= 0.0 && a.hits.iter().any(|h| h.module == SETTINGS && h.id == S_EXPORT);
+    out += &format!("{:<4} General page fits Export / Import ({:.0} DIPs to spare)\n", ok(gen_ok), a.settings_room[0]);
+
+    // The tour's presets.
+    a.settings_open = false;
+    a.onboarding = Some(3);
+    draw(a);
+    out += &snap(a, "tour presets");
+    let cards = a.hits.iter().filter(|h| h.module == ONBOARD && (O_PRESET..O_PRESET + 4).contains(&h.id)).count();
+    a.onboarding_action(O_PRESET + 1);
+    let student = current_preset(&a.settings) == Some(1);
+    out += &format!("{:<4} the tour offers {cards} presets; picking Student switches it on\n", ok(cards == 4 && student));
+
+    (a.expanded, a.settings_open, a.settings_page, a.tab, a.settings.hidden_panels, a.settings.extra, a.onboarding) = start;
+    a.settings.save();
+    a.more_open = false;
+    a.tick();
     out
 }
 
@@ -7314,6 +7843,29 @@ fn draw_widget_wide(ui: &mut Ui, w: &Widget, left: Rect, right: Rect, vertical: 
     ui.text(v, right, vs, col::TEXT, Weight::Semi, Align::Right);
 }
 
+/// Room for tabs on the usual panel width, with a fixed allowance for the
+/// clock (so the ⋯ doesn't come and go as the time gets wider).
+fn bar_room(tab_h: f32) -> f32 {
+    modules::PANEL.0 - (tab_h + 4.0 + TAB_GAP) - 70.0 - 84.0
+}
+
+/// Names on the Features page (and in "... is off").
+fn feature_name(title: &'static str) -> &'static str {
+    match title {
+        "AI Agents" => "AI agents",
+        "Prayer Times" => "Prayer times",
+        "Clipboard" => "Clipboard",
+        t => panel_name(t),
+    }
+}
+
+/// The page chips at the top of Settings' right column.
+fn settings_pages(ui: &mut Ui, seg: Rect, page: u8) {
+    for (cell, (i, name)) in seg.columns(4, 6.0).into_iter().zip([(0u8, "General"), (3, "Look"), (1, "Privacy"), (2, "Features")]) {
+        ui.chip(cell, name, S_PAGE + i as u32, page == i, col::ACCENT);
+    }
+}
+
 fn panel_name(title: &'static str) -> &'static str {
     match title {
         "Now Playing" => "Music",
@@ -7459,6 +8011,50 @@ fn run_deferred(list: Vec<Deferred>) {
         match d {
             Deferred::TrayMenu => tray::show_menu(),
             Deferred::Quit => {
+                if let Some(h) = with_app(|a| a.hwnd) {
+                    unsafe {
+                        let _ = DestroyWindow(h);
+                    }
+                }
+            }
+            Deferred::Export => {
+                let Some(h) = with_app(|a| a.hwnd) else { continue };
+                if let Some(path) = crate::features::save_dialog(h) {
+                    let ok = std::fs::write(&path, crate::features::bundle()).is_ok();
+                    with_app(|a| {
+                        let name = std::path::Path::new(&path).file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
+                        let t = if ok {
+                            Toast::new("export", glyph::CHECK, col::GREEN, "Settings exported", &name)
+                        } else {
+                            Toast::new("export", glyph::SETTINGS, col::RED, "Couldn't save the file", &name)
+                        };
+                        a.push_toast(t.secs(4.0));
+                        a.request_frame();
+                    });
+                }
+            }
+            Deferred::Import => {
+                let Some(h) = with_app(|a| a.hwnd) else { continue };
+                if let Some(path) = crate::features::open_dialog(h) {
+                    let files = std::fs::read(&path).ok().and_then(|b| crate::features::unbundle(&String::from_utf8_lossy(&b)));
+                    with_app(|a| {
+                        match files {
+                            Some(f) => {
+                                a.import_pending = Some(f);
+                                a.settings_page = 0;
+                                a.open_settings();
+                            }
+                            None => a.push_toast(Toast::new("import", glyph::SETTINGS, col::RED, "Not a WindyLand settings file", "Pick a file saved with Export").secs(5.0)),
+                        }
+                        a.request_frame();
+                    });
+                }
+            }
+            Deferred::Restart => {
+                if let Ok(exe) = std::env::current_exe() {
+                    release_single_instance();
+                    let _ = std::process::Command::new(exe).spawn();
+                }
                 if let Some(h) = with_app(|a| a.hwnd) {
                     unsafe {
                         let _ = DestroyWindow(h);

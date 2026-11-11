@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Settings > Features** (was Panels): every feature on one page, in four groups (Everyday, Focus & health, Work & tools, System), each with a switch; resting the mouse on one says what it does. A feature that's off has no tab, no reminders and does no work in the background (its panel isn't ticked; clipboard history stops listening).
+  - **Presets**: Minimal (music, timer, to-do, calendar, widgets), Student, Work and Everything switch on exactly that set; change any of it after. A new install starts on Minimal, and the welcome tour has a step to pick one.
+  - **Keyboard shortcuts**: **Win+Alt+N** opens and closes the notch from anywhere; optional shortcuts for clipboard history (opens it with search) and a screenshot. Click a shortcut and press the keys to change it; Backspace removes it. A shortcut another app already has shows "In use".
+- **⋯ in the tab bar**: when more panels are on than fit, the rest sit under ⋯ as big tiles. The panel you're on always stays in the bar, and the mouse wheel still goes through all of them.
+- **Export / Import settings** (Settings > General): saves your settings and data (to-do, water, prayer, tools, shelf, pinned clipboard) in one `.windyland` file for another PC. Import shows what's in the file and asks before replacing anything, then WindyLand starts again on it.
 - **Calendar** tab: the month with today highlighted, days with to-do tasks due marked, previous / next month (or the mouse wheel), Today, and the chosen day's tasks beside the grid. The week starts on Windows' first day of the week.
 - **Themes** (Settings > Look): Black (default), Graphite, Midnight, Rose, Forest, Ocean, Light, Blossom, Paper and **Liquid Glass**, which blurs what's behind the notch under a clear tint with a bright rim and switches between light and dark glass with the background. While Liquid Glass is on the notch is left out of screenshots and screen sharing. Every theme meets WCAG AA text contrast, and coloured labels on the light themes reach 3:1 (checked by the self-test, Liquid Glass over light, dark and colourful backgrounds).
 - **Show seconds** (Settings > Look): seconds on the clock; Slim and Compact grow 24 px so nothing gets squeezed.

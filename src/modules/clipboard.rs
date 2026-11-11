@@ -489,6 +489,7 @@ impl Module for Clipboard {
         // Mirror the settings for the listener thread (off too while the
         // Clipboard panel is hidden in Settings > Panels).
         self.on.store(ctx.settings.clip_on && !ctx.settings.panel_hidden("Clipboard"), Ordering::Relaxed);
+        RECORDING.store(self.on.load(Ordering::Relaxed), Ordering::Relaxed);
         self.show.store(ctx.settings.copy_toast, Ordering::Relaxed);
         self.mode.store(mode_byte(ctx.settings.clip_mode), Ordering::Relaxed);
         let new: Vec<Incoming> = std::mem::take(&mut *self.incoming.lock().unwrap());
@@ -500,6 +501,14 @@ impl Module for Clipboard {
                 self.add(inc.content);
             }
         }
+    }
+
+    fn tick_off(&mut self, _ctx: &mut Ctx) {
+        // Switched off: the listener records nothing and shows nothing.
+        self.on.store(false, Ordering::Relaxed);
+        self.show.store(false, Ordering::Relaxed);
+        RECORDING.store(false, Ordering::Relaxed);
+        self.incoming.lock().unwrap().clear();
     }
 
     fn draw(&mut self, ui: &mut Ui, mut r: Rect) {
@@ -857,6 +866,13 @@ struct ListenerState {
 }
 
 static LISTENER: OnceLock<ListenerState> = OnceLock::new();
+
+/// Recording now (for the self-test): mirrors the listener's switch.
+static RECORDING: AtomicBool = AtomicBool::new(false);
+
+pub fn recording() -> Option<bool> {
+    Some(RECORDING.load(Ordering::Relaxed))
+}
 
 /// A message-only window on its own thread gets WM_CLIPBOARDUPDATE the
 /// moment anything is copied, reads it, and wakes the notch.
