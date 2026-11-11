@@ -4,7 +4,7 @@
 //! How it works: "Connect" adds a hook to the agent's own config
 //! (Hermes shell hooks via `hermes config set`, `~/.claude/settings.json`
 //! hooks, `~/.codex/config.toml` notify). The agent
-//! then runs `windyland.exe --agent-event <agent>` at each step; that short
+//! then runs `nookly.exe --agent-event <agent>` at each step; that short
 //! process keeps only the event name, session id, project folder, tool name
 //! and notice text, and hands them to the running notch with WM_COPYDATA.
 //! Prompts, code and tool output are never read or kept, nothing is written
@@ -42,12 +42,12 @@ pub const A_DEMO_ASK: u32 = 991;
 /// Demo video: it finishes.
 pub const A_DEMO_DONE: u32 = 992;
 
-/// Claude Code hook events WindyLand listens to.
+/// Claude Code hook events Nookly listens to.
 pub const CLAUDE_EVENTS: [&str; 6] = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Stop", "SessionEnd"];
 
 // ------------------------------------------------------------ hook side
 
-/// Events handed over by `windyland.exe --agent-event` (filled from
+/// Events handed over by `nookly.exe --agent-event` (filled from
 /// WM_COPYDATA on the UI thread, read in `tick`).
 static INBOX: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -56,7 +56,7 @@ static INBOX: Mutex<Vec<String>> = Mutex::new(Vec::new());
 pub fn on_copydata(hwnd: HWND, lp: LPARAM) -> Option<LRESULT> {
     // Docs/demo renders never take real events (the self-test sends its
     // own on purpose, by window handle).
-    if isolated() && std::env::var("WINDYLAND_SELFTEST_OUT").is_err() && !std::env::args().any(|a| a == "--selftest") {
+    if isolated() && std::env::var("NOOKLY_SELFTEST_OUT").is_err() && !std::env::args().any(|a| a == "--selftest") {
         return None;
     }
     let cds = unsafe { (lp.0 as *const COPYDATASTRUCT).as_ref()? };
@@ -120,7 +120,7 @@ pub fn slim(agent: &str, v: &Value) -> Value {
     })
 }
 
-/// `windyland.exe --agent-event <claude|codex> [json]`: run by the agent's
+/// `nookly.exe --agent-event <claude|codex> [json]`: run by the agent's
 /// hook. Always exits quietly with 0 so it can never block the agent.
 pub fn hook_main(args: &[String]) -> i32 {
     let i = args.iter().position(|a| a == "--agent-event").unwrap_or(0);
@@ -144,9 +144,9 @@ pub fn hook_main(args: &[String]) -> i32 {
     }
     let msg = slim(agent, &v).to_string();
     unsafe {
-        let target = match std::env::var("WINDYLAND_AGENT_HWND").ok().and_then(|h| h.parse::<isize>().ok()) {
+        let target = match std::env::var("NOOKLY_AGENT_HWND").ok().and_then(|h| h.parse::<isize>().ok()) {
             Some(h) => HWND(h as *mut _),
-            None => FindWindowW(w!("WindyLandNotch"), None).unwrap_or_default(),
+            None => FindWindowW(w!("NooklyNotch"), None).unwrap_or_default(),
         };
         if target.0.is_null() {
             return 0;
@@ -169,7 +169,7 @@ pub enum Link {
 }
 
 /// Set for --selftest and the docs/demo renders: never touch the real
-/// agents' settings, only WINDYLAND_AGENT_HOME / WINDYLAND_HERMES_HOME.
+/// agents' settings, only NOOKLY_AGENT_HOME / NOOKLY_HERMES_HOME.
 pub static ISOLATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn isolated() -> bool {
@@ -177,18 +177,18 @@ fn isolated() -> bool {
 }
 
 fn home() -> PathBuf {
-    if let Ok(h) = std::env::var("WINDYLAND_AGENT_HOME") {
+    if let Ok(h) = std::env::var("NOOKLY_AGENT_HOME") {
         return PathBuf::from(h);
     }
     if isolated() {
-        return PathBuf::from(r"Z:\windyland-test-no-home");
+        return PathBuf::from(r"Z:\nookly-test-no-home");
     }
     std::env::var("USERPROFILE").map(PathBuf::from).unwrap_or_default()
 }
 
 /// The command the hooks run (forward slashes work in bash and cmd alike).
 pub fn hook_command(agent: &str) -> String {
-    let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "windyland.exe".into());
+    let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "nookly.exe".into());
     format!("\"{}\" --agent-event {agent}", exe.replace('\\', "/"))
 }
 
@@ -215,7 +215,7 @@ pub fn claude_link() -> Link {
     }
 }
 
-/// Add (on) or remove (off) WindyLand's hooks in ~/.claude/settings.json,
+/// Add (on) or remove (off) Nookly's hooks in ~/.claude/settings.json,
 /// leaving everything else in the file as it was.
 pub fn claude_connect(on: bool) -> std::result::Result<(), String> {
     if !home().join(".claude").is_dir() {
@@ -254,7 +254,7 @@ pub fn claude_connect(on: bool) -> std::result::Result<(), String> {
     if hooks.is_empty() {
         root.remove("hooks");
     }
-    let backup = path.with_extension("json.windyland-backup");
+    let backup = path.with_extension("json.nookly-backup");
     if !text.is_empty() && !backup.exists() {
         let _ = std::fs::write(&backup, &text);
     }
@@ -266,7 +266,7 @@ fn codex_path() -> PathBuf {
     home().join(".codex").join("config.toml")
 }
 
-const CODEX_NOTE: &str = "# WindyLand: shows in the notch when Codex finishes (remove both lines to stop)";
+const CODEX_NOTE: &str = "# Nookly: shows in the notch when Codex finishes (remove both lines to stop)";
 
 /// Top-level `notify = ...` lines (before the first [table]).
 fn codex_notify_lines(text: &str) -> Vec<(usize, bool)> {
@@ -304,7 +304,7 @@ pub fn codex_connect(on: bool) -> std::result::Result<(), String> {
     let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let found = codex_notify_lines(&text);
     if on && found.iter().any(|(_, ours)| !*ours) {
-        return Err("Codex already runs its own notify program, so WindyLand left it alone".into());
+        return Err("Codex already runs its own notify program, so Nookly left it alone".into());
     }
     let drop: Vec<usize> = found.iter().filter(|(_, o)| *o).map(|(i, _)| *i).collect();
     let mut lines: Vec<&str> = text.lines().enumerate().filter(|(i, l)| !drop.contains(i) && l.trim() != CODEX_NOTE).map(|(_, l)| l).collect();
@@ -324,7 +324,7 @@ pub fn codex_connect(on: bool) -> std::result::Result<(), String> {
 
 // ------------------------------------------------------------------ Hermes
 
-/// Hermes shell hooks WindyLand registers (all observers: they can't block
+/// Hermes shell hooks Nookly registers (all observers: they can't block
 /// or change anything in Hermes).
 pub const HERMES_EVENTS: [&str; 6] = ["on_session_start", "on_stream_start", "on_human_input_request", "on_human_input_resolved", "on_session_end", "on_session_finalize"];
 
@@ -332,10 +332,10 @@ pub const HERMES_EVENTS: [&str; 6] = ["on_session_start", "on_stream_start", "on
 /// (whichever has a config.yaml).
 pub fn hermes_home() -> Option<PathBuf> {
     if isolated() {
-        return std::env::var("WINDYLAND_HERMES_HOME").ok().map(PathBuf::from).filter(|p| p.join("config.yaml").is_file());
+        return std::env::var("NOOKLY_HERMES_HOME").ok().map(PathBuf::from).filter(|p| p.join("config.yaml").is_file());
     }
     let mut c: Vec<PathBuf> = Vec::new();
-    for k in ["WINDYLAND_HERMES_HOME", "HERMES_HOME"] {
+    for k in ["NOOKLY_HERMES_HOME", "HERMES_HOME"] {
         if let Ok(v) = std::env::var(k) {
             if !v.trim().is_empty() {
                 c.push(PathBuf::from(v));
@@ -343,7 +343,7 @@ pub fn hermes_home() -> Option<PathBuf> {
             }
         }
     }
-    if std::env::var("WINDYLAND_AGENT_HOME").is_err() {
+    if std::env::var("NOOKLY_AGENT_HOME").is_err() {
         if let Ok(l) = std::env::var("LOCALAPPDATA") {
             c.push(PathBuf::from(l).join("hermes"));
         }
@@ -354,7 +354,7 @@ pub fn hermes_home() -> Option<PathBuf> {
 
 /// The `hermes` command: the one installed with Hermes, else on PATH.
 pub fn hermes_cli() -> Option<PathBuf> {
-    if let Ok(v) = std::env::var("WINDYLAND_HERMES_CLI") {
+    if let Ok(v) = std::env::var("NOOKLY_HERMES_CLI") {
         return Some(PathBuf::from(v));
     }
     if isolated() {
@@ -392,7 +392,7 @@ fn entry_is_ours(e: &Value) -> bool {
     e.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("--agent-event"))
 }
 
-/// Hermes' `hooks:` section with WindyLand's entries removed, then added
+/// Hermes' `hooks:` section with Nookly's entries removed, then added
 /// back (on) for each event. Everything else is kept as it was.
 pub fn merge_hermes_hooks(cur: &Value, cmd: &str, on: bool) -> Value {
     let mut m = cur.as_object().cloned().unwrap_or_default();
@@ -433,7 +433,7 @@ fn iso_utc(t: std::time::SystemTime) -> String {
 }
 
 /// Hermes asks before running a new shell hook; switching Hermes on in
-/// WindyLand is that yes, so record it in Hermes' own allowlist (the same
+/// Nookly is that yes, so record it in Hermes' own allowlist (the same
 /// entry `hermes` writes after a "yes" at its prompt).
 fn hermes_allowlist(home: &std::path::Path, cmd: &str, on: bool) -> std::result::Result<(), String> {
     let path = home.join("shell-hooks-allowlist.json");
@@ -470,7 +470,7 @@ fn run_hermes(cli: &std::path::Path, home: &std::path::Path, args: &[&str]) -> s
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-/// Add or remove WindyLand's Hermes hooks, through Hermes' own
+/// Add or remove Nookly's Hermes hooks, through Hermes' own
 /// `hermes config get/set` (never by editing config.yaml directly). Takes
 /// a few seconds: run it off the UI thread.
 pub fn hermes_connect(on: bool) -> std::result::Result<(), String> {
@@ -499,7 +499,7 @@ pub fn hermes_connect(on: bool) -> std::result::Result<(), String> {
 /// Result of the background connect: (switched on?, outcome).
 static HERMES_DONE: Mutex<Option<(bool, std::result::Result<(), String>)>> = Mutex::new(None);
 
-/// Uninstall: remove WindyLand's hooks from every agent.
+/// Uninstall: remove Nookly's hooks from every agent.
 pub fn disconnect_all() {
     if hermes_link() == Link::On {
         let _ = hermes_connect(false);
@@ -592,7 +592,7 @@ impl Agents {
     pub fn new() -> Agents {
         // After an update the exe is newer than Hermes' approval: refresh it
         // so `hermes hooks list` doesn't warn about a changed script.
-        if hermes_link() == Link::On && std::env::var("WINDYLAND_SELFTEST_OUT").is_err() {
+        if hermes_link() == Link::On && std::env::var("NOOKLY_SELFTEST_OUT").is_err() {
             if let Some(h) = hermes_home() {
                 let _ = hermes_allowlist(&h, &hook_command("hermes"), true);
             }
@@ -939,7 +939,7 @@ impl Module for Agents {
                 self.codex = Link::Off;
                 self.sessions = vec![
                     Session { agent: "hermes", id: "d0".into(), project: "desktop".into(), state: State::Working, since: now - 212.0, started: now - 212.0, last: now, detail: "claude-opus".into() },
-                    Session { agent: "claude", id: "d1".into(), project: "WindyLand".into(), state: State::Working, since: now - 95.0, started: now - 95.0, last: now, detail: "Used Edit".into() },
+                    Session { agent: "claude", id: "d1".into(), project: "Nookly".into(), state: State::Working, since: now - 95.0, started: now - 95.0, last: now, detail: "Used Edit".into() },
                     Session { agent: "codex", id: "d2".into(), project: "shop-api".into(), state: State::Done, since: now - 240.0, started: now - 600.0, last: now - 240.0, detail: "Finished".into() },
                 ];
             }

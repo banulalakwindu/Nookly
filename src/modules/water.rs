@@ -1,4 +1,4 @@
-//! Water reminder: set bottle size, daily goal and active hours; WindyLand spreads
+//! Water reminder: set bottle size, daily goal and active hours; Nookly spreads
 //! reminders across those hours, tells you when to refill, and charts intake.
 
 use std::collections::BTreeMap;

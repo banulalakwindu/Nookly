@@ -43,6 +43,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "nookly"
+version = "0.2.0"
+dependencies = [
+ "qrcodegen",
+ "serde_json",
+ "windows",
+ "windows-core",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -265,16 +275,6 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
-
-[[package]]
-name = "windyland"
-version = "0.1.21"
-dependencies = [
- "qrcodegen",
- "serde_json",
- "windows",
- "windows-core",
-]
 
 [[package]]
 name = "zmij"

@@ -8,8 +8,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: WindyLand version
-      description: Right-click the notch or tray icon, then About WindyLand.
+      label: Nookly version
+      description: Right-click the notch or tray icon, then About Nookly.
       placeholder: "0.1.5"
     validations:
       required: true
@@ -64,6 +64,6 @@ body:
     attributes:
       label: Screenshots or logs
       description: >
-        Drag images in here. For click problems, start WindyLand with the
-        environment variable WINDYLAND_DEBUG=1 and attach debug.log from
-        %APPDATA%\WindyLand (it only lists clicks, no personal data).
+        Drag images in here. For click problems, start Nookly with the
+        environment variable NOOKLY_DEBUG=1 and attach debug.log from
+        %APPDATA%\Nookly (it only lists clicks, no personal data).

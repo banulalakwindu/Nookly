@@ -1,7 +1,7 @@
 """Screenshots for the README and user guide (run via make_images.py).
 
 Every image is 1600 px wide: a desktop "screen" card with the real
-WindyLand render at its top edge, then a title, a line of text and a row of
+Nookly render at its top edge, then a title, a line of text and a row of
 feature chips, on a dark page. Collections (styles, alerts, mascots,
 positions) arrange several renders on one card.
 """
@@ -204,7 +204,7 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
     collage.save(IMAGES / "hero-collage.png")
     hero = Image.new("RGBA", (W, total_h + 2 * PAD), BG + (255,))
     hero.alpha_composite(collage, (PAD, PAD))
-    page_img = page_chips(hero, "WindyLand", "A Dynamic Island for Windows: music, AI agents, tools, reminders and more. Free and open source.",
+    page_img = page_chips(hero, "Nookly", "A Dynamic Island for Windows: music, AI agents, tools, reminders and more. Free and open source.",
                           ["Music + lyrics", "AI agents", "Color picker", "Calculator", "QR codes", "Converter", "System monitor", "Clipboard",
                            "Screenshots", "File shelf", "Notifications", "Prayer times", "Timer", "Pomodoro", "To-do", "Water", "8 mascots", "Taskbar mascot"])
     page_img.save(IMAGES / "hero.png")
@@ -232,6 +232,8 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
     single("tools-convert", "panel_tools_convert", "Converter", "Units, including katha, bigha and maund, and world time zones.", ["Length to data", "Bangladesh units", "12 cities"])
     single("tools-zones", "panel_tools_zones", "Time zones", "What time it is in 12 cities, now or an hour from now.", ["Daylight saving handled", "Pick any city as base"])
     single("settings-privacy", "settings_privacy", "Privacy settings", "Notifications, mic and camera dots, and clipboard history: all opt-in.", ["Windows notifications", "Hide message text", "Mute apps"])
+    single("calendar", "panel_calendar", "Calendar", "The month at a glance, with the days your tasks are due.", ["Today in red", "Due-task dots", "Wheel for months"])
+    single("themes", "settings_look", "Themes", "Ten themes, Liquid Glass included, every one checked for readable contrast.", ["Black", "Rose", "Forest", "Paper", "Liquid Glass"])
     single("settings-features", "settings_features", "Features", "Switch on only what you use; what's off doesn't run at all.", ["Minimal", "Student", "Work", "Everything", "Win+Alt+N"])
     single("tour", "tour_style", "Welcome tour", "First run asks how the notch should look, then where it sits.", ["Full", "Slim", "Compact", "Pill", "Hidden"])
     single("notifications", "toast_notification", "Windows notifications", "Other apps' notifications drop out of the notch, with their icon and colour.", ["Click to open the app", "Mute an app", "Respects Do Not Disturb"], min_h=300)

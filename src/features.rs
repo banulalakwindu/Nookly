@@ -1,4 +1,4 @@
-//! Settings > Features: what WindyLand has switched on, the presets for
+//! Settings > Features: what Nookly has switched on, the presets for
 //! it, keyboard shortcuts, and moving settings to another PC.
 //!
 //! A feature is a panel (its key is the module title) or a background
@@ -209,8 +209,8 @@ pub fn register(hwnd: HWND, st: &Settings) -> [bool; 3] {
 
 /// The data files, in the order they're written.
 pub const DATA_FILES: [&str; 7] = ["settings.txt", "todo.txt", "water.txt", "prayer.txt", "tools.txt", "shelf.txt", "clipboard.txt"];
-const HEADER: &str = "WindyLand settings export 1";
-const MARK: &str = "=== WindyLand file: ";
+const HEADER: &str = "Nookly settings export 1";
+const MARK: &str = "=== Nookly file: ";
 
 /// Every data file in one text file.
 pub fn bundle() -> String {
@@ -265,7 +265,7 @@ fn dialog_path(item: windows::core::Result<IShellItem>) -> Option<String> {
 
 fn filter() -> [COMDLG_FILTERSPEC; 2] {
     [
-        COMDLG_FILTERSPEC { pszName: w!("WindyLand settings"), pszSpec: w!("*.windyland") },
+        COMDLG_FILTERSPEC { pszName: w!("Nookly settings"), pszSpec: w!("*.nookly") },
         COMDLG_FILTERSPEC { pszName: w!("All files"), pszSpec: w!("*.*") },
     ]
 }
@@ -276,10 +276,10 @@ pub fn save_dialog(owner: HWND) -> Option<String> {
     unsafe {
         let d: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER).ok()?;
         let _ = d.SetFileTypes(&filter());
-        let _ = d.SetDefaultExtension(w!("windyland"));
-        let name = HSTRING::from(format!("WindyLand settings {}.windyland", { let (y, m, d) = crate::time::local_date(crate::time::unix_now()); format!("{y}-{m:02}-{d:02}") }));
+        let _ = d.SetDefaultExtension(w!("nookly"));
+        let name = HSTRING::from(format!("Nookly settings {}.nookly", { let (y, m, d) = crate::time::local_date(crate::time::unix_now()); format!("{y}-{m:02}-{d:02}") }));
         let _ = d.SetFileName(PCWSTR(name.as_ptr()));
-        let _ = d.SetTitle(w!("Export WindyLand settings"));
+        let _ = d.SetTitle(w!("Export Nookly settings"));
         if let Ok(o) = d.GetOptions() {
             let _ = d.SetOptions(o | FOS_FORCEFILESYSTEM | FOS_OVERWRITEPROMPT);
         }
@@ -295,7 +295,7 @@ pub fn open_dialog(owner: HWND) -> Option<String> {
     unsafe {
         let d: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
         let _ = d.SetFileTypes(&filter());
-        let _ = d.SetTitle(w!("Import WindyLand settings"));
+        let _ = d.SetTitle(w!("Import Nookly settings"));
         if let Ok(o) = d.GetOptions() {
             let _ = d.SetOptions(o | FOS_FORCEFILESYSTEM);
         }

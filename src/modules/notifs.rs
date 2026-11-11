@@ -210,7 +210,7 @@ fn filetime_now() -> i64 {
     ((t.dwHighDateTime as i64) << 32) | t.dwLowDateTime as i64
 }
 
-/// Read everything WindyLand shows from one notification.
+/// Read everything Nookly shows from one notification.
 pub fn read_note(n: &UserNotification) -> Note {
     let mut note = Note { id: n.Id().unwrap_or(0), ..Default::default() };
     if let Ok(info) = n.AppInfo() {
@@ -508,7 +508,7 @@ impl Notifs {
                 let n = Note {
                     id: 1,
                     app: "Messages".into(),
-                    aumid: "WindyLand.Demo".into(),
+                    aumid: "Nookly.Demo".into(),
                     title: "Nadia".into(),
                     body: "Are we still on for 7? I'll bring the slides".into(),
                     icon: Some(Arc::new(demo_icon())),

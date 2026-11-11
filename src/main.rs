@@ -1,7 +1,7 @@
 #![windows_subsystem = "windows"]
 // Many helpers (gfx shapes, palette, Ctx methods) exist for future modules.
 #![allow(dead_code)]
-//! WindyLand: a living notch for Windows.
+//! Nookly: a living notch for Windows.
 //!
 //! Layout:
 //!   app.rs      window, animation, input routing, toasts, mascot
@@ -10,7 +10,7 @@
 //!   modules/    one file per feature, add your own here (see modules/mod.rs)
 //!   tray.rs     tray icon + menu
 //!   dragdrop.rs OLE drag in/out
-//!   store.rs    %APPDATA%\WindyLand\*.txt persistence
+//!   store.rs    %APPDATA%\Nookly\*.txt persistence
 //!   http.rs     WinHTTP GET (used for LRCLIB lyrics)
 
 mod app;
@@ -120,16 +120,16 @@ fn main() {
             app::MAXIMIZED_OVERRIDE.store(2, std::sync::atomic::Ordering::Relaxed);
             // Tests and renders change data (tasks, settings...): never
             // your own unless asked with --real-data.
-            let set = std::env::var("WINDYLAND_DATA_DIR").map_or(false, |d| !d.is_empty());
+            let set = std::env::var("NOOKLY_DATA_DIR").map_or(false, |d| !d.is_empty());
             if !set && !args.iter().any(|a| a == "--real-data") {
-                let d = std::env::temp_dir().join(format!("windyland-test-{}", std::process::id()));
+                let d = std::env::temp_dir().join(format!("nookly-test-{}", std::process::id()));
                 let _ = std::fs::create_dir_all(&d);
                 // Renders start past the welcome tour (the self-test checks
                 // the tour itself, from a fresh folder).
                 if !args.iter().any(|a| a == "--selftest") {
                     let _ = std::fs::write(d.join("settings.txt"), "onboarded=1\n");
                 }
-                std::env::set_var("WINDYLAND_DATA_DIR", &d);
+                std::env::set_var("NOOKLY_DATA_DIR", &d);
             }
         }
         if let Some(i) = args.iter().position(|a| a == "--render-demo") {
@@ -157,13 +157,13 @@ fn main() {
             let mut report = app::selftest();
             report += &format!("INFO lyrics (LRCLIB): {}\n", modules::music::selftest_lyrics());
             report += &format!("INFO data dir: {}\n", store::dir().display());
-            let out = std::env::var("WINDYLAND_SELFTEST_OUT").unwrap_or_else(|_| "selftest.txt".into());
+            let out = std::env::var("NOOKLY_SELFTEST_OUT").unwrap_or_else(|_| "selftest.txt".into());
             let _ = std::fs::write(out, report);
             app::shutdown();
             std::process::exit(0);
         }
 
-        let mutex = CreateMutexW(None, true, w!("Local\\WindyLand.SingleInstance"));
+        let mutex = CreateMutexW(None, true, w!("Local\\Nookly.SingleInstance"));
         if GetLastError() == ERROR_ALREADY_EXISTS {
             return;
         }
@@ -172,8 +172,8 @@ fn main() {
         }
 
         if let Err(e) = app::App::create(true) {
-            let msg = HSTRING::from(format!("WindyLand failed to start:\n{e}"));
-            MessageBoxW(None, &msg, w!("WindyLand"), MB_ICONERROR);
+            let msg = HSTRING::from(format!("Nookly failed to start:\n{e}"));
+            MessageBoxW(None, &msg, w!("Nookly"), MB_ICONERROR);
             return;
         }
 

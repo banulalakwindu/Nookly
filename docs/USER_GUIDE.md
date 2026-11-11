@@ -1,4 +1,4 @@
-# WindyLand user guide
+# Nookly user guide
 
 - [Getting started](#getting-started)
 - [Open and close](#open-and-close)
@@ -29,13 +29,13 @@
 
 ## Getting started
 
-1. Run `WindyLandSetup-<version>.exe`. Tick **Start WindyLand when Windows starts** if you like.
+1. Run `NooklySetup-<version>.exe`. Tick **Start Nookly when Windows starts** if you like.
 2. The notch opens with a short **welcome tour**: pick how it looks when closed (Full, Compact, Pill or Hidden), pick the screen edge, read three quick tips (hover to open, the mouse wheel switches panels, right-drag to move it), and see what's in Settings at a glance. **Open Settings** on the last step goes straight there. You can skip it, and replay it later from the tray icon's menu (**Welcome tour**). Everything you pick can be changed later in Settings.
 
    <img src="images/tour.png" alt="Welcome tour">
 
-3. A tray icon (a pill with two eyes) appears near the clock.
-4. To quit, right-click the tray icon and choose **Exit**, or use **Quit WindyLand** in Settings.
+3. A tray icon (an amber "n" on a dark tile) appears near the clock.
+4. To quit, right-click the tray icon and choose **Exit**, or use **Quit Nookly** in Settings.
 
 ## Open and close
 
@@ -80,7 +80,7 @@ Open **Settings** and pick one under **Notch style**:
 
 - Works with anything that shows in the Windows media overlay: Spotify, YouTube and other sites in Chrome, Edge or Firefox, Media Player and more.
 - **Click the progress bar** to seek. Use the previous, play/pause and next buttons.
-- If a player turns down a skip (some web players), WindyLand presses the media key for you instead. The previous and next buttons look dimmed when the player says it can't skip right now (a single video, the first track). Most players restart the song when you press previous a few seconds in; press it twice to go back a track.
+- If a player turns down a skip (some web players), Nookly presses the media key for you instead. The previous and next buttons look dimmed when the player says it can't skip right now (a single video, the first track). Most players restart the song when you press previous a few seconds in; press it twice to go back a track.
 - **Lyrics**: click the lines button on the right. The panel splits and the current line lights up. Click a line to jump to it, or scroll to look ahead.
 - When music plays, the closed notch shows the album art on the left, a small equaliser on the right and the clock in the middle (on the top and bottom edges, unless a centred mascot sits there). Timers, Pomodoro, prayer times, due tasks, AI agents and the system monitor keep the clock in the middle the same way.
 - Some songs have no lyrics on LRCLIB yet; the panel then says *Lyrics not available*.
@@ -97,7 +97,7 @@ Open **Settings** and pick one under **Notch style**:
 4. **+1 min / -1 min** also work while it is running, without restarting.
 5. When it finishes it chimes and drops an alert with **Restart** and **Dismiss**.
 
-WindyLand remembers your last duration.
+Nookly remembers your last duration.
 
 <img src="images/stopwatch.png" alt="Stopwatch">
 
@@ -155,12 +155,12 @@ The gear button opens settings: bottle size, daily goal, sip size, active hours 
 
 If you use **Hermes**, **Claude Code** or **Codex CLI**, the notch shows what they're doing while you're in another window.
 
-- Open the **AI agents** tab and switch on **Hermes**, **Claude Code** and/or **Codex**. WindyLand adds a hook to the agent's own settings: Hermes shell hooks through `hermes config set` (and Hermes' hook allowlist, so it doesn't ask again), `~/.claude/settings.json`, `~/.codex/config.toml`. Hermes picks it up within a minute; Claude Code and Codex from their next session. Switching it off removes exactly what was added, and so does uninstalling WindyLand.
+- Open the **AI agents** tab and switch on **Hermes**, **Claude Code** and/or **Codex**. Nookly adds a hook to the agent's own settings: Hermes shell hooks through `hermes config set` (and Hermes' hook allowlist, so it doesn't ask again), `~/.claude/settings.json`, `~/.codex/config.toml`. Hermes picks it up within a minute; Claude Code and Codex from their next session. Switching it off removes exactly what was added, and so does uninstalling Nookly.
 - **Working**: the closed notch shows the agent icon and how long it has been at it, with the project folder on the other side.
 - **Needs you**: when Hermes wants your OK for a command, asks a question or needs a password, or Claude Code asks for permission, the notch pops up (with your chime) and turns orange until you answer.
 - **Done**: a short "finished, took 3 min" notice when a turn ends. Codex reports only this one. Stopping Hermes with Esc shows Stopped, without a notice.
 - The tab lists recent sessions; click one to clear it. A session that goes quiet for 20 minutes (you pressed Esc, say) drops back to Ready.
-- Privacy: the hook passes on only the event name, session id, project folder (or where Hermes runs, like desktop), model and tool name, and the agent's notice text. Prompts, code and tool output are never read or stored, and nothing leaves your PC. If Codex already runs its own `notify` program, WindyLand leaves it alone and says so.
+- Privacy: the hook passes on only the event name, session id, project folder (or where Hermes runs, like desktop), model and tool name, and the agent's notice text. Prompts, code and tool output are never read or stored, and nothing leaves your PC. If Codex already runs its own `notify` program, Nookly leaves it alone and says so.
 
 ## System monitor
 
@@ -185,7 +185,7 @@ Click a card to switch it on or off. The cards come in three groups:
 
 Out of the box only the live activities are on: Music, Timer, Pomodoro, Prayer countdown, AI agents and Due tasks, each across both sides of the clock. Switch on any widget you want.
 
-WindyLand puts them in order for you. Whatever is running wins, the most urgent first (an AI agent that needs your OK goes above music). When nothing is running, your widgets show, two at a time, around the clock.
+Nookly puts them in order for you. Whatever is running wins, the most urgent first (an AI agent that needs your OK goes above music). When nothing is running, your widgets show, two at a time, around the clock.
 
 **Only when it matters** (on by default) hides a widget with nothing to say: the battery on the charger, good Wi-Fi, sound that isn't muted, Water once the goal is reached, no open tasks.
 
@@ -230,8 +230,8 @@ The page always shows the place in use, by name, so you can see when it's wrong.
 - A panel turned off in **Settings > Features** drops out of the Widgets tab too.
 - Clicking the closed notch opens the panel of what it's showing.
 - With the mascot in the **Slim** style: in the middle it takes the clock's place; at the left or right it takes that side, and the notch stays the same size. Only beside an item using both sides does the notch grow to make room.
-- **Bluetooth** shows the battery Windows knows for connected headsets, mice and keyboards. AirPods don't share theirs with Windows, so WindyLand listens for about 3 seconds once a minute to the battery broadcast AirPods send (left, right and case, in 10% steps). It only does this while the Bluetooth widget is on (or the Widgets tab is open) and AirPods are connected. Nothing is saved or sent. In a crowded place it may sometimes pick up someone else's AirPods.
-- **Weather** is the only widget that goes online by itself: while it's on, WindyLand asks Open-Meteo about every 30 minutes, with the place rounded to about 10 km. Temperatures are in °C; switch to °F on the **Place** page.
+- **Bluetooth** shows the battery Windows knows for connected headsets, mice and keyboards. AirPods don't share theirs with Windows, so Nookly listens for about 3 seconds once a minute to the battery broadcast AirPods send (left, right and case, in 10% steps). It only does this while the Bluetooth widget is on (or the Widgets tab is open) and AirPods are connected. Nothing is saved or sent. In a crowded place it may sometimes pick up someone else's AirPods.
+- **Weather** is the only widget that goes online by itself: while it's on, Nookly asks Open-Meteo about every 30 minutes, with the place rounded to about 10 km. Temperatures are in °C; switch to °F on the **Place** page.
 - **Wi-Fi** shows the signal, and the network's name when Windows allows it (the same location setting as above).
 
 ## Calendar
@@ -292,27 +292,27 @@ The Tools tab has four small tools; the chips at the top switch between them. Ev
 - To only copy it, hover the entry and click the **copy** icon; then paste wherever you like with Ctrl+V.
 - Apps running as administrator don't accept typing from normal apps, so for those the entry is only copied and the notch says **press Ctrl+V**.
 - Hover an entry to **copy** it without pasting, **pin** it (pinned entries stay at the top and are kept after a restart) or **remove** it. **Clear** removes everything that isn't pinned. The switch in the tab header stops and starts recording.
-- **Show what I copy** (Settings > Privacy, off by default): every time you copy something, a small toast shows it for two seconds, like on Android: the text, the file names, or a thumbnail of the picture. It works even with clipboard history off and keeps nothing. WindyLand's own copies (pasting an entry, a color, a screenshot) don't show.
-- Privacy: unpinned entries and all pictures live in memory only and are gone when WindyLand exits. Pinned text and files are saved in `clipboard.txt`. Passwords and codes copied from password managers that mark them private (KeePass, Bitwarden, 1Password and others) are never recorded.
+- **Show what I copy** (Settings > Privacy, off by default): every time you copy something, a small toast shows it for two seconds, like on Android: the text, the file names, or a thumbnail of the picture. It works even with clipboard history off and keeps nothing. Nookly's own copies (pasting an entry, a color, a screenshot) don't show.
+- Privacy: unpinned entries and all pictures live in memory only and are gone when Nookly exits. Pinned text and files are saved in `clipboard.txt`. Passwords and codes copied from password managers that mark them private (KeePass, Bitwarden, 1Password and others) are never recorded.
 
 ## Mic and camera dots
 
 - While any app is using your **microphone**, an orange dot appears beside the notch; a green dot means the **camera** is on. The notch also drops a short notice naming the app when it starts.
 - The dots show in every notch style, including Pill and Hidden, and next to the clock when the panel is open.
-- WindyLand reads this from Windows' own privacy records; it does not listen to or watch anything itself. Turn the dots off with **Mic & camera dots** in Settings.
+- Nookly reads this from Windows' own privacy records; it does not listen to or watch anything itself. Turn the dots off with **Mic & camera dots** in Settings.
 
 ## Windows notifications in the notch
 
 <img src="images/notifications.png" alt="Windows notifications">
 
-WindyLand can show other apps' notifications (messages, mail, calendar, browser sites) in the notch, with the app's icon and colour, instead of Windows' banner in the corner.
+Nookly can show other apps' notifications (messages, mail, calendar, browser sites) in the notch, with the app's icon and colour, instead of Windows' banner in the corner.
 
 - Turn it on in **Settings > Privacy > Show them in the notch**. It's off until you do.
 - Windows keeps showing its own banner too, unless you turn banners off: click **Windows banners** in the same place (or open Windows **Settings > System > Notifications**) and turn off **Show notification banners** for the apps you want in the notch only. Notifications still go to Notification Center as usual.
 - **Click** a notification (or **Open**) to open the app that sent it. **Mute app** stops that app's notifications appearing in the notch; **Unmute** in Settings brings them all back. Buttons inside a notification (Reply, Accept) only work in Windows' own banner.
 - **Include message text** off shows only the app's name, handy if you share your screen.
 - Notifications that arrive while **Do Not Disturb** or focus is on, or during a full-screen game or video, wait until it's over, then the newest shows with a count of the rest ("+2 more"). Windows 11 turns focus on by itself during games and full-screen apps.
-- How it works: WindyLand asks Windows for the notifications in Notification Center, the same permission other notification tools use (Windows **Settings > Privacy & security > Notifications**). It checks only when Windows records a new one. Nothing is stored or sent anywhere.
+- How it works: Nookly asks Windows for the notifications in Notification Center, the same permission other notification tools use (Windows **Settings > Privacy & security > Notifications**). It checks only when Windows records a new one. Nothing is stored or sent anywhere.
 
 ## Alerts and overlays
 
@@ -347,7 +347,7 @@ Pick one in **Settings > Mascot**: Eyes, Cat, Ghost, Robot, Sparky (an electric 
 
 <img src="images/settings-features.png" alt="Settings > Features">
 
-**Settings > Features** lists everything WindyLand can do, in four groups: **Everyday**, **Focus & health**, **Work & tools** and **System**. Click one to switch it on or off; rest the mouse on it to read what it does.
+**Settings > Features** lists everything Nookly can do, in four groups: **Everyday**, **Focus & health**, **Work & tools** and **System**. Click one to switch it on or off; rest the mouse on it to read what it does.
 
 - A feature that's off is really off: no tab, no reminders, and it does no work in the background, so it costs nothing.
 - **Start from** sets everything at once: **Minimal** (music, timer, to-do, calendar and widgets), **Student** (adds Pomodoro, water, shelf, clipboard and tools), **Work** (adds Pomodoro, shelf, clipboard, tools, AI agents and the system monitor) or **Everything**. Change any of it afterwards. A new install starts on Minimal, and the welcome tour lets you pick.
@@ -380,12 +380,12 @@ Open Settings with the **gear** at the end of the tab bar, a plain **right-click
 | Sound for reminders | Chime, Bell, Pop, Marimba, Windows (your system sound) or Off; picking one plays it |
 | **General** page: Start with Windows | Launch at sign-in |
 | Volume overlay | Show volume changes |
-| 12-hour clock | 4:20 PM (the default) or 16:20, everywhere in WindyLand |
+| 12-hour clock | 4:20 PM (the default) or 16:20, everywhere in Nookly |
 | Step aside for windows under it | Smart hide: steps aside while a window's top is under the notch, comes back after a moment, steps aside when the mouse is near (on by default) |
 | Check for updates | Looks for a newer version now |
 | Check for updates automatically | Asks GitHub for the latest version about twice a day. On by default; also offered by the installer |
-| Open data folder | Opens `%APPDATA%\WindyLand` |
-| Export settings / Import settings | Save your settings and data in one `.windyland` file, and load it on another PC. Import shows what's in the file and asks before replacing anything; then WindyLand starts again |
+| Open data folder | Opens `%APPDATA%\Nookly` |
+| Export settings / Import settings | Save your settings and data in one `.nookly` file, and load it on another PC. Import shows what's in the file and asks before replacing anything; then Nookly starts again |
 | GitHub / Privacy / Quit | The privacy policy is [PRIVACY.md](../PRIVACY.md) |
 | **Privacy** page: Windows notifications | Show them in the notch, include message text, Windows banners, unmute apps |
 | Mic & camera dots | Dots while the mic or camera is in use |
@@ -395,28 +395,28 @@ Open Settings with the **gear** at the end of the tab bar, a plain **right-click
 
 Right-clicking the tray icon shows a short menu: Settings, Welcome tour, Check for updates, About and Exit. Resting the mouse on any icon button shows what it does.
 
-Everything is stored as plain text in `%APPDATA%\WindyLand` (`settings.txt`, `todo.txt`, `water.txt`, `prayer.txt`, `tools.txt`, `shelf.txt`, `clipboard.txt`). Uninstalling from **Settings > Apps** asks whether to delete it too.
+Everything is stored as plain text in `%APPDATA%\Nookly` (`settings.txt`, `todo.txt`, `water.txt`, `prayer.txt`, `tools.txt`, `shelf.txt`, `clipboard.txt`). Uninstalling from **Settings > Apps** asks whether to delete it too.
 
 ## Uninstalling
 
-- **Settings > Apps > WindyLand > Uninstall**, as usual, or **Uninstall WindyLand...** in the tray icon's menu.
-- The tray item works even where Windows blocks the unsigned uninstaller (Smart App Control). It asks whether to keep your data, closes WindyLand, takes it out of startup, disconnects Claude Code and Codex, then removes the app. From a command line: `windyland.exe --uninstall` (`--keep-data`, `--quiet`).
+- **Settings > Apps > Nookly > Uninstall**, as usual, or **Uninstall Nookly...** in the tray icon's menu.
+- The tray item works even where Windows blocks the unsigned uninstaller (Smart App Control). It asks whether to keep your data, closes Nookly, takes it out of startup, disconnects Claude Code and Codex, then removes the app. From a command line: `nookly.exe --uninstall` (`--keep-data`, `--quiet`).
 - Screenshots in Pictures\Screenshots are never deleted.
 
 ## Updates
 
-WindyLand checks GitHub for a new version shortly after it starts and then twice a day. When there is one, the notch shows **Update available**:
+Nookly checks GitHub for a new version shortly after it starts and then twice a day. When there is one, the notch shows **Update available**:
 
 - **Update** downloads the installer, upgrades in place and starts the new version. Your data and settings stay.
 - **Later** asks again at the next check.
 - **Skip** ignores that version (newer ones are still offered).
 
-To check yourself, open Settings and click **Check for updates**. The check only asks GitHub for the latest release number; nothing about you is sent. If GitHub is busy or you're offline, it tries again within the hour. Before running a downloaded update, WindyLand checks it against the fingerprint (SHA-256) GitHub publishes for it.
+To check yourself, open Settings and click **Check for updates**. The check only asks GitHub for the latest release number; nothing about you is sent. If GitHub is busy or you're offline, it tries again within the hour. Before running a downloaded update, Nookly checks it against the fingerprint (SHA-256) GitHub publishes for it.
 
 ## Troubleshooting
 
 - **Nothing in Now playing.** Make sure the player shows up in the Windows media overlay (press a media key and look at the volume flyout).
 - **The notch disappeared.** It hides while a full-screen game, video or presentation is running, and comes back as soon as you leave it. Reminders that arrive meanwhile wait and show (with their sound) when it returns.
 - **It opens when I reach for my tabs.** Switch to the Compact, Pill or Hidden style, or move it to another edge.
-- **Found a bug or have an idea?** Open an [issue](https://github.com/shabab239/WindyLand/issues/new/choose); the form asks for what helps.
+- **Found a bug or have an idea?** Open an [issue](https://github.com/banulalakwindu/Nookly/issues/new/choose); the form asks for what helps.
 - **Lyrics not available.** The song is not on LRCLIB yet, or the title from the player is too unusual to match.

@@ -211,7 +211,7 @@ pub enum Deferred {
     /// Settings > General: save settings and data to a file / load them.
     Export,
     Import,
-    /// Start a fresh WindyLand (after an import) and quit this one.
+    /// Start a fresh Nookly (after an import) and quit this one.
     Restart,
     DragOut(Vec<String>),
 }
@@ -355,7 +355,7 @@ thread_local! {
 pub static SINGLE_INSTANCE: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
 /// Release the single-instance mutex early, so an installer started by the
-/// updater doesn't see WindyLand as still running while we shut down.
+/// updater doesn't see Nookly as still running while we shut down.
 pub fn release_single_instance() {
     let h = SINGLE_INSTANCE.swap(0, std::sync::atomic::Ordering::SeqCst);
     if h != 0 {
@@ -382,7 +382,7 @@ thread_local! {
 
 /// Open a file, folder or link once the current message is handled. The
 /// shell keeps Windows messages flowing while it starts things; inside a
-/// click WindyLand is busy and would miss them (a lost "mouse left" kept the
+/// click Nookly is busy and would miss them (a lost "mouse left" kept the
 /// notch open for good).
 pub fn open_later(target: impl Into<String>) {
     OPEN_LATER.with(|q| q.borrow_mut().push(target.into()));
@@ -403,10 +403,10 @@ pub fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
     APP.with(|a| a.try_borrow_mut().ok().and_then(|mut g| g.as_mut().map(f)))
 }
 
-/// Append a line to debug.log in the data folder when WINDYLAND_DEBUG=1.
+/// Append a line to debug.log in the data folder when NOOKLY_DEBUG=1.
 pub fn dlog(msg: impl AsRef<str>) {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if *ON.get_or_init(|| std::env::var("WINDYLAND_DEBUG").map_or(false, |v| v == "1")) {
+    if *ON.get_or_init(|| std::env::var("NOOKLY_DEBUG").map_or(false, |v| v == "1")) {
         use std::io::Write;
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(crate::store::dir().join("debug.log")) {
             let _ = writeln!(f, "{:.3} {}", crate::time::unix_now(), msg.as_ref());
@@ -424,7 +424,7 @@ impl App {
             let hinst = GetModuleHandleW(None)?;
             // Self-test and docs renders use their own class, so agent hooks
             // (and the uninstaller) only ever find the real notch.
-            let class = if crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed) { w!("WindyLandNotchTest") } else { w!("WindyLandNotch") };
+            let class = if crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed) { w!("NooklyNotchTest") } else { w!("NooklyNotch") };
             let wc = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
                 lpfnWndProc: Some(wndproc),
@@ -437,7 +437,7 @@ impl App {
             let hwnd = CreateWindowExW(
                 WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 class,
-                w!("WindyLand"),
+                w!("Nookly"),
                 WS_POPUP,
                 0,
                 0,
@@ -980,7 +980,7 @@ impl App {
         (live, widgets)
     }
 
-    /// The rows the notch reads: your order (Custom order), or WindyLand's:
+    /// The rows the notch reads: your order (Custom order), or Nookly's:
     /// what is running, most urgent first (an agent that needs you goes
     /// above music), then the widgets two per row, in the order switched on.
     fn effective_rows(&self, live: &[(&'static str, usize, Option<u8>)]) -> Vec<NotchRow> {
@@ -1178,7 +1178,7 @@ impl App {
         let testing = crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed);
         let data = if testing {
             // Renders and tests: a made-up background (light, dark, colour).
-            let kind = std::env::var("WINDYLAND_RENDER_BACKDROP").unwrap_or_else(|_| "color".into());
+            let kind = std::env::var("NOOKLY_RENDER_BACKDROP").unwrap_or_else(|_| "color".into());
             let (w, h) = (((notch.w * self.scale) as u32 / 4).max(2), ((notch.h * self.scale) as u32 / 4).max(2));
             Some(crate::glass::sample(&kind, w, h))
         } else {
@@ -1769,7 +1769,7 @@ impl App {
         }
     }
 
-    /// With WINDYLAND_DEBUG=1, log each transition's frame rate and worst gap
+    /// With NOOKLY_DEBUG=1, log each transition's frame rate and worst gap
     /// to debug.log, so a "looks choppy" report comes with numbers.
     fn perf_note(&mut self, t: f64, moving: bool) {
         if moving {
@@ -2314,7 +2314,7 @@ impl App {
             ui.chip(cell, s.label(), S_SOUND + i as u32, st.sound == s, accent);
         }
         let foot = left.cut_bottom(14.0, 0.0);
-        let v = format!("WindyLand {}  ·  right-click the notch for settings", crate::modules::update::VERSION);
+        let v = format!("Nookly {}  ·  right-click the notch for settings", crate::modules::update::VERSION);
         ui.text(&v, foot, 10.0, col::FAINT, Weight::Regular, Align::Left);
 
         // The right column has three pages.
@@ -2329,7 +2329,7 @@ impl App {
             let names = importing.unwrap_or_default();
             label(&mut ui, right.cut_top(16.0, 4.0), "Import settings");
             ui.text_wrap(
-                "Replace your settings and data on this PC with the ones in the file? WindyLand starts again to load them.",
+                "Replace your settings and data on this PC with the ones in the file? Nookly starts again to load them.",
                 right.cut_top(48.0, 4.0),
                 12.0,
                 col::TEXT,
@@ -2711,7 +2711,7 @@ impl App {
                 }
             }
             S_POLICY => {
-                open_later("https://github.com/shabab239/WindyLand/blob/main/PRIVACY.md");
+                open_later("https://github.com/banulalakwindu/Nookly/blob/main/PRIVACY.md");
             },
             S_NOTIF_ON => self.settings.notif_on = !self.settings.notif_on,
             S_NOTIF_TEXT => self.settings.notif_text = !self.settings.notif_text,
@@ -2810,7 +2810,7 @@ impl App {
             let x = dots.x + k as f32 * 12.0 + if k > step { 10.0 } else { 0.0 };
             ui.fill_rr(Rect::new(x, dots.cy() - 3.0, w, 6.0), 3.0, c);
         }
-        ui.text("Welcome to WindyLand", head, 15.0, col::TEXT, Weight::Semi, Align::Left);
+        ui.text("Welcome to Nookly", head, 15.0, col::TEXT, Weight::Semi, Align::Left);
         let (question, hint) = match step {
             0 => ("First, how should the notch look when it's closed?", "Pick one. You can change it anytime in Settings."),
             1 => ("Where should it sit?", "Or right-drag the notch to any edge, on any screen."),
@@ -2820,7 +2820,7 @@ impl App {
         };
         ui.text(question, r.cut_top(20.0, 2.0), 12.5, col::DIM, Weight::Regular, Align::Left);
         let mut foot = r.cut_bottom(28.0, 0.0);
-        let next = if step + 1 >= ONBOARD_STEPS { "Start using WindyLand" } else { "Next" };
+        let next = if step + 1 >= ONBOARD_STEPS { "Start using Nookly" } else { "Next" };
         let nw = ui.measure(next, 12.0, Weight::Semi) + 40.0;
         ui.button_accent(foot.cut_right(nw, 8.0), next, O_NEXT, accent);
         if step + 1 >= ONBOARD_STEPS {
@@ -3927,7 +3927,7 @@ pub fn selftest() -> String {
 
             // Live Windows clipboard (opt-in: it briefly replaces what you copied,
             // then puts it back).
-            if std::env::var("WINDYLAND_TEST_CLIPBOARD").is_ok() {
+            if std::env::var("NOOKLY_TEST_CLIPBOARD").is_ok() {
                 let hwnd = a.hwnd;
                 let saved = cb::current(hwnd);
                 a.settings.clip_on = true;
@@ -3937,7 +3937,7 @@ pub fn selftest() -> String {
                     std::thread::sleep(std::time::Duration::from_millis(400));
                     a.call(i, |m, c| m.tick(c));
                 };
-                let tag = format!("WindyLand selftest {}", crate::time::unix_now() as u64);
+                let tag = format!("Nookly selftest {}", crate::time::unix_now() as u64);
                 cb::set_clipboard(hwnd, &Content::Text(tag.clone()));
                 wait(a);
                 let st = a.modules[i].debug_state();
@@ -3989,7 +3989,7 @@ pub fn selftest() -> String {
                         a.render(tgt, 0.0);
                         copy_icon = a.hits.iter().find(|x| x.module == i && x.id >> 24 == 1 && (x.rect.cy() - h.rect.cy()).abs() < 2.0).copied();
                     }
-                    // A plain desktop-style window to paste into (not WindyLand).
+                    // A plain desktop-style window to paste into (not Nookly).
                     let shell = unsafe { GetShellWindow() };
                     cb::TEST_TARGET.store(shell.0 as isize, Relaxed);
                     let entry = row.map_or(0, |h| h.id & 0xFF_FFFF);
@@ -4001,24 +4001,24 @@ pub fn selftest() -> String {
                     a.call(i, |m, c| m.action((1 << 24) | entry, (0.0, 0.0), c));
                     let st2 = a.modules[i].debug_state();
                     let copied = st2.contains("paste=None") && cb::current(hwnd).map_or(false, |c| c != Content::Text("other".into()));
-                    // Never into WindyLand itself or the taskbar.
+                    // Never into Nookly itself or the taskbar.
                     cb::TEST_TARGET.store(hwnd.0 as isize, Relaxed);
                     a.call(i, |m, c| m.action((4 << 24) | entry, (0.0, 0.0), c));
                     let own = a.modules[i].debug_state().contains("paste=Some(NoTarget)");
                     let tray = unsafe { FindWindowW(w!("Shell_TrayWnd"), None) }.unwrap_or_default();
                     let no_tray = tray.0.is_null() || !cb::paste_target_ok(tray, hwnd);
                     out += &format!(
-                        "{:<4} clicking an entry pastes it, the copy icon only copies, never into WindyLand or the taskbar {:?}\n",
+                        "{:<4} clicking an entry pastes it, the copy icon only copies, never into Nookly or the taskbar {:?}\n",
                         if row.is_some() && copy_icon.is_some() && pasted && copied && own && no_tray { "OK" } else { "FAIL" },
                         (row.is_some(), copy_icon.is_some(), pasted, copied, own, no_tray)
                     );
                     out += &snap(a, "clipboard hover with copy icon");
                     // Real Ctrl+V into a text box (opt-in: it takes focus).
-                    if std::env::var("WINDYLAND_TEST_PASTE").is_ok() {
+                    if std::env::var("NOOKLY_TEST_PASTE").is_ok() {
                         cb::PASTE_DRY_RUN.store(false, Relaxed);
                         unsafe {
                             let hinst = GetModuleHandleW(None).unwrap_or_default();
-                            let top = CreateWindowExW(WINDOW_EX_STYLE(0), w!("STATIC"), w!("WindyLand paste test"), WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100, 400, 120, None, None, hinst, None).unwrap_or_default();
+                            let top = CreateWindowExW(WINDOW_EX_STYLE(0), w!("STATIC"), w!("Nookly paste test"), WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100, 400, 120, None, None, hinst, None).unwrap_or_default();
                             // An Edit can't be a top-level parent for focus tests; host it.
                             let edit = CreateWindowExW(WINDOW_EX_STYLE(0), w!("EDIT"), w!(""), WS_CHILD | WS_VISIBLE | WS_BORDER, 10, 10, 360, 30, top, None, hinst, None).unwrap_or_default();
                             // Windows only lets the app that got the last input take
@@ -4028,7 +4028,7 @@ pub fn selftest() -> String {
                             let _ = SetForegroundWindow(top);
                             let _ = SetFocus(edit);
                             let front = GetForegroundWindow() == top;
-                            let want = format!("WindyLand paste {}", crate::time::unix_now() as u64);
+                            let want = format!("Nookly paste {}", crate::time::unix_now() as u64);
                             cb::set_clipboard(hwnd, &Content::Text(want.clone()));
                             wait(a);
                             cb::TEST_TARGET.store(top.0 as isize, Relaxed);
@@ -4594,7 +4594,7 @@ pub fn selftest() -> String {
                     tight.push(s);
                 }
             }
-            let last_w = ONBOARD_SIZE.0 - 8.0 - (a.gfx.measure("Start using WindyLand", 12.0, Weight::Semi) + 48.0) - 118.0 - 78.0;
+            let last_w = ONBOARD_SIZE.0 - 8.0 - (a.gfx.measure("Start using Nookly", 12.0, Weight::Semi) + 48.0) - 118.0 - 78.0;
             if a.gfx.measure("That's it. Enjoy!", 11.0, Weight::Regular) > last_w || a.gfx.measure("Open Settings", 12.0, Weight::Semi) > 110.0 - 16.0 {
                 tight.push("last step footer");
             }
@@ -4635,7 +4635,7 @@ pub fn selftest() -> String {
             let right_w = SETTINGS_SIZE.0 - 372.0 - 20.0;
             let btn_w = (right_w - 8.0) / 2.0 - 16.0;
             let mut tight = Vec::new();
-            for s in ["Check for updates", "Open data folder", "GitHub page", "Privacy policy", "Quit WindyLand", "Checking..."] {
+            for s in ["Check for updates", "Open data folder", "GitHub page", "Privacy policy", "Quit Nookly", "Checking..."] {
                 if a.gfx.measure(s, 12.0, Weight::Semi) > btn_w {
                     tight.push(s);
                 }
@@ -4652,7 +4652,7 @@ pub fn selftest() -> String {
                     tight.push(clip_mode_short(m));
                 }
             }
-            if a.gfx.measure("WindyLand 0.0.00  ·  right-click the notch for settings", 10.0, Weight::Regular) > 372.0 {
+            if a.gfx.measure("Nookly 0.0.00  ·  right-click the notch for settings", 10.0, Weight::Regular) > 372.0 {
                 tight.push("footer");
             }
             for s in ["Windows banners", "Unmute 12 apps", "No muted apps"] {
@@ -5410,13 +5410,13 @@ pub fn selftest() -> String {
             let off = ag::merge_hermes_hooks(&on, &cmd, false);
             let ok = on == twice && off == cur && ag::HERMES_EVENTS.iter().all(|e| on[*e].as_array().map_or(false, |l| l.len() == 1)) && on["pre_tool_call"] == cur["pre_tool_call"];
             out += &format!("{:<4} Hermes hooks: added once per event, the user's hooks and outbound kept, removal restores\n", if ok { "OK" } else { "FAIL" });
-            if std::env::var("WINDYLAND_TEST_HERMES").is_ok() {
+            if std::env::var("NOOKLY_TEST_HERMES").is_ok() {
                 // The real hermes CLI against a scratch HERMES_HOME (never the user's).
                 let hh = crate::store::dir().join("hermes-home");
                 let _ = std::fs::remove_dir_all(&hh);
                 let _ = std::fs::create_dir_all(&hh);
                 let _ = std::fs::write(hh.join("config.yaml"), "hooks:\n  pre_tool_call:\n  - command: mine.sh\n    matcher: terminal\n");
-                std::env::set_var("WINDYLAND_HERMES_HOME", &hh);
+                std::env::set_var("NOOKLY_HERMES_HOME", &hh);
                 let t0 = std::time::Instant::now();
                 let c1 = ag::hermes_connect(true);
                 let cfg = std::fs::read_to_string(hh.join("config.yaml")).unwrap_or_default();
@@ -5427,7 +5427,7 @@ pub fn selftest() -> String {
                 let allow2 = std::fs::read_to_string(hh.join("shell-hooks-allowlist.json")).unwrap_or_default();
                 let ok = c1.is_ok() && c2.is_ok() && linked && cfg.contains("on_stream_start") && cfg.contains("mine.sh") && allow.matches("--agent-event hermes").count() == 6 && !cfg2.contains("agent-event") && cfg2.contains("mine.sh") && !allow2.contains("agent-event") && ag::hermes_link() == Link::Off;
                 out += &format!("{:<4} real hermes CLI: connect writes 6 hooks + consent, keeps the user's hook, disconnect removes them ({:.1} s) {:?}\n", if ok { "OK" } else { "FAIL" }, t0.elapsed().as_secs_f32(), (c1, c2, linked));
-                std::env::remove_var("WINDYLAND_HERMES_HOME");
+                std::env::remove_var("NOOKLY_HERMES_HOME");
             }
             // The hook keeps only status fields: no prompt, no file contents.
             let big = json!({"hook_event_name": "PostToolUse", "session_id": "s", "cwd": "C:/x/y", "tool_name": "Read", "prompt": "SECRET-PROMPT", "tool_input": {"file_path": "C:/x/.env"}, "tool_response": {"content": "SECRET-FILE"}});
@@ -5443,7 +5443,7 @@ pub fn selftest() -> String {
                 use std::io::Write;
                 let t0 = std::time::Instant::now();
                 let mut cmd = std::process::Command::new(&exe);
-                cmd.args(["--agent-event", agent]).env("WINDYLAND_AGENT_HWND", (a.hwnd.0 as isize).to_string()).stdin(std::process::Stdio::piped());
+                cmd.args(["--agent-event", agent]).env("NOOKLY_AGENT_HWND", (a.hwnd.0 as isize).to_string()).stdin(std::process::Stdio::piped());
                 if agent == "codex" {
                     cmd.arg(&payload);
                 }
@@ -5478,7 +5478,7 @@ pub fn selftest() -> String {
             let home = crate::store::dir().join("agent-home");
             let _ = std::fs::remove_dir_all(&home);
             let _ = std::fs::create_dir_all(&home);
-            std::env::set_var("WINDYLAND_AGENT_HOME", &home);
+            std::env::set_var("NOOKLY_AGENT_HOME", &home);
             let missing = ag::claude_link() == Link::Missing && ag::claude_connect(true).is_err() && ag::codex_link() == Link::Missing;
             let _ = std::fs::create_dir_all(home.join(".claude"));
             let original = "{\n  \"model\": \"opus\",\n  \"hooks\": {\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo mine\"\n          }\n        ]\n      }\n    ]\n  },\n  \"zzz\": 1\n}\n";
@@ -5491,7 +5491,7 @@ pub fn selftest() -> String {
             let kept = text.contains("echo mine") && text.find("\"model\"") < text.find("\"hooks\"") && text.find("\"hooks\"") < text.find("\"zzz\"");
             let c2 = ag::claude_connect(false).is_ok() && ag::claude_link() == Link::Off;
             let restored = std::fs::read_to_string(home.join(".claude/settings.json")).unwrap_or_default() == original;
-            let backup = home.join(".claude/settings.json.windyland-backup").exists();
+            let backup = home.join(".claude/settings.json.nookly-backup").exists();
             out += &format!(
                 "{:<4} Claude Code connect adds 6 hooks once, keeps the user's settings and order, disconnect restores the file exactly {:?}\n",
                 if missing && c1 && all_once && kept && c2 && restored && backup { "OK" } else { "FAIL" },
@@ -5515,9 +5515,9 @@ pub fn selftest() -> String {
             ag::disconnect_all();
             out += &format!("{:<4} uninstall disconnects both agents\n", if ag::claude_link() == Link::Off && ag::codex_link() == Link::Off { "OK" } else { "FAIL" });
             // Never the real Hermes during tests.
-            std::env::remove_var("WINDYLAND_HERMES_HOME");
+            std::env::remove_var("NOOKLY_HERMES_HOME");
             out += &format!("{:<4} self-test can't reach the real Hermes or agent settings ({:?}, {:?})\n", if ag::hermes_home().is_none() && ag::hermes_link() == Link::Missing { "OK" } else { "FAIL" }, ag::hermes_home(), ag::hermes_link());
-            std::env::remove_var("WINDYLAND_AGENT_HOME");
+            std::env::remove_var("NOOKLY_AGENT_HOME");
             let _ = std::fs::remove_dir_all(&home);
             a.call(ai, |m, c| m.action(ag::A_DEMO, (0.0, 0.0), c));
             a.expanded = true;
@@ -5653,7 +5653,7 @@ pub fn selftest() -> String {
                 (button.is_some(), closed, back, png, dib)
             );
             out += &snap(a, "shelf with a screenshot");
-            if std::env::var("WINDYLAND_TEST_PICKER").is_ok() {
+            if std::env::var("NOOKLY_TEST_PICKER").is_ok() {
                 let up = snip::start(a.hwnd);
                 let dragged = snip::test_drag(10, 10, 110, 60);
                 let got = snip::RESULT.lock().unwrap().take();
@@ -5778,7 +5778,7 @@ pub fn selftest() -> String {
                 a.expanded = true;
                 a.tab = ti;
                 a.switch_t = -10.0;
-                let qr = crate::modules::tools::qr_check("https://github.com/shabab239/WindyLand");
+                let qr = crate::modules::tools::qr_check("https://github.com/banulalakwindu/Nookly");
                 let long = crate::modules::tools::qr_check(&"x".repeat(3500));
                 out += &format!("{:<4} QR code for a link ({:?}), image copy size right, too-long text refused\n", if matches!(qr, Some((s, true)) if s >= 21) && long.is_none() { "OK" } else { "FAIL" }, qr);
                 let names = ["color", "calculator", "QR code", "converter"];
@@ -5870,7 +5870,7 @@ pub fn selftest() -> String {
                         }
                         unsafe { ReleaseDC(None, screen) };
                         out += &format!("{:<4} color picker screenshot {}x{} matches the screen ({same}/5 points)\n", if same >= 3 { "OK" } else { "INFO" }, s.w, s.h);
-                        if std::env::var("WINDYLAND_TEST_PICKER").is_ok() {
+                        if std::env::var("NOOKLY_TEST_PICKER").is_ok() {
                             *tools::picker::RESULT.lock().unwrap() = None;
                             let up = tools::picker::start(a.hwnd);
                             let clicked = tools::picker::test_click(12, 12);
@@ -6004,7 +6004,7 @@ pub fn selftest() -> String {
                 a.call(ni, |m, c| m.action(notifs::A_DEMO, (0.0, 0.0), c));
                 a.frame();
                 let silent = a.toast.is_none() && a.queue.is_empty();
-                let counted = notifs::muted(&a.settings.extra) == vec!["WindyLand.Demo".to_string()];
+                let counted = notifs::muted(&a.settings.extra) == vec!["Nookly.Demo".to_string()];
                 a.settings.extra.remove(notifs::MUTED_KEY);
                 a.settings.save();
                 out += &format!("{:<4} muting an app silences it\n", if silent && counted { "OK" } else { "FAIL" });
@@ -6084,7 +6084,7 @@ pub fn selftest() -> String {
                 use windows::Data::Xml::Dom::XmlDocument;
                 use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
                 let xml = XmlDocument::new()?;
-                xml.LoadXml(h!("<toast><visual><binding template='ToastGeneric'><text>WindyLand self-test</text><text>This test notification removes itself</text></binding></visual><audio silent='true'/></toast>"))?;
+                xml.LoadXml(h!("<toast><visual><binding template='ToastGeneric'><text>Nookly self-test</text><text>This test notification removes itself</text></binding></visual><audio silent='true'/></toast>"))?;
                 let toast = ToastNotification::CreateToastNotification(&xml)?;
                 toast.SetTag(h!("wl-selftest"))?;
                 toast.SetGroup(h!("wl"))?;
@@ -6097,7 +6097,7 @@ pub fn selftest() -> String {
                 while t0.elapsed().as_secs_f64() < 5.0 && got.is_none() {
                     std::thread::sleep(std::time::Duration::from_millis(50));
                     a.tick();
-                    let hit = |t: &Toast| t.key == "notif" && t.title == "WindyLand self-test";
+                    let hit = |t: &Toast| t.key == "notif" && t.title == "Nookly self-test";
                     if a.toast.as_ref().map_or(false, |t| hit(&t.0)) || a.queue.iter().any(|t| hit(t)) {
                         got = Some(t0.elapsed().as_secs_f64() * 1000.0);
                     }
@@ -6161,22 +6161,22 @@ pub fn selftest() -> String {
             let ok = is_newer("v0.1.10", "0.1.9") && !is_newer("0.1.4", "0.1.4") && !is_newer("v0.1.3", "0.1.4") && is_newer("1.0.0", "0.9.9");
             out += &format!("{:<4} update version comparison\n", if ok { "OK" } else { "FAIL" });
             let json = br#"{"tag_name":"v9.9.9","html_url":"https://x","draft":false,"prerelease":false,
-                "assets":[{"name":"WindyLandSetup-9.9.9.exe","browser_download_url":"https://github.com/a/b.exe","size":123}]}"#;
+                "assets":[{"name":"NooklySetup-9.9.9.exe","browser_download_url":"https://github.com/a/b.exe","size":123}]}"#;
             let rel = parse_release(json);
             let ok = rel.as_ref().map_or(false, |r| r.version == "9.9.9" && r.installer.as_ref().map_or(false, |i| i.size == Some(123)));
             out += &format!("{:<4} update release JSON parsing\n", if ok { "OK" } else { "FAIL" });
             let ok = sha256_hex(b"abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
             out += &format!("{:<4} SHA-256 matches the standard test vector\n", if ok { "OK" } else { "FAIL" });
             let html = format!(
-                r#"<a href="/{REPO}/releases/download/v9.9.9/WindyLand-src.zip">x</a><clipboard-copy value="sha256:{a}">
-                <a href="/{REPO}/releases/download/v9.9.9/WindyLandSetup-9.9.9.exe" rel="nofollow">x</a>
+                r#"<a href="/{REPO}/releases/download/v9.9.9/Nookly-src.zip">x</a><clipboard-copy value="sha256:{a}">
+                <a href="/{REPO}/releases/download/v9.9.9/NooklySetup-9.9.9.exe" rel="nofollow">x</a>
                 <clipboard-copy value="sha256:{b}"></clipboard-copy><span>2.3 MB</span>"#,
                 a = "1".repeat(64),
                 b = "AB".repeat(32)
             );
             let inst = parse_assets_html(&html, "v9.9.9");
             let ok = inst.as_ref().map_or(false, |i| {
-                i.url == format!("https://github.com/{REPO}/releases/download/v9.9.9/WindyLandSetup-9.9.9.exe") && i.sha256.as_deref() == Some(&"ab".repeat(32)[..])
+                i.url == format!("https://github.com/{REPO}/releases/download/v9.9.9/NooklySetup-9.9.9.exe") && i.sha256.as_deref() == Some(&"ab".repeat(32)[..])
             });
             out += &format!("{:<4} release page parsing finds the installer and its SHA-256\n", if ok { "OK" } else { "FAIL" });
             // Live: both routes must agree on the latest release.
@@ -6201,7 +6201,7 @@ pub fn selftest() -> String {
             if let Ok(r) = fetch_latest() {
                 out += &format!("INFO latest release {} -> this build {VERSION} is {}\n", r.version, if is_newer(&r.version, VERSION) { "behind (update offered)" } else { "up to date" });
             }
-            if std::env::var("WINDYLAND_TEST_DOWNLOAD").is_ok() {
+            if std::env::var("NOOKLY_TEST_DOWNLOAD").is_ok() {
                 for (route, r) in [("release pages", web), ("API", api)] {
                     if let Ok(r) = r {
                         match download_installer(&r) {
@@ -6277,8 +6277,8 @@ fn animate(a: &mut App, dir: &std::path::Path, n: &mut u32, steps: u32, crop: (i
     }
 }
 
-/// `windyland --render-docs <dir>`: render every view with demo data for the
-/// README/user guide. Run with `WINDYLAND_DATA_DIR` pointing at seeded demo data.
+/// `nookly --render-docs <dir>`: render every view with demo data for the
+/// README/user guide. Run with `NOOKLY_DATA_DIR` pointing at seeded demo data.
 pub fn render_docs(dir: &std::path::Path) -> String {
     let _ = std::fs::create_dir_all(dir);
     with_app(|a| {
@@ -6286,14 +6286,14 @@ pub fn render_docs(dir: &std::path::Path) -> String {
         let scale = 2.0;
         a.scale = scale;
         let _ = a.gfx.resize((CANVAS_W * scale) as i32, (CANVAS_H * scale) as i32);
-        // WINDYLAND_RENDER_STYLE=slim renders every shot in another style (for checking layouts).
-        let base = std::env::var("WINDYLAND_RENDER_STYLE").ok().and_then(|s| NotchStyle::from_key(&s)).unwrap_or(NotchStyle::Full);
+        // NOOKLY_RENDER_STYLE=slim renders every shot in another style (for checking layouts).
+        let base = std::env::var("NOOKLY_RENDER_STYLE").ok().and_then(|s| NotchStyle::from_key(&s)).unwrap_or(NotchStyle::Full);
         a.settings.style = base;
-        // WINDYLAND_RENDER_THEME / WINDYLAND_RENDER_SECONDS: renders in a theme, with seconds.
-        if let Ok(t) = std::env::var("WINDYLAND_RENDER_THEME") {
+        // NOOKLY_RENDER_THEME / NOOKLY_RENDER_SECONDS: renders in a theme, with seconds.
+        if let Ok(t) = std::env::var("NOOKLY_RENDER_THEME") {
             a.settings.theme = t;
         }
-        a.settings.seconds = std::env::var("WINDYLAND_RENDER_SECONDS").is_ok();
+        a.settings.seconds = std::env::var("NOOKLY_RENDER_SECONDS").is_ok();
         crate::time::SECONDS.store(a.settings.seconds, std::sync::atomic::Ordering::Relaxed);
         a.settings.edge = Edge::Top;
         a.settings.personality = true;
@@ -6568,7 +6568,7 @@ pub fn render_docs(dir: &std::path::Path) -> String {
             ("toast_lang", Toast::new("lang", glyph::KEYBOARD, col::BLUE, "Bangla (Bangladesh)", "Keyboard language").right("BN")),
             ("toast_copy", crate::modules::clipboard::copy_toast(&crate::modules::clipboard::Content::Text("Meeting moved to 4:30 pm, same room.\nBring the printed slides.".into()))),
             ("toast_agent", Toast::new("agent", crate::modules::agents::ICON, col::ACCENT, "Hermes needs you", "desktop \u{00B7} Wants your OK to run a command")),
-            ("toast_agent_done", Toast::new("agent", crate::modules::agents::ICON, col::GREEN, "Claude Code finished", "WindyLand \u{00B7} took 4m 12s")),
+            ("toast_agent_done", Toast::new("agent", crate::modules::agents::ICON, col::GREEN, "Claude Code finished", "Nookly \u{00B7} took 4m 12s")),
             (
                 "toast_notification",
                 Toast::new("notif", glyph::BELL, col::GREEN, "Nadia", "Are we still on for 7? I'll bring the slides")
@@ -6651,7 +6651,7 @@ pub fn render_docs(dir: &std::path::Path) -> String {
     .unwrap_or_else(|| "app not running".into())
 }
 
-/// `windyland --render-demo <dir>`: the scripted demo for the README video.
+/// `nookly --render-demo <dir>`: the scripted demo for the README video.
 /// Drives the real UI (hover, clicks, tabs, toasts, settings) on a virtual
 /// 30 fps clock with a scripted cursor, and writes every frame as a raw
 /// 2x canvas plus `demo.log` (cursor position, clicks and scene markers)
@@ -6990,7 +6990,7 @@ pub fn render_demo(dir: &std::path::Path) -> String {
         }
 
         d.scene("outro");
-        d.sub("github.com/shabab239/WindyLand");
+        d.sub("github.com/banulalakwindu/Nookly");
         d.move_to(CANVAS_W * 0.9, CANVAS_H + 60.0, 0.8);
         d.wait(3.2);
         d.log += &format!("end {}\n", d.n);
@@ -7041,14 +7041,14 @@ fn settings_tip(id: u32) -> &'static str {
         91 => "Notifications, mic dots and clipboard",
         92 => "Switch features on or off; presets and shortcuts",
         93 => "Theme and seconds on the clock",
-        S_STARTUP => "Start WindyLand when you sign in to Windows",
+        S_STARTUP => "Start Nookly when you sign in to Windows",
         S_VOLUME => "Show a bar when you change the volume",
         S_UPDATE_AUTO => "Look for new versions twice a day",
         S_UPDATES => "Look for a new version now",
         S_DATA => "Open the folder where your data is kept",
         S_GITHUB => "Source code, releases and issues",
-        S_POLICY => "What WindyLand keeps and reads",
-        S_QUIT => "Close WindyLand (start it again from the Start menu)",
+        S_POLICY => "What Nookly keeps and reads",
+        S_QUIT => "Close Nookly (start it again from the Start menu)",
         S_NOTIF_ON => "Show other apps' Windows notifications in the notch",
         S_NOTIF_TEXT => "Off: only the app name shows",
         S_NOTIF_BANNERS => "Windows' own notification settings",
@@ -7101,7 +7101,7 @@ enum ShownItem {
     W(Widget, usize),
 }
 
-/// WindyLand's own order (Custom order off): what is switched on and
+/// Nookly's own order (Custom order off): what is switched on and
 /// running, most urgent first, then the widgets two per row in the order
 /// they were switched on.
 pub(crate) fn auto_rows(l: &NotchLayout, live: &[(&'static str, usize, Option<u8>)]) -> Vec<NotchRow> {
@@ -7256,7 +7256,7 @@ fn widget_tests(a: &mut App) -> String {
         out += &format!("INFO Wi-Fi now: {wifi:?}\n");
         let w: Vec<String> = cat.iter().filter(|c| ["wifi", "volume", "mic"].contains(&c.id.as_str())).map(|c| format!("{} {}", c.id, c.detail)).collect();
         out += &format!("INFO sound and Wi-Fi widgets: {w:?}\n");
-        if std::env::var("WINDYLAND_SELFTEST_ONLINE").is_ok() {
+        if std::env::var("NOOKLY_SELFTEST_ONLINE").is_ok() {
             let (lat, lon, place) = crate::modules::prayer::location();
             let r = crate::http::get("api.open-meteo.com", &wg::weather_path(lat, lon, false));
             let got = r.filter(|r| r.status == 200).and_then(|r| wg::parse_weather(&String::from_utf8_lossy(&r.body)));
@@ -7380,8 +7380,8 @@ fn feature_tests(a: &mut App) -> String {
     let text = bundle();
     let files = unbundle(&text);
     let round = files.as_ref().map_or(false, |f| f.iter().any(|(n, b)| n == "settings.txt" && b.contains("hotkey_clip=6:86")));
-    let junk = unbundle("hello\nworld").is_none() && unbundle("WindyLand settings export 1\n=== WindyLand file: ../evil.txt ===\nx\n").is_none();
-    out += &format!("{:<4} export holds the data files; import takes only WindyLand's own files\n", ok(round && junk));
+    let junk = unbundle("hello\nworld").is_none() && unbundle("Nookly settings export 1\n=== Nookly file: ../evil.txt ===\nx\n").is_none();
+    out += &format!("{:<4} export holds the data files; import takes only Nookly's own files\n", ok(round && junk));
     a.import_pending = files;
     a.settings_page = 0;
     draw(a);
@@ -8044,7 +8044,7 @@ fn run_deferred(list: Vec<Deferred>) {
                                 a.settings_page = 0;
                                 a.open_settings();
                             }
-                            None => a.push_toast(Toast::new("import", glyph::SETTINGS, col::RED, "Not a WindyLand settings file", "Pick a file saved with Export").secs(5.0)),
+                            None => a.push_toast(Toast::new("import", glyph::SETTINGS, col::RED, "Not a Nookly settings file", "Pick a file saved with Export").secs(5.0)),
                         }
                         a.request_frame();
                     });

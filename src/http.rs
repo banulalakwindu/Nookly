@@ -36,7 +36,7 @@ pub fn get_no_redirect(host: &str, path: &str) -> Option<Response> {
 fn request(host: &str, path: &str, follow: bool) -> Option<Response> {
     unsafe {
         let session = H(WinHttpOpen(
-            w!("WindyLand/0.1 (https://github.com/shabab239/WindyLand)"),
+            w!("Nookly/0.1 (https://github.com/banulalakwindu/Nookly)"),
             WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
             PCWSTR::null(),
             PCWSTR::null(),

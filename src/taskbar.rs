@@ -176,7 +176,7 @@ impl Pet {
                     cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
                     lpfnWndProc: Some(pet_proc),
                     hInstance: hinst.into(),
-                    lpszClassName: w!("WindyLandTaskbarPet"),
+                    lpszClassName: w!("NooklyTaskbarPet"),
                     hCursor: LoadCursorW(None, IDC_HAND).unwrap_or_default(),
                     ..Default::default()
                 };
@@ -184,8 +184,8 @@ impl Pet {
             });
             let hwnd = CreateWindowExW(
                 WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-                w!("WindyLandTaskbarPet"),
-                w!("WindyLand mascot"),
+                w!("NooklyTaskbarPet"),
+                w!("Nookly mascot"),
                 WS_POPUP,
                 0,
                 0,

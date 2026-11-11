@@ -1,6 +1,6 @@
 # Release build: compile, stamp the exe icon and version info, run the
 # self-test, build the installer.
-#   .\build.ps1                      -> dist\WindyLandSetup-<version>.exe
+#   .\build.ps1                      -> dist\NooklySetup-<version>.exe
 #   .\build.ps1 -OutDir $HOME\Desktop
 # GitHub Actions (release.yml) builds in two halves (a step can go between
 # them, e.g. signing the exe before it goes into the installer):
@@ -16,14 +16,14 @@ $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
 $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
-Write-Host "WindyLand $version"
+Write-Host "Nookly $version"
 
-$exe = "$PSScriptRoot\target\release\windyland.exe"
+$exe = "$PSScriptRoot\target\release\nookly.exe"
 if (-not $InstallerOnly) {
 cargo build --release
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 
-# Embed assets\windyland.ico as the exe icon (works without windres/rc.exe).
+# Embed assets\nookly.ico as the exe icon (works without windres/rc.exe).
 Add-Type -TypeDefinition @"
 using System; using System.IO; using System.Runtime.InteropServices;
 public static class IconStamp {
@@ -49,7 +49,7 @@ public static class IconStamp {
   }
 }
 "@
-[IconStamp]::Apply($exe, "$PSScriptRoot\assets\windyland.ico")
+[IconStamp]::Apply($exe, "$PSScriptRoot\assets\nookly.ico")
 Write-Host "Icon embedded"
 
 # Version info (product name and version, shown in the file's Properties):
@@ -94,30 +94,30 @@ public static class VersionStamp {
 }
 "@
 $strings = New-Object 'System.Collections.Generic.Dictionary[string,string]'
-$strings['CompanyName'] = 'Shabab'
-$strings['FileDescription'] = 'WindyLand'
+$strings['CompanyName'] = 'Banula Lakwindu'
+$strings['FileDescription'] = 'Nookly'
 $strings['FileVersion'] = $version
-$strings['InternalName'] = 'windyland'
-$strings['LegalCopyright'] = 'Copyright (C) 2026 Shabab. MIT License.'
-$strings['OriginalFilename'] = 'windyland.exe'
-$strings['ProductName'] = 'WindyLand'
+$strings['InternalName'] = 'nookly'
+$strings['LegalCopyright'] = 'Copyright (C) 2026 Banula Lakwindu; based on WindyLand, (C) 2026 Shabab. MIT License.'
+$strings['OriginalFilename'] = 'nookly.exe'
+$strings['ProductName'] = 'Nookly'
 $strings['ProductVersion'] = $version
 [VersionStamp]::Apply($exe, $version, $strings)
 $vi = (Get-Item $exe).VersionInfo
-if ($vi.ProductName -ne 'WindyLand' -or $vi.ProductVersion -ne $version) { throw "version info not readable" }
+if ($vi.ProductName -ne 'Nookly' -or $vi.ProductVersion -ne $version) { throw "version info not readable" }
 Write-Host "Version info embedded ($($vi.ProductName) $($vi.ProductVersion))"
 
 }
 
 # Self-test in a scratch data folder.
 if (-not $NoSelfTest -and -not $InstallerOnly) {
-$tmp = Join-Path $env:TEMP "windyland-selftest"
+$tmp = Join-Path $env:TEMP "nookly-selftest"
 Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $tmp | Out-Null
-$env:WINDYLAND_DATA_DIR = $tmp
-$env:WINDYLAND_SELFTEST_OUT = "$tmp\report.txt"
+$env:NOOKLY_DATA_DIR = $tmp
+$env:NOOKLY_SELFTEST_OUT = "$tmp\report.txt"
 Start-Process $exe -ArgumentList '--selftest' -Wait
-Remove-Item Env:WINDYLAND_DATA_DIR, Env:WINDYLAND_SELFTEST_OUT
+Remove-Item Env:NOOKLY_DATA_DIR, Env:NOOKLY_SELFTEST_OUT
 $report = Get-Content "$tmp\report.txt"
 $fails = @($report | Where-Object { $_ -like 'FAIL*' })
 $oks = @($report | Where-Object { $_ -like 'OK*' })
@@ -136,6 +136,6 @@ $iscc = @(
 if (-not $iscc) { throw "Inno Setup 6 (ISCC.exe) not found. Install it or set `$env:ISCC." }
 
 New-Item -ItemType Directory $OutDir -Force | Out-Null
-& $iscc "/DAppVersion=$version" "/DOutDir=$OutDir" "$PSScriptRoot\installer\windyland.iss"
+& $iscc "/DAppVersion=$version" "/DOutDir=$OutDir" "$PSScriptRoot\installer\nookly.iss"
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
-Write-Host "Installer: $OutDir\WindyLandSetup-$version.exe"
+Write-Host "Installer: $OutDir\NooklySetup-$version.exe"

@@ -771,7 +771,7 @@ pub mod picker {
                 let wc = WNDCLASSW {
                     lpfnWndProc: Some(proc),
                     hInstance: hinst.into(),
-                    lpszClassName: w!("WindyLandColorPicker"),
+                    lpszClassName: w!("NooklyColorPicker"),
                     hCursor: LoadCursorW(None, IDC_CROSS).unwrap_or_default(),
                     ..Default::default()
                 };
@@ -779,8 +779,8 @@ pub mod picker {
             });
             let Ok(hwnd) = CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-                w!("WindyLandColorPicker"),
-                w!("WindyLand color picker"),
+                w!("NooklyColorPicker"),
+                w!("Nookly color picker"),
                 WS_POPUP,
                 snap.x,
                 snap.y,

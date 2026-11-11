@@ -1,8 +1,13 @@
-<p align="center"><img src="docs/images/hero.png" alt="WindyLand" width="100%"></p>
+<p align="center"><img src="docs/images/hero.png" alt="Nookly" width="100%"></p>
 
-<p align="center"><a href="https://shabab239.github.io/WindyLand/"><b>Download for Windows</b></a> · <a href="https://shabab239.github.io/WindyLand/">Website</a> · <a href="docs/USER_GUIDE.md">User guide</a></p>
+<p align="center"><a href="https://banulalakwindu.github.io/Nookly/"><b>Download for Windows</b></a> · <a href="https://banulalakwindu.github.io/Nookly/">Website</a> · <a href="docs/USER_GUIDE.md">User guide</a></p>
 
-# WindyLand
+# Nookly
+
+> Nookly is based on [WindyLand](https://github.com/shabab239/WindyLand) by
+> Shabab, used under the MIT License. It has since grown its own features
+> (Widgets, smart hide, Calendar, themes, the Features page and more) and is
+> developed separately. It stays free and open source under the same license.
 
 A living notch for Windows 10 and 11, like the Dynamic Island. Music with
 synced lyrics, your Windows notifications, a timer, Pomodoro, to-do
@@ -62,9 +67,9 @@ on. See the [privacy policy](PRIVACY.md).
 
 ## Install
 
-Download `WindyLandSetup-<version>.exe` from the
-[website](https://shabab239.github.io/WindyLand/) or
-[Releases](https://github.com/shabab239/WindyLand/releases) and run it. It
+Download `NooklySetup-<version>.exe` from the
+[website](https://banulalakwindu.github.io/Nookly/) or
+[Releases](https://github.com/banulalakwindu/Nookly/releases) and run it. It
 installs per user, no admin rights needed. A short welcome tour lets you pick
 the look, and later versions install with one click from the notch.
 
@@ -84,14 +89,24 @@ blue "Windows protected your PC" screen is different: click **More info** >
 Needs Rust (stable, GNU or MSVC toolchain).
 
 ```powershell
-cargo build --release                       # target\release\windyland.exe
-.\target\release\windyland.exe --selftest   # headless checks
+cargo build --release                       # target\release\nookly.exe
+.\target\release\nookly.exe --selftest   # headless checks
 .\build.ps1                                 # build + icon + self-test + installer (Inno Setup 6)
 python docs\tools\make_images.py shots      # regenerate the screenshots (Pillow, numpy)
 ```
 
-Releases are built by GitHub Actions from the version tag
-(`.github/workflows/release.yml`).
+### Releases and the website
+
+- **Website**: `docs/` is the site at
+  [banulalakwindu.github.io/Nookly](https://banulalakwindu.github.io/Nookly/).
+  It goes live by itself after every push to `main` that touches `docs/`
+  (`.github/workflows/pages.yml`).
+- **Releases**: after a batch of good changes, raise `version` in
+  `Cargo.toml` and add a `## <version>` section to `CHANGELOG.md`, then push
+  to `main`. GitHub Actions builds the installer from the source, tags
+  `v<version>` and publishes the release with that section as its notes
+  (`.github/workflows/release.yml`). Pushes that don't change the version
+  release nothing. The in-app update check then offers it to everyone.
 
 ## Adding a feature
 
@@ -102,9 +117,10 @@ function.
 
 ## Credits
 
-WindyLand was inspired by [Nusa](https://rama2555.github.io/nusa/), a
-living notch for Windows by rama2555. WindyLand is written from scratch and shares no
-code with Nusa.
+Nookly is based on [WindyLand](https://github.com/shabab239/WindyLand) by
+Shabab (MIT License), and keeps its copyright notice in [LICENSE](LICENSE).
+WindyLand was inspired by [Nusa](https://rama2555.github.io/nusa/), a living
+notch for Windows by rama2555, and shares no code with it.
 
 ## License
 

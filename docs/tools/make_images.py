@@ -1,14 +1,14 @@
-"""Build WindyLand's README media: the demo video/GIF and the screenshots.
+"""Build Nookly's README media: the demo video/GIF and the screenshots.
 
     python docs/tools/make_images.py          # everything
     python docs/tools/make_images.py demo     # only the demo video + GIF
     python docs/tools/make_images.py shots    # only the screenshots
 
 Needs: a release build (cargo build --release), Python 3 with Pillow and
-numpy, and ffmpeg on PATH. Nothing here touches your real WindyLand data:
+numpy, and ffmpeg on PATH. Nothing here touches your real Nookly data:
 the app runs against a throwaway data folder seeded with made-up content.
 
-How it works: `windyland --render-demo DIR` plays a scripted session (a
+How it works: `nookly --render-demo DIR` plays a scripted session (a
 virtual 30 fps clock and a scripted cursor driving the real UI) and writes
 every frame of the 780x360 canvas at 2x as raw premultiplied BGRA, plus
 demo.log with cursor positions, clicks and caption markers. This script puts
@@ -31,9 +31,9 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-EXE = ROOT / "target" / "release" / "windyland.exe"
+EXE = ROOT / "target" / "release" / "nookly.exe"
 IMAGES = ROOT / "docs" / "images"
-WORK = Path(tempfile.gettempdir()) / "windyland-media"
+WORK = Path(tempfile.gettempdir()) / "nookly-media"
 FONTS = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
 
 BG = (18, 20, 25)
@@ -128,7 +128,7 @@ def album_art(path: Path, n=480):
 
 
 def run(args, data: Path):
-    env = dict(os.environ, WINDYLAND_DATA_DIR=str(data), WINDYLAND_DEMO_ART=str(data / "art.png"))
+    env = dict(os.environ, NOOKLY_DATA_DIR=str(data), NOOKLY_DEMO_ART=str(data / "art.png"))
     subprocess.run([str(EXE), *args], env=env, check=True, timeout=1800)
 
 
@@ -214,14 +214,14 @@ def ease(p):
 # ------------------------------------------------------------------ demo
 
 STEPS = {
-    "intro": ("", "WindyLand"),
+    "intro": ("", "Nookly"),
     "tour": ("01 · WELCOME TOUR", "Learn it in a minute"),
     "styles": ("02 · NOTCH STYLES", "Five looks, one notch"),
     "open": ("03 · HOVER TO OPEN", "Your music, right there"),
     "tabs": ("04 · CLICK OR SCROLL", "Everything in one place"),
     "alerts": ("05 · ALERTS", "Alerts that feel native"),
     "settings": ("06 · SETTINGS", "Make it yours"),
-    "outro": ("FREE AND OPEN SOURCE", "Get WindyLand"),
+    "outro": ("FREE AND OPEN SOURCE", "Get Nookly"),
 }
 
 
@@ -270,7 +270,7 @@ def caption(im, n, scenes, subs, end, area):
         spaced = " ".join(label)
         d.text((cx, y0 + 22 + dy), spaced, font=f, fill=ACCENT + (int(255 * a),), anchor="mm")
     if name == "intro":
-        logo = Image.open(ROOT / "assets" / "windyland.png").convert("RGBA").resize((92, 92), Image.LANCZOS)
+        logo = Image.open(ROOT / "assets" / "nookly.png").convert("RGBA").resize((92, 92), Image.LANCZOS)
         f = font(88, "bold")
         tw = d.textlength(title, font=f)
         lx = int(cx - (tw + 112) / 2)

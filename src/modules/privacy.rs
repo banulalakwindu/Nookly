@@ -138,7 +138,7 @@ impl Module for Privacy {
             self.cam.clear();
             return;
         }
-        // Announce what started (not on WindyLand's own start-up).
+        // Announce what started (not on Nookly's own start-up).
         if self.started {
             let new_mic: Vec<String> = mic.iter().filter(|a| !self.mic.contains(a)).cloned().collect();
             let new_cam: Vec<String> = cam.iter().filter(|a| !self.cam.contains(a)).cloned().collect();

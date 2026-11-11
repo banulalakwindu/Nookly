@@ -149,7 +149,7 @@ pub struct Clipboard {
 }
 
 impl Clipboard {
-    /// Keep track of the app in front (not WindyLand), where a paste goes.
+    /// Keep track of the app in front (not Nookly), where a paste goes.
     fn note_target(&mut self) {
         let fg = unsafe { GetForegroundWindow() };
         if paste_target_ok(fg, HWND(self.own as *mut _)) {
@@ -764,7 +764,7 @@ impl Module for Clipboard {
             A_DEMO_DOCS => {
                 let logo = crate::store::dir().join("Demo files").join("Logo final.png");
                 self.add(Content::Files(vec![logo.display().to_string()]));
-                for s in ["SELECT name, total FROM orders WHERE status = 'paid';", "Meeting moved to 4:30 pm, same room", "https://github.com/shabab239/WindyLand"] {
+                for s in ["SELECT name, total FROM orders WHERE status = 'paid';", "Meeting moved to 4:30 pm, same room", "https://github.com/banulalakwindu/Nookly"] {
                     self.add(Content::Text(s.into()));
                 }
             }
@@ -882,7 +882,7 @@ fn spawn_listener(incoming: Arc<Mutex<Vec<Incoming>>>, on: Arc<AtomicBool>, show
     }
     std::thread::spawn(|| unsafe {
         let Ok(hinst) = GetModuleHandleW(None) else { return };
-        let class = w!("WindyLandClipboard");
+        let class = w!("NooklyClipboard");
         let wc = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             lpfnWndProc: Some(listener_proc),
@@ -909,7 +909,7 @@ extern "system" fn listener_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
     if msg == WM_CLIPBOARDUPDATE {
         if let Some(st) = LISTENER.get() {
             let record = st.on.load(Ordering::Relaxed);
-            // WindyLand's own copies (a history entry, a colour, a
+            // Nookly's own copies (a history entry, a colour, a
             // screenshot) aren't news: no toast for those.
             let show = st.show.load(Ordering::Relaxed) && !copied_by_us();
             let mode = st.mode.load(Ordering::Relaxed);
@@ -1059,7 +1059,7 @@ pub enum Paste {
     /// That app runs as administrator; Windows doesn't let a normal app type
     /// into it, so it's only copied.
     Elevated,
-    /// No app to paste into (only the taskbar or WindyLand was in front).
+    /// No app to paste into (only the taskbar or Nookly was in front).
     NoTarget,
 }
 
@@ -1076,7 +1076,7 @@ fn class_of(h: HWND) -> String {
 }
 
 /// A window we can paste into: a real, visible top-level app window that
-/// isn't WindyLand or the taskbar.
+/// isn't Nookly or the taskbar.
 pub fn paste_target_ok(h: HWND, own: HWND) -> bool {
     if h.0.is_null() || h == own || !unsafe { IsWindow(h) }.as_bool() {
         return false;

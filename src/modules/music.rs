@@ -858,9 +858,9 @@ impl Module for Music {
     }
 }
 
-/// Made-up track used by `--render-docs` (art from WINDYLAND_DEMO_ART).
+/// Made-up track used by `--render-docs` (art from NOOKLY_DEMO_ART).
 fn demo_media() -> MediaInfo {
-    let art = std::env::var("WINDYLAND_DEMO_ART")
+    let art = std::env::var("NOOKLY_DEMO_ART")
         .ok()
         .and_then(|p| std::fs::read(p).ok())
         .and_then(|b| unsafe { decode_square(&b, 160) })

@@ -1287,7 +1287,7 @@ impl Module for Widgets {
             A_ALERTS => "How each alert shows: off, small inside the notch, or a pop-up",
             A_PLACE => "Where you are, for the weather (and prayer times if you like)",
             A_SMART => "Skip a widget with nothing worth showing (battery on the charger, good Wi-Fi)",
-            A_CUSTOM => "Off: WindyLand orders things for you. On: arrange them yourself on the Order page",
+            A_CUSTOM => "Off: Nookly orders things for you. On: arrange them yourself on the Order page",
             A_RESET => "Back to the default items and order (asks first)",
             A_ALERT_RESET => "Every alert back to a pop-up (asks first)",
             A_PLACE_PRAYER => "Prayer times use this place instead of their own city",
@@ -1303,7 +1303,7 @@ impl Module for Widgets {
             i if (A_WHEN_L..A_WHEN_L + 1000).contains(&i) => "When to show it: always, only when it matters, or for a few seconds when it changes",
             i if (A_X_L..A_X_L + 1000).contains(&i) => "Remove it from the notch",
             i if (A_ALERT..A_ALERT + 100).contains(&i) => "Off, small inside the closed notch, or the pop-up card",
-            i if (A_PLACE_MODE..A_PLACE_MODE + 3).contains(&i) => "How WindyLand knows where you are",
+            i if (A_PLACE_MODE..A_PLACE_MODE + 3).contains(&i) => "How Nookly knows where you are",
             i if (A_PLACE_RESULT..A_PLACE_RESULT + 10).contains(&i) => "Use this place",
             _ => "",
         }

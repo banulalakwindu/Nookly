@@ -3,7 +3,7 @@
 //! allows 60 requests an hour per internet address, and many ISPs share one
 //! address between lots of customers) the normal release pages. If it's newer, it shows a toast with
 //! Update / Later / Skip. "Update" downloads the installer, runs it silently
-//! and quits; the installer upgrades in place and starts WindyLand again.
+//! and quits; the installer upgrades in place and starts Nookly again.
 
 use std::sync::{Arc, Mutex};
 
@@ -18,7 +18,7 @@ use crate::http;
 use crate::modules::{Ctx, Module, Rel, Toast};
 use crate::time::unix_now;
 
-pub const REPO: &str = "shabab239/WindyLand";
+pub const REPO: &str = "banulalakwindu/Nookly";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Action ids. `A_CHECK_NOW` is also sent by the tray menu.
@@ -90,7 +90,7 @@ pub fn parse_release(body: &[u8]) -> Option<Release> {
     let installer = v.get("assets").and_then(|a| a.as_array()).and_then(|assets| {
         assets.iter().find_map(|a| {
             let name = a.get("name")?.as_str()?.to_lowercase();
-            if name.starts_with("windylandsetup") && name.ends_with(".exe") {
+            if name.starts_with("nooklysetup") && name.ends_with(".exe") {
                 Some(Installer {
                     url: a.get("browser_download_url")?.as_str()?.to_string(),
                     size: a.get("size").and_then(|s| s.as_u64()),
@@ -147,7 +147,7 @@ pub fn parse_assets_html(html: &str, tag: &str) -> Option<Installer> {
         let end = after.find('"')?;
         let path = &after[..end];
         let name = path.rsplit('/').next().unwrap_or("").to_lowercase();
-        if name.starts_with("windylandsetup") && name.ends_with(".exe") {
+        if name.starts_with("nooklysetup") && name.ends_with(".exe") {
             // The digest sits in the same row, before the next file's link.
             let row = &after[end..];
             let row = &row[..row[1..].find(&prefix).map_or(row.len(), |n| n + 1)];
@@ -188,7 +188,7 @@ pub fn download_installer(rel: &Release) -> std::result::Result<std::path::PathB
         (None, None) if r.body.len() < 500_000 => return Err("download incomplete".into()),
         _ => {}
     }
-    let p = std::env::temp_dir().join(format!("WindyLandSetup-{}.exe", rel.version));
+    let p = std::env::temp_dir().join(format!("NooklySetup-{}.exe", rel.version));
     std::fs::write(&p, &r.body).map_err(|e| e.to_string())?;
     Ok(p)
 }
@@ -306,7 +306,7 @@ impl Module for Updater {
                 let fresh = self.shown.as_deref() != Some(rel.version.as_str());
                 if manual || (rel.version != self.skip && fresh) {
                     self.shown = Some(rel.version.clone());
-                    let mut t = Toast::new("update", "\u{E895}", col::GREEN, "Update available", format!("WindyLand {} is out (you have {VERSION})", rel.version))
+                    let mut t = Toast::new("update", "\u{E895}", col::GREEN, "Update available", format!("Nookly {} is out (you have {VERSION})", rel.version))
                         .secs(30.0);
                     t = if rel.installer.is_some() { t.action("Update", A_UPDATE) } else { t.action("Open page", A_OPEN_PAGE) };
                     ctx.toast(t.action("Later", A_LATER).action("Skip", A_SKIP));
@@ -315,7 +315,7 @@ impl Module for Updater {
             }
             State::UpToDate { manual: true } => {
                 *self.state.lock().unwrap() = State::Idle;
-                ctx.toast(Toast::new("update", glyph::CHECK, col::GREEN, "You're up to date", format!("WindyLand {VERSION} is the latest")));
+                ctx.toast(Toast::new("update", glyph::CHECK, col::GREEN, "You're up to date", format!("Nookly {VERSION} is the latest")));
             }
             State::Failed { manual, why } => {
                 *self.state.lock().unwrap() = State::Idle;
@@ -360,7 +360,7 @@ impl Module for Updater {
             A_CHECK_NOW => self.check(true),
             A_UPDATE => {
                 if let Some(rel) = offered {
-                    ctx.toast(Toast::new("update", "\u{E896}", col::GREEN, "Downloading update", format!("WindyLand {}", rel.version)).secs(60.0));
+                    ctx.toast(Toast::new("update", "\u{E896}", col::GREEN, "Downloading update", format!("Nookly {}", rel.version)).secs(60.0));
                     self.download(rel);
                 }
             }

@@ -1,4 +1,4 @@
-//! Plain-text persistence in %APPDATA%\WindyLand\.
+//! Plain-text persistence in %APPDATA%\Nookly\.
 //!
 //! Each feature owns one small text file (settings.txt, todo.txt, water.txt,
 //! shelf.txt). Files are written atomically (temp file + rename).
@@ -8,13 +8,38 @@ use std::fs;
 use std::path::PathBuf;
 
 pub fn dir() -> PathBuf {
-    // WINDYLAND_DATA_DIR overrides the location (used by `windyland --selftest`).
-    let p = match std::env::var("WINDYLAND_DATA_DIR") {
+    // NOOKLY_DATA_DIR overrides the location (used by `nookly --selftest`).
+    let p = match std::env::var("NOOKLY_DATA_DIR") {
         Ok(d) if !d.is_empty() => PathBuf::from(d),
-        _ => PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("WindyLand"),
+        _ => {
+            let appdata = PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into()));
+            let p = appdata.join("Nookly");
+            if !p.exists() {
+                copy_from_windyland(&appdata.join("WindyLand"), &p);
+            }
+            p
+        }
     };
     let _ = fs::create_dir_all(&p);
     p
+}
+
+/// First start of Nookly on a PC that had WindyLand (the project Nookly is
+/// based on): copy its settings and data over. WindyLand's folder stays as
+/// it is.
+fn copy_from_windyland(old: &std::path::Path, new: &std::path::Path) {
+    let Ok(list) = fs::read_dir(old) else { return };
+    if fs::create_dir_all(new).is_err() {
+        return;
+    }
+    for e in list.flatten() {
+        let path = e.path();
+        let name = e.file_name().to_string_lossy().to_lowercase();
+        // Plain data files only (not logs or temp files).
+        if path.is_file() && name.ends_with(".txt") && name != "debug.log" {
+            let _ = fs::copy(&path, new.join(e.file_name()));
+        }
+    }
 }
 
 pub fn read(name: &str) -> String {
@@ -420,7 +445,7 @@ pub const ALERTS: [(&str, &str); 8] = [
 ];
 
 /// What the closed notch shows. Simple: `picked` is what is switched on and
-/// WindyLand orders it. Custom (`custom`): `rows` is the order, top first;
+/// Nookly orders it. Custom (`custom`): `rows` is the order, top first;
 /// the first row with something to show wins, and a one-side row with an
 /// empty (or idle) side borrows the next one-side item below.
 #[derive(Clone, Debug, PartialEq)]

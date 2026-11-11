@@ -102,7 +102,7 @@ pub fn start(app: HWND) -> bool {
             let wc = WNDCLASSW {
                 lpfnWndProc: Some(proc),
                 hInstance: hinst.into(),
-                lpszClassName: w!("WindyLandScreenshot"),
+                lpszClassName: w!("NooklyScreenshot"),
                 hCursor: LoadCursorW(None, IDC_CROSS).unwrap_or_default(),
                 ..Default::default()
             };
@@ -123,7 +123,7 @@ pub fn start(app: HWND) -> bool {
         bi.bmiHeader = BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: snap.w, biHeight: -snap.h, biPlanes: 1, biBitCount: 32, ..Default::default() };
         SetDIBits(dim, dim_bmp, 0, snap.h as u32, px.as_ptr() as *const _, &bi, DIB_RGB_COLORS);
         let dim_old = SelectObject(dim, dim_bmp);
-        let Ok(hwnd) = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, w!("WindyLandScreenshot"), w!("WindyLand screenshot"), WS_POPUP, snap.x, snap.y, snap.w, snap.h, None, None, hinst, None) else {
+        let Ok(hwnd) = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, w!("NooklyScreenshot"), w!("Nookly screenshot"), WS_POPUP, snap.x, snap.y, snap.w, snap.h, None, None, hinst, None) else {
             SelectObject(dim, dim_old);
             let _ = DeleteObject(dim_bmp);
             let _ = DeleteDC(dim);
@@ -314,7 +314,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
 /// Pictures\Screenshots (where Windows keeps its own), or the data folder
 /// while testing.
 pub fn folder() -> PathBuf {
-    if std::env::var("WINDYLAND_DATA_DIR").is_ok() {
+    if std::env::var("NOOKLY_DATA_DIR").is_ok() {
         return crate::store::dir().join("Screenshots");
     }
     use windows::Win32::UI::Shell::*;

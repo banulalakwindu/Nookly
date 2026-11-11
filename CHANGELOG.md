@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+Nookly continues [WindyLand](https://github.com/shabab239/WindyLand) by Shabab
+(MIT License). Versions up to 0.1.21 below are WindyLand's own releases.
+
+## 0.2.0: first Nookly release
+
+- **New name, Nookly**, with its own logo, installer, data folder (`%APPDATA%\Nookly`) and update channel. On first start, settings and data from `%APPDATA%\WindyLand` are copied over, so nothing is lost; WindyLand itself is left untouched.
 
 - **Settings > Features** (was Panels): every feature on one page, in four groups (Everyday, Focus & health, Work & tools, System), each with a switch; resting the mouse on one says what it does. A feature that's off has no tab, no reminders and does no work in the background (its panel isn't ticked; clipboard history stops listening).
   - **Presets**: Minimal (music, timer, to-do, calendar, widgets), Student, Work and Everything switch on exactly that set; change any of it after. A new install starts on Minimal, and the welcome tour has a step to pick one.

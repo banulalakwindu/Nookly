@@ -368,7 +368,7 @@ pub trait Module {
     }
     /// Set while files are being dragged over the notch.
     fn drag_hover(&mut self, on: bool) {}
-    /// One-line state summary printed by `windyland --selftest`.
+    /// One-line state summary printed by `nookly --selftest`.
     fn debug_state(&self) -> String {
         String::new()
     }

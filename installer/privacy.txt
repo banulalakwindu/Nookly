@@ -1,7 +1,7 @@
-WindyLand and your privacy
+Nookly and your privacy
 
-WindyLand runs on your PC and keeps your data there, in plain text files in
-%APPDATA%\WindyLand. It has no account, no telemetry, no ads and no
+Nookly runs on your PC and keeps your data there, in plain text files in
+%APPDATA%\Nookly. It has no account, no telemetry, no ads and no
 tracking.
 
 It goes online for only these things, and sends no personal information:
@@ -22,4 +22,4 @@ Windows notifications in the notch and clipboard history are off until you
 turn them on, and are read on your PC only.
 
 Full privacy policy:
-https://github.com/shabab239/WindyLand/blob/main/PRIVACY.md
+https://github.com/banulalakwindu/Nookly/blob/main/PRIVACY.md

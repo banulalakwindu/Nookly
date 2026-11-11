@@ -6,7 +6,7 @@ use windows::Win32::System::SystemInformation::{GetLocalTime, GetSystemTimeAsFil
 pub const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 pub const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/// Docs/demo mode (`windyland --render-docs`): fixed 16:20 clock, demo media.
+/// Docs/demo mode (`nookly --render-docs`): fixed 16:20 clock, demo media.
 pub static DEMO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn demo() -> bool {
