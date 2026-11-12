@@ -22,6 +22,7 @@ pub mod launcher;
 pub mod health;
 pub mod meetings;
 pub mod mirror;
+pub mod mixer;
 pub mod notes;
 pub mod toggles;
 pub mod clipboard;
@@ -41,6 +42,7 @@ pub mod tools;
 pub mod todo;
 pub mod update;
 pub mod water;
+pub mod weather;
 pub mod widgets;
 
 /// Every tab opens to this one panel size (content area, DIPs), so the tab
@@ -71,6 +73,8 @@ pub fn all(hwnd: HWND) -> Vec<Box<dyn Module>> {
         Box::new(mirror::Mirror::new()),
         Box::new(health::Health::load()),
         Box::new(commands::Commands::load()),
+        Box::new(weather::Weather::new()),
+        Box::new(mixer::Mixer::new()),
         Box::new(agents::Agents::new()),
         Box::new(monitor::Monitor::new()),
         Box::new(widgets::Widgets::new()),
@@ -293,6 +297,11 @@ pub trait Module {
     /// otherwise trims the panel. Views too dense to shrink return PANEL.
     fn slim_min(&self) -> (f32, f32) {
         (0.0, 0.0)
+    }
+    /// The panel is as tall as `size()` says, even below the usual height
+    /// (a short list shouldn't leave empty space).
+    fn fit_height(&self) -> bool {
+        false
     }
     /// Colour of this tab's highlight glow when you switch to it.
     fn accent(&self) -> Color {

@@ -1048,6 +1048,8 @@ impl Widgets {
         let cw = (list.w - ROW_GAP * (cols as f32 - 1.0)) / cols as f32;
         let mut y = list.y - self.scroll[0];
         let items = self.items.clone();
+        // Cards scroll under the switches above, never over them.
+        ui.push_clip(Rect::new(list.x - 2.0, list.y, list.w + 4.0, list.h + 2.0));
         for (g, title) in [(0u8, "Live activities: while they run"), (1, "System"), (2, "From your panels")] {
             let group: Vec<(usize, &CatalogItem)> = items.iter().enumerate().filter(|(_, it)| it.group == g).collect();
             if group.is_empty() {
@@ -1085,6 +1087,7 @@ impl Widgets {
             }
             y += ((group.len() + cols - 1) / cols) as f32 * (CARD_H + ROW_GAP) + 4.0;
         }
+        ui.pop_clip();
         let content = y + self.scroll[0] - list.y;
         self.max_scroll[0] = (content - list.h).max(0.0);
         self.scroll[0] = self.scroll[0].clamp(0.0, self.max_scroll[0]);

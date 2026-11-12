@@ -28,7 +28,7 @@ const fn f(key: &'static str, group: u8, what: &'static str) -> Feature {
     Feature { key, group, what }
 }
 
-pub const FEATURES: [Feature; 24] = [
+pub const FEATURES: [Feature; 26] = [
     f("Now Playing", 0, "Song, controls and lyrics; the album art shows on the notch while music plays."),
     f("Timer", 0, "Timer and stopwatch, with the countdown on the closed notch."),
     f("TodoList", 0, "Tasks with reminders and due times."),
@@ -36,6 +36,7 @@ pub const FEATURES: [Feature; 24] = [
     f("Notes", 0, "A scratchpad that saves as you type."),
     f("Countdowns", 0, "Exams, birthdays, Eid, salary day: \"12 days\" on the notch."),
     f("downloads", 0, "When a download finishes, the notch shows it; click to open it."),
+    f("Weather", 0, "Now, the hours around it and the week ahead for your place (goes online only while it's on)."),
     f("Shelf", 1, "Drop files on the notch to keep them close; screenshots land here too."),
     f("Clipboard", 1, "History of what you copy and snippets; click one to paste it."),
     f("Launcher", 1, "Pinned apps, folders and sites, one click away."),
@@ -43,6 +44,7 @@ pub const FEATURES: [Feature; 24] = [
     f("Mirror", 1, "A quick camera preview before a call. The camera is on only while it's open."),
     f("Toggles", 1, "Wi-Fi, Bluetooth, dark mode and microphone switches, plus Night light and hotspot."),
     f("Commands", 1, "Your own commands on a schedule, with what they print on the notch."),
+    f("Volume", 1, "The master volume and each app's own, with mute."),
     f("Pomodoro", 2, "Focus and break sessions, with the time left on the notch."),
     f("Water Reminder", 2, "Reminds you to drink and counts the glasses."),
     f("Prayer Times", 2, "Prayer times for your city, reminders, a countdown and Ramadan mode."),
@@ -85,7 +87,7 @@ pub const PRESETS: [(&str, &str, &[&str]); 4] = [
         "Every feature",
         &[
             "Now Playing", "Timer", "TodoList", "Calendar", "Notes", "Countdowns", "downloads", "Shelf", "Clipboard", "Launcher", "Tools", "Mirror", "Toggles", "Pomodoro", "Water Reminder",
-            "Prayer Times", "Health", "AI Agents", "meetings", "Widgets", "System Monitor", "dots",
+            "Prayer Times", "Health", "AI Agents", "meetings", "Widgets", "System Monitor", "dots", "Commands", "Weather", "Volume",
         ],
     ),
 ];

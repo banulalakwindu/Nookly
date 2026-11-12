@@ -370,7 +370,7 @@ Click a shortcut, then press the keys you want: it needs Ctrl, Alt or Win (or us
 
 ## Notes, countdowns, launcher and toggles
 
-- **Notes**: type anything; it's saved as you go. **Copy** copies it all. Give it a keyboard shortcut in Settings > Features > Keyboard & mouse shortcuts.
+- **Notes**: type anything; it's saved as you go. Click or drag to place the caret and select; arrows (with Shift to select, Ctrl to jump words), Home / End, Ctrl+A, Ctrl+C, Ctrl+X and Ctrl+V work as usual, and the wheel scrolls. **Copy** copies the selection, or the whole note. Give it a keyboard shortcut in Settings > Features > Keyboard & mouse shortcuts.
 - **Countdowns**: type a name, pick the date with the arrows (or roll the mouse wheel over the day, month or year) and click **Add**. **Every year** repeats it (birthdays, holidays); the **↻** button on a countdown switches that later. Switch on the **Countdown** widget in the Widgets tab for "12 days" on the closed notch.
 - **Launcher**: **Add apps...** opens a file picker in the Start menu folder (pick several at once), **Folder...** pins folders, or drag apps, folders or files onto the notch while the Launcher tab is open, or paste a link and press **Pin**. Click one to open it.
 - **Commands**: type a command, pick how often it runs (1 minute to daily) and click **Add**. Each shows the first line it printed and when; ▶ runs it now. Switch them on in the Widgets tab to see the output on the closed notch. They run with cmd.exe on your PC, only while the Commands panel is on.
@@ -383,6 +383,11 @@ In the **Calendar** tab, click the **link** button and paste your calendar's pri
 - **Outlook**: Settings > Calendar > Shared calendars > *Publish a calendar* > the ICS link.
 
 Your events then show in the month (a blue dot) and the day panel, with **Join** for Teams, Zoom and Meet links. 15 minutes before a meeting the closed notch shows "Standup in 8 min", and a minute before it drops down with **Join**. It refreshes every 15 minutes; **Remove** forgets the link.
+
+## Weather and Volume
+
+- **Weather** shows the weather now (temperature, feels like, humidity, wind), the hours around now with the rain chance ahead, and yesterday to six days ahead, for your place (Widgets > Place). It's read from Open-Meteo only while the panel is on: when you open it, then at most every 30 minutes. °C or °F follows Widgets > Place.
+- **Volume** lists the master volume and every app playing sound. Drag or click a slider to change it, click the speaker to mute.
 
 ## Health
 

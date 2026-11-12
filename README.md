@@ -31,8 +31,10 @@ Free, open source, private, and light enough that you'll forget it's running.</p
 | **Music** from any app, with synced lyrics, a draggable seek bar and an optional glow in the album's colour that moves with the beat | **Calendar** with your tasks, plus your Google or Outlook calendar (iCal link or `.ics` file): "Standup in 8 min" on the notch and a **Join** button |
 | <img src="docs/images/widgets.png" alt="Widgets"> | <img src="docs/images/health.png" alt="Health"> |
 | **Widgets** on the closed notch: battery, AirPods, weather, Wi-Fi, CPU, countdowns, your commands... in the order you like | **Health**: screen time today, eye breaks (20-20-20), stand-up reminders and battery care. Reminders wait during games and calls |
+| <img src="docs/images/weather.png" alt="Weather"> | <img src="docs/images/volume.png" alt="Volume mixer"> |
+| **Weather** now, hour by hour and for the week, with icons for every kind of weather | **Volume mixer**: the master volume and each app's own, with mute |
 | <img src="docs/images/countdowns.png" alt="Countdowns"> | <img src="docs/images/notes.png" alt="Notes"> |
-| **Countdowns** to exams, trips and birthdays, "12 days" on the notch | **Notes**: a scratchpad that saves as you type |
+| **Countdowns** to exams, trips and birthdays, "12 days" on the notch | **Notes**: a real little editor that saves as you type |
 | <img src="docs/images/launcher.png" alt="Launcher"> | <img src="docs/images/toggles.png" alt="Quick toggles"> |
 | **Launcher**: your apps, folders and sites, one click away | **Quick toggles**: Wi-Fi, Bluetooth, dark mode and mic mute |
 | <img src="docs/images/commands.png" alt="Commands"> | <img src="docs/images/agents.png" alt="AI agents"> |

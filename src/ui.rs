@@ -227,6 +227,7 @@ impl<'a> Ui<'a> {
     /// Draw a text box; clicking it sends `id`. A blinking caret shows while
     /// it has focus, the placeholder while it's empty.
     pub fn field(&mut self, r: Rect, f: &TextField, placeholder: &str, id: u32, accent: Color) {
+        text_area(r);
         let hov = self.hovered(r);
         self.fill_rr(r, 9.0, if f.focused { col::BTN_HOVER } else if hov { col::BTN_HOVER } else { col::BTN });
         if f.focused {
@@ -258,4 +259,23 @@ impl<'a> Ui<'a> {
         }
         self.hit(r, id);
     }
+}
+
+thread_local! {
+    /// Text boxes drawn this frame: the mouse shows the I-beam over them.
+    static TEXT_AREAS: std::cell::RefCell<Vec<Rect>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// This rect takes typing: show the text cursor over it.
+pub fn text_area(r: Rect) {
+    TEXT_AREAS.with(|t| t.borrow_mut().push(r));
+}
+
+/// A new frame starts: forget last frame's text boxes.
+pub fn clear_text_areas() {
+    TEXT_AREAS.with(|t| t.borrow_mut().clear());
+}
+
+pub fn over_text(x: f32, y: f32) -> bool {
+    TEXT_AREAS.with(|t| t.borrow().iter().any(|r| r.contains(x, y)))
 }

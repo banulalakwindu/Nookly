@@ -19,6 +19,9 @@ const A_RUN: u32 = 100; // + index
 const A_REMOVE: u32 = 120; // + index
 const A_LESS: u32 = 140; // + index
 const A_MORE: u32 = 160; // + index
+/// Click the time to type any number of minutes: + index (MAX: the new one).
+const A_EDIT: u32 = 180;
+const LONGEST: u32 = 7 * 1440;
 pub const MAX: usize = 5;
 /// The schedules to choose from, in minutes.
 const EVERY: [u32; 10] = [1, 2, 5, 10, 15, 30, 60, 120, 240, 1440];
@@ -39,7 +42,9 @@ fn every_text(m: u32) -> String {
     match m {
         m if m < 60 => format!("{m} min"),
         1440 => "Daily".into(),
-        m => format!("{} h", m / 60),
+        m if m % 1440 == 0 => format!("{} days", m / 1440),
+        m if m % 60 == 0 => format!("{} h", m / 60),
+        m => format!("{} h {} m", m / 60, m % 60),
     }
 }
 
@@ -83,15 +88,43 @@ pub struct Commands {
     list: Vec<Cmd>,
     field: TextField,
     new_every: u32,
+    /// Typing minutes for a command's schedule: which one (MAX: the new one).
+    editing: Option<usize>,
+    minutes: TextField,
 }
 
 impl Commands {
+    /// The schedule in the middle of the arrows: click to type minutes.
+    fn every_label(&self, ui: &mut Ui, r: Rect, which: usize, every: u32, size: f32) {
+        if self.editing == Some(which) {
+            let mut f = self.minutes.clone();
+            f.focused = true;
+            ui.field(r.inset_xy(0.0, 1.0), &f, "min", A_EDIT + which.min(MAX) as u32, C_CMD);
+        } else {
+            ui.text(&every_text(every), r, size, if which == MAX { col::TEXT } else { col::DIM }, Weight::Semi, Align::Center);
+            ui.hit(r, A_EDIT + which.min(MAX) as u32);
+        }
+    }
+    /// Apply the typed minutes.
+    fn commit_minutes(&mut self) {
+        if let (Some(w), Ok(m)) = (self.editing.take(), self.minutes.text.trim().parse::<u32>()) {
+            let m = m.clamp(1, LONGEST);
+            if w == MAX {
+                self.new_every = m;
+            } else if let Some(c) = self.list.get_mut(w) {
+                c.every = m;
+                self.save();
+            }
+        }
+        self.minutes.text.clear();
+        self.minutes.focused = false;
+    }
     pub fn load() -> Commands {
         if crate::time::demo() {
             let now = unix_now();
             let demo = [("curl -s wttr.in/Colombo?format=3", 15, "Colombo: ⛅ +29°C"), ("git -C C:\\code\\app status -sb", 5, "## main...origin/main [ahead 2]"), ("ping -n 1 1.1.1.1 | find \"time=\"", 1, "Reply from 1.1.1.1: time=14ms")];
             let list = demo.iter().map(|&(c, e, o)| Cmd { text: c.into(), every: e, out: Arc::new(Mutex::new((o.into(), now - 120.0, false))), last: now }).collect();
-            return Commands { list, field: TextField::new(400), new_every: 5 };
+            return Commands { list, field: TextField::new(400), new_every: 5, editing: None, minutes: TextField::new(5) };
         }
         let list = store::read("commands.txt")
             .lines()
@@ -101,7 +134,7 @@ impl Commands {
             })
             .take(MAX)
             .collect();
-        Commands { list, field: TextField::new(400), new_every: 5 }
+        Commands { list, field: TextField::new(400), new_every: 5, editing: None, minutes: TextField::new(5) }
     }
     fn save(&self) {
         let s: String = self.list.iter().map(|c| format!("{}|{}\n", c.every, store::esc(&c.text))).collect();
@@ -153,7 +186,7 @@ impl Module for Commands {
         ui.fill_rr(ev, 14.0, col::BTN);
         ui.icon_btn(ev.cut_left(24.0, 0.0), "\u{E76B}", A_NEW_LESS, 9.0, col::DIM, None, "Less often");
         ui.icon_btn(ev.cut_right(24.0, 0.0), "\u{E76C}", A_NEW_MORE, 9.0, col::DIM, None, "More often");
-        ui.text(&every_text(self.new_every), ev, 11.5, col::TEXT, Weight::Semi, Align::Center);
+        self.every_label(ui, ev, MAX, self.new_every, 11.5);
         ui.field(row, &self.field, if full { "That's 5: remove one to add another" } else { "A command, e.g. curl -s wttr.in/Colombo?format=3" }, A_FIELD, C_CMD);
         if self.list.is_empty() {
             ui.text_wrap(
@@ -176,7 +209,8 @@ impl Module for Commands {
             let mut ev = row.cut_right(84.0, 8.0).centered(84.0, 22.0);
             ui.icon_btn(ev.cut_left(20.0, 0.0), "\u{E76B}", A_LESS + k as u32, 8.0, col::DIM, None, "Less often");
             ui.icon_btn(ev.cut_right(20.0, 0.0), "\u{E76C}", A_MORE + k as u32, 8.0, col::DIM, None, "More often");
-            ui.text(&every_text(c.every), ev, 10.5, col::DIM, Weight::Semi, Align::Center);
+            let every = c.every;
+            self.every_label(ui, ev, k, every, 10.5);
             let name = row.cut_left(110.0, 8.0);
             ui.text(&c.text, name, 11.5, col::TEXT, Weight::Semi, Align::Left);
             let shown = if running { "Running...".to_string() } else if out.is_empty() { "-".into() } else { out };
@@ -188,8 +222,20 @@ impl Module for Commands {
     fn action(&mut self, id: u32, _rel: Rel, ctx: &mut Ctx) {
         match id {
             A_FIELD => {
+                self.commit_minutes();
                 self.field.focused = true;
                 ctx.want_keyboard(true);
+            }
+            i if (A_EDIT..=A_EDIT + MAX as u32).contains(&i) => {
+                let w = (i - A_EDIT) as usize;
+                if self.editing != Some(w) {
+                    self.commit_minutes();
+                    self.editing = Some(w);
+                    self.minutes.text.clear();
+                    self.minutes.focused = true;
+                    self.field.focused = false;
+                    ctx.want_keyboard(true);
+                }
             }
             A_ADD => self.add(),
             A_NEW_LESS => self.new_every = step(self.new_every, 1),
@@ -223,6 +269,20 @@ impl Module for Commands {
         }
     }
     fn key(&mut self, vk: u16, ctrl: bool, ctx: &mut Ctx) -> bool {
+        if self.editing.is_some() {
+            match vk {
+                0x0D => self.commit_minutes(),
+                0x1B => {
+                    self.editing = None;
+                    self.minutes.text.clear();
+                }
+                0x08 => {
+                    self.minutes.text.pop();
+                }
+                _ => return false,
+            }
+            return true;
+        }
         match self.field.key(vk, ctrl) {
             FieldKey::Submit => {
                 self.add();
@@ -238,9 +298,16 @@ impl Module for Commands {
         }
     }
     fn chr(&mut self, c: char, _ctx: &mut Ctx) -> bool {
+        if self.editing.is_some() {
+            if c.is_ascii_digit() && self.minutes.text.len() < 5 {
+                self.minutes.text.push(c);
+            }
+            return true;
+        }
         self.field.chr(c)
     }
     fn blur(&mut self) {
+        self.commit_minutes();
         self.field.focused = false;
     }
     fn widgets(&mut self) -> Vec<Widget> {
@@ -260,6 +327,7 @@ impl Module for Commands {
             A_FIELD => "The command to run with cmd.exe",
             A_ADD => "Add it (it runs once now)",
             A_NEW_LESS | A_NEW_MORE => "How often it runs",
+            i if (A_EDIT..=A_EDIT + MAX as u32).contains(&i) => "Click and type any number of minutes, then Enter",
             _ => "",
         }
     }

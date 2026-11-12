@@ -113,8 +113,25 @@ fn main() {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let _ = OleInitialize(None);
 
-        // Docs renders: demo data, fixed clock, no window shown.
         let args: Vec<String> = std::env::args().collect();
+        // `--probe-privacy <file> [camera]`: write what Windows reports as
+        // using the microphone and camera, every second for 8 seconds (to
+        // check the mic and camera dots); with `camera`, open the camera
+        // meanwhile.
+        if let Some(i) = args.iter().position(|a| a == "--probe-privacy") {
+            let out = args.get(i + 1).cloned().unwrap_or_else(|| "probe.txt".into());
+            let cam = args.iter().any(|a| a == "camera").then(|| modules::mirror::probe_camera(6.0));
+            let mut log = String::new();
+            for k in 0..8 {
+                let c = cam.as_ref().map(|(f, e)| (f.lock().unwrap().as_ref().map(|x| x.3), e.lock().unwrap().clone()));
+                log += &format!("{k}s mic={:?} camera={:?} frames/err={:?}
+", modules::privacy::in_use("microphone"), modules::privacy::in_use("webcam"), c);
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+            let _ = std::fs::write(out, log);
+            std::process::exit(0);
+        }
+        // Docs renders: demo data, fixed clock, no window shown.
         if args.iter().any(|a| a == "--selftest" || a == "--render-demo" || a == "--render-docs") {
             modules::agents::ISOLATED.store(true, std::sync::atomic::Ordering::Relaxed);
             // His screen may have a maximized window open: renders and tests

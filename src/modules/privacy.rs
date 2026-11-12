@@ -93,8 +93,67 @@ fn qword(path: &str, name: &str) -> Option<u64> {
     (r == ERROR_SUCCESS).then_some(v)
 }
 
+/// Apps recording from any microphone right now, from Windows' audio
+/// sessions (works on every Windows version; the registry records below
+/// stopped being written on newer builds).
+fn mic_sessions() -> Vec<String> {
+    use windows::core::Interface;
+    use windows::Win32::Media::Audio::*;
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+    let me = std::process::id();
+    let mut out = Vec::new();
+    unsafe {
+        let Ok(en) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) else { return out };
+        let Ok(devs) = en.EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE) else { return out };
+        for d in 0..devs.GetCount().unwrap_or(0) {
+            let Ok(dev) = devs.Item(d) else { continue };
+            let Ok(mgr) = dev.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else { continue };
+            let Ok(list) = mgr.GetSessionEnumerator() else { continue };
+            for i in 0..list.GetCount().unwrap_or(0) {
+                let Ok(ctl) = list.GetSession(i) else { continue };
+                if ctl.GetState().map_or(true, |s| s != AudioSessionStateActive) {
+                    continue;
+                }
+                let Ok(c2) = ctl.cast::<IAudioSessionControl2>() else { continue };
+                let pid = c2.GetProcessId().unwrap_or(0);
+                if pid == me || pid == 0 {
+                    continue;
+                }
+                out.push(exe_of(pid).map_or_else(|| "An app".to_string(), |n| crate::modules::health::friendly(&n)));
+            }
+        }
+    }
+    out
+}
+
+fn exe_of(pid: u32) -> Option<String> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
+    unsafe {
+        let p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buf = [0u16; 520];
+        let mut n = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(p, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut n).is_ok();
+        let _ = CloseHandle(p);
+        ok.then(|| String::from_utf16_lossy(&buf[..n as usize])).and_then(|s| std::path::Path::new(&s).file_stem().map(|x| x.to_string_lossy().into_owned()))
+    }
+}
+
 /// Apps currently using `cap` ("microphone" or "webcam").
 pub fn in_use(cap: &str) -> Vec<String> {
+    let mut names = in_use_registry(cap);
+    if cap == "microphone" {
+        names.extend(mic_sessions());
+    } else if crate::modules::mirror::RUNNING.load(std::sync::atomic::Ordering::Relaxed) {
+        names.push("Nookly Mirror".into());
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// From Windows' privacy records in the registry.
+fn in_use_registry(cap: &str) -> Vec<String> {
     let base = format!(r"{ROOT}\{cap}");
     let mut keys: Vec<String> = subkeys(&base).into_iter().filter(|k| k != "NonPackaged").map(|k| format!(r"{base}\{k}")).collect();
     let np = format!(r"{base}\NonPackaged");

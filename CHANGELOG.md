@@ -2,6 +2,16 @@
 
 Versions 0.1.x below came before the Nookly name.
 
+## 0.3.1: Weather, Volume and a real Notes editor
+
+- **Weather** panel: now (temperature, feels like, humidity, wind), the hours around now (earlier ones greyed, rain chance ahead) and yesterday to six days ahead, with drawn icons for sun, moon, clouds, rain, snow, storms and fog. From Open-Meteo, only while the panel is on (on opening, then at most every 30 minutes).
+- **Volume** panel: the master volume and each app's own volume with mute, like Windows' mixer. Read only while the panel is open.
+- **Notes** is a real editor now: click or drag to place the caret and select, arrows (Shift selects, Ctrl jumps words), Home / End, Ctrl+A / C / X / V, Tab, the mouse wheel scrolls (with a scroll bar), and the text cursor shows over it and every text box.
+- **Commands**: click a schedule to type any number of minutes (up to a week), besides the arrows.
+- **Mic dot fixed on newer Windows**: Windows stopped writing the records Nookly read, so the mic dot never came on there. It now comes straight from Windows' audio sessions, so it works on every version. The camera dot still uses Windows' records (newer test builds of Windows lock those away); Nookly's own Mirror always shows it.
+- **Widgets > Show**: the cards no longer scroll over the switches above them.
+- The welcome tour shows once more after an update when it has something new.
+
 ## 0.3.0: a lot more in the notch
 
 - **A new welcome tour**: hello, the look and where it sits, a colour, what you want in it, and four things to know. 30 seconds, all changeable later.

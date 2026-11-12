@@ -248,6 +248,8 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
     single("launcher", "panel_launcher", "Launcher", "Your apps, folders and sites, one click away.", ["Add apps...", "Drop to pin", "Links"])
     single("commands", "panel_commands", "Commands", "Run your own commands on a schedule and see what they print.", ["1 min to daily", "Up to 5", "On the notch"])
     single("toggles", "panel_toggles", "Quick toggles", "Wi-Fi, Bluetooth, dark mode and the microphone in one place.", ["Wi-Fi", "Bluetooth", "Dark mode", "Mic mute"])
+    single("weather", "panel_weather", "Weather", "Now, the hours around it and the week ahead, with icons for every kind of weather.", ["Hourly", "7 days", "Rain chance"])
+    single("volume", "panel_volume", "Volume mixer", "The master volume and every app's own, with mute.", ["Per app", "Drag to set", "Mute"])
     single("health", "panel_health", "Health", "Screen time today, eye breaks, stand-up reminders and battery care.", ["Screen time", "20-20-20", "Stand up", "Unplug at 80%"])
     single("notifications", "toast_notification", "Windows notifications", "Other apps' notifications drop out of the notch, with their icon and colour.", ["Click to open the app", "Mute an app", "Respects Do Not Disturb"], min_h=300)
 

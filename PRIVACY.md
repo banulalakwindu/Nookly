@@ -93,7 +93,9 @@ information to them:
    15 minutes Nookly downloads that calendar straight from where it lives,
    to show your events and the next meeting. The link stays in your
    settings file on your PC; remove it in the Calendar tab.
-5. **[open.er-api.com](https://www.exchangerate-api.com)** (currency rates),
+5. **[Open-Meteo](https://open-meteo.com)** again for the **Weather** panel,
+   only while that panel is switched on: the forecast for your place.
+6. **[open.er-api.com](https://www.exchangerate-api.com)** (currency rates),
    only after you click **Get today's rates** in Tools > Converter > Money,
    then at most once a day while you use it. Nothing about you is sent.
 

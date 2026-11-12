@@ -16,6 +16,9 @@ use crate::ui::Ui;
 const A_FLIP: u32 = 1;
 const C_MIRROR: Color = Color { r: 0.95, g: 0.55, b: 0.85, a: 1.0 };
 
+/// The camera is running for the Mirror panel (the camera dot shows it).
+pub static RUNNING: AtomicBool = AtomicBool::new(false);
+
 /// The latest frame: (width, height, BGRA, frame number).
 type Frame = Arc<Mutex<Option<(u32, u32, Vec<u8>, u64)>>>;
 
@@ -84,6 +87,7 @@ unsafe fn capture(frame: &Frame, running: &AtomicBool) -> std::result::Result<()
         let size = cur.GetUINT64(&MF_MT_FRAME_SIZE).map_err(|e| e.to_string())?;
         let (w, h) = ((size >> 32) as u32, (size & 0xffff_ffff) as u32);
         let mut n = 0u64;
+        RUNNING.store(true, Ordering::Relaxed);
         while running.load(Ordering::SeqCst) {
             let mut flags = 0u32;
             let mut sample: Option<IMFSample> = None;
@@ -116,6 +120,7 @@ unsafe fn capture(frame: &Frame, running: &AtomicBool) -> std::result::Result<()
                 let _ = buf.Unlock();
             }
         }
+        RUNNING.store(false, Ordering::Relaxed);
         let _ = source.Shutdown();
         Ok(())
     })();
@@ -211,4 +216,23 @@ impl Module for Mirror {
     fn debug_state(&self) -> String {
         format!("mirror running={}", self.running.load(Ordering::SeqCst))
     }
+}
+
+/// For `--probe-privacy camera`: run the camera for `secs` on a thread.
+/// Returns (frames seen so far, error) readers.
+pub fn probe_camera(secs: f64) -> (Frame, Arc<Mutex<Option<String>>>) {
+    let frame: Frame = Arc::new(Mutex::new(None));
+    let err = Arc::new(Mutex::new(None));
+    let running = Arc::new(AtomicBool::new(true));
+    let (f2, e2, r2) = (frame.clone(), err.clone(), running.clone());
+    std::thread::spawn(move || {
+        if let Err(e) = unsafe { capture(&f2, &r2) } {
+            *e2.lock().unwrap() = Some(e);
+        }
+    });
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs_f64(secs));
+        running.store(false, Ordering::SeqCst);
+    });
+    (frame, err)
 }

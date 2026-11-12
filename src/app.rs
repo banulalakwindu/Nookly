@@ -75,6 +75,9 @@ const O_STYLE: u32 = 10; // + index into NotchStyle::ALL
 const O_EDGE: u32 = 20; // + index into Edge::ALL
 const O_PRESET: u32 = 30; // + index into features::PRESETS
 const ONBOARD_STEPS: u8 = 5;
+/// Raise this when the welcome tour gains something new: everyone sees it
+/// once more after updating.
+const TOUR_VERSION: u32 = 2;
 /// Tour step 3: how to use it.
 const TOUR_TIPS: [(&str, &str, &str); 4] = [
     (glyph::PLAY, "Hover to open", "Move the mouse away and it tucks itself back."),
@@ -596,7 +599,11 @@ impl App {
             };
             app.place();
             sound::set(app.settings.sound);
-            if !app.settings.onboarded {
+            let seen = app.settings.extra.get("tour_version").and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+            if app.settings.onboarded && seen < TOUR_VERSION && visible {
+                // Updated, and the tour has news: show it once more.
+                app.start_onboarding();
+            } else if !app.settings.onboarded {
                 // A brand-new install starts small; the tour offers the rest.
                 if visible && crate::store::read("settings.txt").trim().is_empty() {
                     crate::features::apply_preset(&mut app.settings, 0);
@@ -1711,11 +1718,14 @@ impl App {
                 } else if self.slim_panel() {
                     let m = &self.modules[self.tab];
                     let (mw, mh) = m.slim_min();
-                    ((m.size().0.max(modules::PANEL.0) - SLIM_TRIM.0).max(mw), (modules::PANEL.1 - SLIM_TRIM.1).max(mh).max(m.size().1.min(TALL_PANEL)))
+                    let h = if m.fit_height() { m.size().1.min(TALL_PANEL) } else { (modules::PANEL.1 - SLIM_TRIM.1).max(mh).max(m.size().1.min(TALL_PANEL)) };
+                    ((m.size().0.max(modules::PANEL.0) - SLIM_TRIM.0).max(mw), h)
                 } else {
-                    // A tab may be taller (the Widgets lists), never shorter.
+                    // A tab may be taller (the Widgets lists), never shorter,
+                    // unless it fits its own content (the Volume list).
                     let m = &self.modules[self.tab];
-                    (m.size().0.max(modules::PANEL.0), m.size().1.clamp(modules::PANEL.1, TALL_PANEL))
+                    let low = if m.fit_height() { 60.0 } else { modules::PANEL.1 };
+                    (m.size().0.max(modules::PANEL.0), m.size().1.clamp(low, TALL_PANEL))
                 };
                 let (tab_h, pad) = self.panel_metrics();
                 let w = (w + 2.0 * pad).clamp(380.0, CANVAS_W - 40.0);
@@ -1964,6 +1974,7 @@ impl App {
         let content_alpha = if switching { 1.0 } else { (1.0 - dist / 50.0).clamp(0.0, 1.0) };
 
         self.hits.clear();
+        crate::ui::clear_text_areas();
         self.apply_theme();
         self.gfx.begin(self.scale);
         let ear = (depth / 4.0).min(9.0);
@@ -3232,6 +3243,7 @@ impl App {
     fn finish_onboarding(&mut self) {
         self.onboarding = None;
         self.settings.onboarded = true;
+        self.settings.extra.insert("tour_version".into(), TOUR_VERSION.to_string());
         self.settings.save();
         self.expanded = false;
         self.leave_at = None;
@@ -3740,7 +3752,8 @@ impl App {
         // Dragging something out of a module?
         if let Some((hit, p0)) = self.press {
             let moved = (x - p0.0).abs() + (y - p0.1).abs();
-            if moved > 5.0 && hit.module < self.modules.len() && self.modules[hit.module].drag_begin(hit.id, x, y) {
+            if moved > 5.0 && hit.module < self.modules.len() && self.modules[hit.module].drag_begin(hit.id, p0.0, p0.1) {
+                self.modules[hit.module].drag_to(x, y);
                 self.press = None;
                 self.inner_drag = Some(hit.module);
                 unsafe {
@@ -3909,7 +3922,12 @@ impl App {
         self.request_frame();
         let (mx, my) = self.mouse;
         let over_bar = self.tab_bar.inset_xy(-8.0, -6.0).contains(mx, my);
-        if self.settings_open || self.keyboard.is_some() {
+        if self.settings_open {
+            return;
+        }
+        // Typing in a panel: the wheel scrolls it (Notes), never switches.
+        if let Some(k) = self.keyboard {
+            self.modules[k].scroll(delta);
             return;
         }
         if !over_bar && self.modules[self.tab].scroll(delta) {
@@ -4208,6 +4226,12 @@ impl App {
                 self.on_wheel(d);
                 Some(LRESULT(0))
             }
+            WM_SETCURSOR if (lp.0 & 0xffff) as u32 == HTCLIENT && crate::ui::over_text(self.mouse.0, self.mouse.1) => unsafe {
+                if let Ok(c) = LoadCursorW(None, IDC_IBEAM) {
+                    SetCursor(c);
+                }
+                Some(LRESULT(1))
+            },
             WM_MBUTTONUP => {
                 self.middle_click();
                 Some(LRESULT(0))
@@ -6476,7 +6500,8 @@ pub fn selftest() -> String {
                     sizes.push((a.modules[i].title(), t.0 as i32, t.1 as i32));
                 }
             }
-            sizes.retain(|s| s.0 != "Widgets");
+            // Wider, taller or fitted on purpose.
+            sizes.retain(|s| !["Widgets", "Weather", "Volume"].contains(&s.0));
             let same = sizes.windows(2).all(|w| (w[0].1, w[0].2) == (w[1].1, w[1].2));
             out += &format!("{:<4} every tab opens to the same panel size {:?}\n", if same { "OK" } else { "FAIL" }, sizes.first().map(|s| (s.1, s.2)));
 
@@ -7091,7 +7116,7 @@ pub fn render_docs(dir: &std::path::Path) -> String {
         {
             let hidden = std::mem::take(&mut a.settings.hidden_panels);
             let tab = a.tab;
-            for (title, name) in [("Notes", "panel_notes"), ("Countdowns", "panel_countdowns"), ("Launcher", "panel_launcher"), ("Toggles", "panel_toggles"), ("Health", "panel_health"), ("Mirror", "panel_mirror"), ("Commands", "panel_commands")] {
+            for (title, name) in [("Notes", "panel_notes"), ("Countdowns", "panel_countdowns"), ("Launcher", "panel_launcher"), ("Toggles", "panel_toggles"), ("Health", "panel_health"), ("Mirror", "panel_mirror"), ("Commands", "panel_commands"), ("Weather", "panel_weather"), ("Volume", "panel_volume")] {
                 if let Some(i) = a.modules.iter().position(|m| m.title() == title) {
                     a.tab = i;
                     shot(a, dir, name);
