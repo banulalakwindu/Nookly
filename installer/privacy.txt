@@ -18,6 +18,14 @@ It goes online for only these things, and sends no personal information:
     widget on, about every 30 minutes, for your place rounded to about
     10 km; and the city name you type if you search for your city.
 
+  - Your calendar: only if you paste its private iCal link in the Calendar
+    tab, about every 15 minutes, straight from Google or Microsoft.
+
+  - Currency rates (open.er-api.com): only after you ask for them in the
+    Converter, at most once a day.
+
+Mirror uses the camera only while its panel is open; nothing is saved.
+
 Windows notifications in the notch and clipboard history are off until you
 turn them on, and are read on your PC only.
 

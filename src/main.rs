@@ -14,6 +14,7 @@
 //!   http.rs     WinHTTP GET (used for LRCLIB lyrics)
 
 mod app;
+mod brightness;
 mod dragdrop;
 mod features;
 mod gfx;
@@ -22,6 +23,7 @@ mod http;
 mod mascot;
 mod modules;
 mod sound;
+mod share;
 mod store;
 mod taskbar;
 mod time;

@@ -30,7 +30,7 @@
 ## Getting started
 
 1. Run `NooklySetup-<version>.exe`. Tick **Start Nookly when Windows starts** if you like.
-2. The notch opens with a short **welcome tour**: pick how it looks when closed (Full, Compact, Pill or Hidden), pick the screen edge, read three quick tips (hover to open, the mouse wheel switches panels, right-drag to move it), and see what's in Settings at a glance. **Open Settings** on the last step goes straight there. You can skip it, and replay it later from the tray icon's menu (**Welcome tour**). Everything you pick can be changed later in Settings.
+2. The notch opens with a 30-second **welcome tour** in five steps: a hello, how it looks when closed (Full, Slim, Compact, Pill or Hidden) and which edge it sits on, a colour theme, what you want in it (Minimal, Student, Work or Everything), and four things to know (hover to open, scroll to switch panels, **Win+Alt+N** from anywhere, right-click for Settings). You can skip it, and replay it later from the tray icon's menu (**Welcome tour**). Everything you pick can be changed later in Settings.
 
    <img src="images/tour.png" alt="Welcome tour">
 
@@ -140,6 +140,8 @@ The gear button opens settings: bottle size, daily goal, sip size, active hours 
 
 ## Prayer times
 
+**Ramadan mode** (the *Ramadan* chip in the Prayer tab: auto, on or off): Sehri (ending at Fajr) and Iftar (at Maghrib) come first in the panel, and the closed notch counts down the last hour to each. *Auto* follows the Hijri calendar, which can differ from local moon sighting by a day; use *on* or *off* then.
+
 - Today's Fajr, Sunrise, Dhuhr, Asr, Maghrib and Isha, with the next prayer, a countdown and the current prayer highlighted.
 - Times are calculated on your PC from the sun's position for your place and date, so they follow the seasons and need no internet. They use your PC's time zone.
 - The **bell** beside a prayer turns its reminder on. Reminders are off until you turn them on.
@@ -243,9 +245,11 @@ The **Calendar** tab shows the month. Today has a red circle; days with to-do ta
 
 ## Themes and seconds
 
+**Settings > Look** now also has **your own theme** (the *Yours* tile: pick a background and a text colour; it shows the contrast and **Fix it** picks a readable text colour), **Size** (smaller, normal or larger notch and panels), **Reduce motion** (no springy animations), **Song colour around the notch** and **Hide the notch for these apps** (it lists the last app you used; click to add it).
+
 **Settings > Look** has the themes and the seconds switch.
 - **Themes**: **Black** (the default), **Graphite**, **Midnight**, **Rose**, **Forest**, **Ocean**, **Light**, **Blossom** (light pink), **Paper** (old paper) and **Liquid Glass**. A theme changes the notch and every panel. On the light themes, coloured labels are a little darker so they stay readable.
-- **Liquid Glass** shows a blurred view of what's behind the notch under a clear tint, with a bright edge. Over a bright window it turns into light glass with dark text, over a dark one into dark glass with white text. To see behind itself, the notch is left out of screenshots and screen sharing while Liquid Glass is on (the other themes aren't).
+- **Liquid Glass** shows a blurred view of what's behind the notch under a clear tint, with a bright edge. Over a bright window it turns into light glass with dark text, over a dark one into dark glass with white text. The notch still shows in screenshots and screen recordings (it hides only for the instant it looks behind itself).
 - **Show seconds** puts seconds on the clock (4:20:15). The Slim and Compact notches get a little wider so nothing gets squeezed.
 
 ## Tools
@@ -266,7 +270,7 @@ The Tools tab has four small tools; the chips at the top switch between them. Ev
 
 <img src="images/tools-convert.png" alt="Converter">
 
-- **Converter**: length, weight, temperature, area, volume, speed and data. It includes Bangladesh's units: katha (720 ft²), bigha (20 katha), decimal (1/100 acre), maund (40 seer), seer and tola (vori). Type a number (or a sum), click the units, **Swap** flips them, and clicking the answer copies it.
+- **Converter**: length, weight, temperature, area, volume, speed and data. It includes Bangladesh's units: katha (720 ft²), bigha (20 katha), decimal (1/100 acre), maund (40 seer), seer and tola (vori). Type a number (or a sum), click the units, **Swap** flips them, and clicking the answer copies it. **Money** converts USD, EUR, GBP, LKR, BDT, INR, SAR and AED at today's rates: the first time, click **Get today's rates** (it goes online once a day from then on, only while you use it).
 - **Zones** shows the time in 12 cities (Dhaka, Kolkata, Dubai, Riyadh, London, Paris, New York, Toronto, Los Angeles, Tokyo, Sydney, Kuala Lumpur), using Windows' own daylight-saving rules. Click a city to compare from it, and use the hour buttons to see "what time will it be there at 6 pm here".
 
 ## File shelf
@@ -363,6 +367,35 @@ Pick one in **Settings > Mascot**: Eyes, Cat, Ghost, Robot, Sparky (an electric 
 | Screenshot (none until you set one) | Starts a screenshot (needs the Shelf on) |
 
 Click a shortcut, then press the keys you want: it needs Ctrl, Alt or Win (or use an F key alone). **Backspace** removes it, **Esc** cancels. If another app already uses those keys, it shows **In use**; pick others.
+
+## Notes, countdowns, launcher and toggles
+
+- **Notes**: type anything; it's saved as you go. **Copy** copies it all. Give it a keyboard shortcut in Settings > Features > Keyboard & mouse shortcuts.
+- **Countdowns**: type a name, pick the date with the arrows (or roll the mouse wheel over the day, month or year) and click **Add**. **Every year** repeats it (birthdays, holidays); the **↻** button on a countdown switches that later. Switch on the **Countdown** widget in the Widgets tab for "12 days" on the closed notch.
+- **Launcher**: **Add apps...** opens a file picker in the Start menu folder (pick several at once), **Folder...** pins folders, or drag apps, folders or files onto the notch while the Launcher tab is open, or paste a link and press **Pin**. Click one to open it.
+- **Commands**: type a command, pick how often it runs (1 minute to daily) and click **Add**. Each shows the first line it printed and when; ▶ runs it now. Switch them on in the Widgets tab to see the output on the closed notch. They run with cmd.exe on your PC, only while the Commands panel is on.
+- **Toggles**: Wi-Fi, Bluetooth, dark mode and the microphone (muted for every app). Night light, hotspot and Focus can only be switched in Windows' Settings, so those buttons take you there.
+
+## Your calendar and the next meeting
+
+In the **Calendar** tab, click the **link** button and paste your calendar's private iCal link (it stays up to date), or click **Choose file...** to use an `.ics` file you exported (it's read again every 15 minutes, so re-exporting over it updates it):
+- **Google Calendar**: Settings > your calendar > *Secret address in iCal format*.
+- **Outlook**: Settings > Calendar > Shared calendars > *Publish a calendar* > the ICS link.
+
+Your events then show in the month (a blue dot) and the day panel, with **Join** for Teams, Zoom and Meet links. 15 minutes before a meeting the closed notch shows "Standup in 8 min", and a minute before it drops down with **Join**. It refreshes every 15 minutes; **Remove** forgets the link.
+
+## Health
+
+The **Health** tab shows your **screen time today** (only while you use the PC, from the app in front) and your top apps. Switch on **eye breaks** (every 20 minutes: look about 6 m away for 20 seconds), **stand-up reminders** (every 30, 45, 60 or 90 minutes) and **battery care** (on the charger at 80%: a reminder to unplug). Time away from the PC counts as a break. Reminders wait while you're in a game, a full-screen video or a call.
+
+## Mirror and Share
+
+- **Mirror** shows your camera, to check how you look before a call. The camera runs only while the panel is on screen (the green dot shows).
+- **Share**: drag files onto the notch; besides the Shelf there's a **Share** zone. Drop them there to open Windows' Share window (Nearby Share, Phone Link, mail and chat apps).
+
+## Profiles
+
+At the bottom of **Settings > Features**, **Home**, **Work** and **Focus** each keep their own features, closed-notch widgets and theme. Switch with a click; what you change saves into the profile you're on. **Auto** switches to Work on weekdays from 9 to 5 and back to Home (Focus is only ever picked by hand).
 
 ## Settings and your data
 

@@ -18,6 +18,20 @@ pub type Backdrop = (u32, u32, Vec<u8>, f32);
 const DOWN: i32 = 4;
 
 /// Keep the notch out of screen captures (Liquid Glass on) or not.
+/// Grab what's behind the notch with the notch itself left out, only for
+/// that moment: screen recorders refuse to start while any window stays
+/// excluded from capture, so it never does for longer than one grab.
+pub fn capture_behind(hwnd: HWND, r: RECT) -> Option<Backdrop> {
+    exclude_from_capture(hwnd, true);
+    // Let the desktop compose once without the notch.
+    unsafe {
+        let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+    }
+    let b = capture(r);
+    exclude_from_capture(hwnd, false);
+    b
+}
+
 pub fn exclude_from_capture(hwnd: HWND, on: bool) {
     unsafe {
         let _ = SetWindowDisplayAffinity(hwnd, if on { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE });

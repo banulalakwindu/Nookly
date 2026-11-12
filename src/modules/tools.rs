@@ -468,6 +468,73 @@ pub const CATS: [(&str, &[Unit], (usize, usize), &str); 7] = [
 ];
 /// Converter chip after the unit categories.
 const ZONES: usize = CATS.len();
+/// Currency chip, after Zones.
+const MONEY: usize = ZONES + 1;
+pub const CURRENCIES: [&str; 8] = ["USD", "EUR", "GBP", "LKR", "BDT", "INR", "SAR", "AED"];
+const A_MFROM: u32 = 140; // + index
+const A_MTO: u32 = 150; // + index
+const A_MFETCH: u32 = 160;
+
+/// Today's rates (units per US dollar), from open.er-api.com: (day, rates,
+/// fetching, error).
+static RATES: std::sync::Mutex<(String, Option<[f64; 8]>, bool, Option<String>)> = std::sync::Mutex::new((String::new(), None, false, None));
+
+/// Rates kept in rates.txt: `day|USD=1,EUR=0.92,...`.
+fn load_rates() {
+    let s = store::read("rates.txt");
+    let Some((day, list)) = s.trim().split_once('|') else { return };
+    let kv: std::collections::HashMap<&str, f64> = list.split(',').filter_map(|p| p.split_once('=')).filter_map(|(k, v)| Some((k, v.parse().ok()?))).collect();
+    let mut r = [0.0; 8];
+    for (i, c) in CURRENCIES.iter().enumerate() {
+        r[i] = *kv.get(c).unwrap_or(&0.0);
+    }
+    if r.iter().all(|x| *x > 0.0) {
+        let mut g = RATES.lock().unwrap();
+        g.0 = day.to_string();
+        g.1 = Some(r);
+    }
+}
+
+/// The rates out of the API's JSON (`"rates":{"EUR":0.92,...}`).
+pub fn parse_rates(json: &str) -> Option<[f64; 8]> {
+    let body = &json[json.find("\"rates\"")?..];
+    let mut r = [0.0; 8];
+    for (i, c) in CURRENCIES.iter().enumerate() {
+        let at = body.find(&format!("\"{c}\":"))? + c.len() + 3;
+        let num: String = body[at..].chars().take_while(|ch| ch.is_ascii_digit() || *ch == '.' || *ch == 'e' || *ch == '-' || *ch == '+').collect();
+        r[i] = num.parse().ok().filter(|v: &f64| *v > 0.0)?;
+    }
+    Some(r)
+}
+
+/// Fetch today's rates (once a day, only after you asked for them).
+fn fetch_rates() {
+    {
+        let mut g = RATES.lock().unwrap();
+        if g.2 {
+            return;
+        }
+        g.2 = true;
+    }
+    std::thread::spawn(|| {
+        let got = crate::http::get("open.er-api.com", "/v6/latest/USD").filter(|r| r.status == 200).and_then(|r| parse_rates(&String::from_utf8_lossy(&r.body)));
+        let day = crate::time::Now::get().day_key();
+        let mut g = RATES.lock().unwrap();
+        g.2 = false;
+        match got {
+            Some(r) => {
+                g.0 = day.clone();
+                g.1 = Some(r);
+                g.3 = None;
+                let list: Vec<String> = CURRENCIES.iter().zip(r).map(|(c, v)| format!("{c}={v}")).collect();
+                store::write("rates.txt", &format!("{day}|{}", list.join(",")));
+            }
+            None => g.3 = Some("Couldn't get the rates; try again later".into()),
+        }
+        drop(g);
+        crate::app::wake();
+    });
+}
 
 pub fn convert(cat: usize, from: usize, to: usize, v: f64) -> f64 {
     let units = CATS[cat].1;
@@ -1025,6 +1092,8 @@ pub struct Tools {
     tz_base: Option<usize>,
     tz_offset: i64,
     focus: Focus,
+    /// Currency: (from, to) into CURRENCIES.
+    money: (usize, usize),
 }
 
 impl Tools {
@@ -1056,12 +1125,18 @@ impl Tools {
             qr_typed: false,
             qr_seq: 0,
             qr: None,
-            cat: kv.get("cat").and_then(|v| v.parse().ok()).filter(|c| *c <= ZONES).unwrap_or(3),
+            cat: kv.get("cat").and_then(|v| v.parse().ok()).filter(|c| *c <= MONEY).unwrap_or(3),
             units,
             value: kv.get("value").cloned().filter(|v| !v.is_empty()).unwrap_or_else(|| "1".into()),
             tz_base: kv.get("tz_base").and_then(|v| v.parse().ok()).filter(|c| *c < CITIES.len()),
             tz_offset: 0,
             focus: Focus::None,
+            money: kv
+                .get("money")
+                .and_then(|v| v.split_once(','))
+                .and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))
+                .filter(|&(a, b): &(usize, usize)| a < 8 && b < 8)
+                .unwrap_or((0, 3)),
         }
     }
 
@@ -1075,6 +1150,7 @@ impl Tools {
             kv.insert(format!("units_{}", c.0.to_lowercase()), format!("{},{}", self.units[i].0, self.units[i].1));
         }
         kv.insert("tz_base".to_string(), self.tz_base.map_or(String::new(), |b| b.to_string()));
+        kv.insert("money".to_string(), format!("{},{}", self.money.0, self.money.1));
         store::write("tools.txt", &store::write_kv(&kv));
     }
 
@@ -1327,12 +1403,15 @@ impl Tools {
 
     fn draw_convert(&mut self, ui: &mut Ui, mut r: Rect) {
         let row = r.cut_top(22.0, if self.cat == ZONES { 6.0 } else { 10.0 });
-        let names: Vec<&str> = CATS.iter().map(|c| c.0).chain(std::iter::once("Zones")).collect();
+        let names: Vec<&str> = CATS.iter().map(|c| c.0).chain(["Zones", "Money"]).collect();
         for (i, cell) in row.columns(names.len(), 5.0).into_iter().enumerate() {
             ui.chip(cell, names[i], A_CAT + i as u32, self.cat == i, ACCENT);
         }
         if self.cat == ZONES {
             return self.draw_zones(ui, r);
+        }
+        if self.cat == MONEY {
+            return self.draw_money(ui, r);
         }
         let (cat, units) = (self.cat, CATS[self.cat].1);
         let (from, to) = self.units[cat];
@@ -1367,6 +1446,50 @@ impl Tools {
         } else {
             note.to_string()
         };
+        ui.text(&line, row, 10.5, col::FAINT, Weight::Regular, Align::Left);
+    }
+
+    /// Currencies at today's rates (fetched once a day after you ask).
+    fn draw_money(&mut self, ui: &mut Ui, mut r: Rect) {
+        let (day, rates, busy, err) = RATES.lock().unwrap().clone();
+        if rates.is_none() && day.is_empty() {
+            load_rates();
+        }
+        let (day, rates, busy, err) = if rates.is_none() { RATES.lock().unwrap().clone() } else { (day, rates, busy, err) };
+        let today = crate::time::Now::get().day_key();
+        let Some(rates) = rates else {
+            let mut c = r.centered(r.w.min(440.0), 80.0);
+            ui.text("Currency rates come from the internet", c.cut_top(18.0, 4.0), 13.0, col::TEXT, Weight::Semi, Align::Center);
+            ui.text(err.as_deref().unwrap_or("Once a day from open.er-api.com, only when you open Money. Nothing about you is sent."), c.cut_top(18.0, 8.0), 11.0, col::DIM, Weight::Regular, Align::Center);
+            ui.button_accent(c.cut_top(28.0, 0.0).centered(170.0, 28.0), if busy { "Getting rates..." } else { "Get today's rates" }, A_MFETCH, ACCENT);
+            return;
+        };
+        if day != today && !busy {
+            fetch_rates();
+        }
+        let units: Vec<Unit> = CURRENCIES.iter().zip(rates).map(|(c, v)| Unit { label: c, f: 1.0 / v }).collect();
+        let (from, to) = self.money;
+        let value = self.value.clone();
+        let focused = self.focus == Focus::Value;
+        let mut row = r.cut_top(28.0, 6.0);
+        Self::field(ui, row.cut_left(118.0, 8.0), &value, "Amount", focused, A_VALUE, 13.0);
+        for (i, cell) in unit_cells(ui, row, &units).iter().enumerate() {
+            ui.chip(*cell, units[i].label, A_MFROM + i as u32, i == from, ACCENT);
+        }
+        let mut row = r.cut_top(28.0, 8.0);
+        let res = row.cut_left(118.0, 8.0);
+        let out = self.value_num().map(|v| fmt_num((v * units[from].f / units[to].f * 100.0).round() / 100.0));
+        ui.fill_rr(res, 8.0, ACCENT.with_a(0.16));
+        let shown = if self.just_copied(A_CONV_COPY) { "Copied".to_string() } else { out.clone().unwrap_or_else(|| "-".into()) };
+        ui.text(&shown, res.inset_xy(10.0, 0.0), 13.0, ACCENT, Weight::Semi, Align::Left);
+        ui.hit_tip(res, A_CONV_COPY, "Copy");
+        for (i, cell) in unit_cells(ui, row, &units).iter().enumerate() {
+            ui.chip(*cell, units[i].label, A_MTO + i as u32, i == to, ACCENT);
+        }
+        let mut row = r.cut_top(22.0, 0.0);
+        ui.button(row.cut_left(70.0, 10.0), "Swap", A_SWAP);
+        let one = rates[to] / rates[from];
+        let line = format!("1 {} = {} {} · rates of {}{}", CURRENCIES[from], fmt_num((one * 10000.0).round() / 10000.0), CURRENCIES[to], day, if busy { " (updating)" } else { "" });
         ui.text(&line, row, 10.5, col::FAINT, Weight::Regular, Align::Left);
     }
 
@@ -1512,7 +1635,11 @@ impl Module for Tools {
             A_QR_CLIP => "QR code of what you last copied",
             A_QR_TYPE | A_QR_FIELD => "Type your own text or link",
             A_QR_COPY => "Copy the QR code as a picture",
+            i if i == A_CAT + MONEY as u32 => "Currencies at today's rates",
             i if (A_CAT..=A_CAT + ZONES as u32).contains(&i) => if i == A_CAT + ZONES as u32 { "Time in 12 cities" } else { "Convert this kind of unit" },
+            i if (A_MFROM..A_MFROM + 8).contains(&i) => "Convert from this currency",
+            i if (A_MTO..A_MTO + 8).contains(&i) => "Convert to this currency",
+            A_MFETCH => "Get today's rates from open.er-api.com",
             i if (A_FROM..A_FROM + 8).contains(&i) => "Convert from this unit",
             i if (A_TO..A_TO + 8).contains(&i) => "Convert to this unit",
             A_SWAP => "Swap the two units",
@@ -1661,10 +1788,19 @@ impl Module for Tools {
                     self.copied = Some((A_QR_COPY, unix_now()));
                 }
             }
-            i if (A_CAT..=A_CAT + ZONES as u32).contains(&i) => {
+            i if (A_CAT..=A_CAT + MONEY as u32).contains(&i) => {
                 self.cat = (i - A_CAT) as usize;
                 self.save();
             }
+            i if (A_MFROM..A_MFROM + 8).contains(&i) => {
+                self.money.0 = (i - A_MFROM) as usize;
+                self.save();
+            }
+            i if (A_MTO..A_MTO + 8).contains(&i) => {
+                self.money.1 = (i - A_MTO) as usize;
+                self.save();
+            }
+            A_MFETCH => fetch_rates(),
             i if (A_FROM..A_FROM + 8).contains(&i) => {
                 if self.cat < ZONES && ((i - A_FROM) as usize) < CATS[self.cat].1.len() {
                     self.units[self.cat].0 = (i - A_FROM) as usize;
@@ -1677,6 +1813,10 @@ impl Module for Tools {
                     self.save();
                 }
             }
+            A_SWAP if self.cat == MONEY => {
+                self.money = (self.money.1, self.money.0);
+                self.save();
+            }
             A_SWAP => {
                 if self.cat < ZONES {
                     let (a, b) = self.units[self.cat];
@@ -1685,6 +1825,13 @@ impl Module for Tools {
                 }
             }
             A_VALUE => self.set_focus(Focus::Value, ctx),
+            A_CONV_COPY if self.cat == MONEY => {
+                let rates = RATES.lock().unwrap().1;
+                if let (Some(v), Some(r)) = (self.value_num(), rates) {
+                    let (a, b) = self.money;
+                    self.copy(A_CONV_COPY, format!("{:.2}", v * r[b] / r[a]));
+                }
+            }
             A_CONV_COPY => {
                 if let (Some(v), true) = (self.value_num(), self.cat < ZONES) {
                     let (a, b) = self.units[self.cat];

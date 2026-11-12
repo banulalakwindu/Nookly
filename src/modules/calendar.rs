@@ -6,7 +6,7 @@
 use crate::gfx::*;
 use crate::modules::{Ctx, Module, Rel};
 use crate::time::{days_in_month, local_time, unix_now, weekday, Now, DAYS};
-use crate::ui::Ui;
+use crate::ui::{FieldKey, TextField, Ui};
 
 pub const ACCENT: Color = hex(0xFF5E57);
 pub const ICON: &str = "\u{E787}";
@@ -19,6 +19,19 @@ const A_NEXT: u32 = 2;
 const A_TODAY: u32 = 3;
 /// + cell index (0..42) in the grid.
 const A_DAY: u32 = 100;
+const A_LINK: u32 = 4;
+const A_FIELD: u32 = 5;
+const A_SAVE: u32 = 6;
+const A_UNLINK: u32 = 7;
+const A_BACK: u32 = 8;
+const A_FILE: u32 = 9;
+
+/// Open the file picker for an .ics file (the app shows it outside
+/// drawing, then calls `ics_picked`).
+pub static PICK_ICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// + index of the event in the chosen day's list.
+const A_JOIN: u32 = 200;
+const C_EVENT: Color = Color { r: 0.55, g: 0.55, b: 1.0, a: 1.0 };
 
 /// A task with a due date: (year, month, day, title, done, minute of day).
 type Due = (i32, u32, u32, String, bool, u32);
@@ -31,6 +44,12 @@ pub struct Calendar {
     due_at: f64,
     /// First day of the week, 0 = Sunday.
     first: u32,
+    /// The calendar link page is open.
+    linking: bool,
+    field: TextField,
+    url: String,
+    /// The chosen day's events (for Join).
+    events: Vec<crate::modules::meetings::Event>,
 }
 
 /// Windows' first day of the week (region settings), 0 = Sunday.
@@ -85,7 +104,7 @@ fn days_between(a: (i32, u32, u32), b: (i32, u32, u32)) -> i64 {
 impl Calendar {
     pub fn new() -> Calendar {
         let now = Now::get();
-        Calendar { year: now.year as i32, month: now.month as u32, sel: (now.year as i32, now.month as u32, now.day as u32), due: Vec::new(), due_at: 0.0, first: first_day_of_week() }
+        Calendar { year: now.year as i32, month: now.month as u32, sel: (now.year as i32, now.month as u32, now.day as u32), due: Vec::new(), due_at: 0.0, first: first_day_of_week(), linking: false, field: TextField::new(600), url: String::new(), events: Vec::new() }
     }
 
     fn today() -> (i32, u32, u32) {
@@ -106,6 +125,58 @@ impl Calendar {
                 (y, m, d, title, done, mins)
             })
             .collect();
+    }
+
+    /// A file chosen in the picker: use it like a link.
+    pub fn use_file(&mut self, path: String, ctx: &mut Ctx) {
+        self.field.text = path;
+        self.save_link(ctx);
+    }
+
+    fn save_link(&mut self, ctx: &mut Ctx) {
+        let u = self.field.text.trim().to_string();
+        self.field.focused = false;
+        ctx.want_keyboard(false);
+        if u.is_empty() {
+            return;
+        }
+        ctx.settings.extra.insert(crate::modules::meetings::URL_KEY.into(), u.clone());
+        crate::features::set_on(ctx.settings, "meetings", true);
+        ctx.settings.save();
+        self.url = u.clone();
+        crate::modules::meetings::refresh(&u);
+    }
+
+    /// Connect a calendar: its private iCal link.
+    fn draw_link(&mut self, ui: &mut Ui, mut r: Rect) {
+        let mut head = r.cut_top(24.0, 8.0);
+        ui.button(head.cut_right(70.0, 0.0), "Back", A_BACK);
+        ui.text("Your calendar in Nookly", head, 14.0, col::TEXT, Weight::Semi, Align::Left);
+        let mut row = r.cut_top(28.0, 8.0);
+        ui.button_accent(row.cut_right(70.0, 6.0), "Save", A_SAVE, C_EVENT);
+        ui.button(row.cut_right(110.0, 6.0), "Choose file...", A_FILE);
+        if !self.url.is_empty() {
+            ui.button(row.cut_right(80.0, 6.0), "Remove", A_UNLINK);
+        }
+        ui.field(row, &self.field, "https://calendar.google.com/calendar/ical/.../basic.ics", A_FIELD, C_EVENT);
+        let (busy, res) = crate::modules::meetings::status();
+        let (line, c) = match (busy, res) {
+            (true, _) => ("Reading your calendar...".to_string(), col::DIM),
+            (_, Some(Ok(n))) if !self.url.is_empty() => (format!("Connected: {n} events in the coming weeks. It refreshes every 15 minutes."), col::GREEN),
+            (_, Some(Err(e))) if !self.url.is_empty() => (e, col::RED),
+            _ => (String::new(), col::DIM),
+        };
+        if !line.is_empty() {
+            ui.text(&line, r.cut_top(16.0, 6.0), 11.0, c, Weight::Semi, Align::Left);
+        }
+        ui.text_wrap(
+            "Paste your calendar's private iCal link (it stays up to date), or choose an .ics file you exported. Google Calendar: Settings > your calendar > Secret address in iCal format. Outlook: Settings > Calendar > Shared calendars > Publish a calendar > ICS. The link stays on this PC and the calendar is read straight from Google or Microsoft.",
+            r,
+            11.0,
+            col::DIM,
+            Weight::Regular,
+            Align::Left,
+        );
     }
 
     fn step(&mut self, by: i32) {
@@ -141,11 +212,25 @@ impl Module for Calendar {
             A_NEXT => "Next month",
             A_TODAY => "Back to today",
             i if (A_DAY..A_DAY + 42).contains(&i) => "See this day",
+            A_LINK => "Show your calendar's events (Google, Outlook...)",
+            A_FIELD => "Paste your calendar's private iCal link",
+            A_SAVE => "Use this calendar",
+            A_UNLINK => "Stop showing this calendar",
+            A_BACK => "Back to the month",
+            A_FILE => "Use a calendar file (.ics) on this PC",
+            i if (A_JOIN..A_JOIN + 20).contains(&i) => "Join the meeting",
             _ => "",
         }
     }
 
+    fn tick(&mut self, ctx: &mut Ctx) {
+        self.url = ctx.settings.extra.get(crate::modules::meetings::URL_KEY).cloned().unwrap_or_default();
+    }
+
     fn draw(&mut self, ui: &mut Ui, r: Rect) {
+        if self.linking {
+            return self.draw_link(ui, r);
+        }
         self.refresh_due();
         let today = Self::today();
         let mut r = r;
@@ -157,6 +242,8 @@ impl Module for Calendar {
         let prev = head.cut_right(24.0, 4.0);
         ui.icon_btn(prev, "\u{E76B}", A_PREV, 11.0, col::DIM, None, "Previous month");
         ui.icon_btn(next, "\u{E76C}", A_NEXT, 11.0, col::DIM, None, "Next month");
+        let link = head.cut_right(24.0, 4.0);
+        ui.icon_btn(link, "\u{E71B}", A_LINK, 11.0, if self.url.is_empty() { col::DIM } else { C_EVENT }, None, "Show your calendar's events (Google, Outlook...)");
         if (self.year, self.month) != (today.0, today.1) {
             ui.chip(head.cut_right(54.0, 6.0), "Today", A_TODAY, false, ACCENT);
         }
@@ -197,6 +284,9 @@ impl Module for Calendar {
             ui.text(&d.to_string(), cell, 11.5, fg, if is_today { Weight::Bold } else { Weight::Semi }, Align::Center);
             // Tasks due that day: a small dot under the number.
             let tasks = self.tasks_on((y, m, d));
+            if this_month && !self.url.is_empty() && !crate::modules::meetings::events_on(y, m, d).is_empty() {
+                ui.circle(cell.cx() + if tasks.is_empty() { 0.0 } else { 4.0 }, dot.b() - 2.5, 1.8, if is_today { ON_ACCENT } else { C_EVENT });
+            }
             if !tasks.is_empty() {
                 let open = tasks.iter().any(|t| !t.4);
                 let c = if is_today { ON_ACCENT } else if open { col::YELLOW } else { col::FAINT };
@@ -224,10 +314,24 @@ impl Module for Calendar {
         let mut words = big;
         ui.text(["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][dow], words.cut_top(17.0, 0.0), 12.0, col::TEXT, Weight::Semi, Align::Left);
         ui.text(&format!("{} {y}", MONTH_NAMES[(m - 1) as usize]), words, 11.0, col::DIM, Weight::Regular, Align::Left);
+        self.events = if self.url.is_empty() { Vec::new() } else { crate::modules::meetings::events_on(y, m, d) };
         let tasks = self.tasks_on(self.sel);
-        if tasks.is_empty() {
-            ui.text("No tasks due", s.cut_top(16.0, 0.0), 11.0, col::FAINT, Weight::Regular, Align::Left);
-        } else {
+        for (k, e) in self.events.clone().iter().enumerate().take(3) {
+            let mut row = s.cut_top(18.0, 2.0);
+            if e.link.is_some() && e.end > unix_now() {
+                let j = row.cut_right(40.0, 4.0);
+                ui.button_c(j, "Join", A_JOIN + k as u32, C_EVENT.with_a(0.25), C_EVENT);
+            }
+            let time = if e.all_day { "All day".to_string() } else { crate::time::fmt_mod(local_time(e.start).3) };
+            let tw = ui.measure(&time, 10.5, Weight::Regular) + 6.0;
+            ui.text(&time, row.cut_right(tw, 0.0), 10.5, col::DIM, Weight::Regular, Align::Right);
+            ui.fill_rr(Rect::new(row.x, row.cy() - 5.0, 3.0, 10.0), 1.5, C_EVENT);
+            row.cut_left(9.0, 0.0);
+            ui.text(&e.title, row, 11.0, col::TEXT, Weight::Regular, Align::Left);
+        }
+        if tasks.is_empty() && self.events.is_empty() {
+            ui.text(if self.url.is_empty() { "No tasks due" } else { "Nothing planned" }, s.cut_top(16.0, 0.0), 11.0, col::FAINT, Weight::Regular, Align::Left);
+        } else if !tasks.is_empty() {
             let fits = ((s.h + 2.0) / 18.0).floor().max(1.0) as usize;
             for (k, t) in tasks.iter().enumerate() {
                 if k + 1 == fits && tasks.len() > fits {
@@ -245,8 +349,35 @@ impl Module for Calendar {
         }
     }
 
-    fn action(&mut self, id: u32, _rel: Rel, _ctx: &mut Ctx) {
+    fn action(&mut self, id: u32, _rel: Rel, ctx: &mut Ctx) {
         match id {
+            A_LINK => {
+                self.linking = true;
+                self.field.text = self.url.clone();
+            }
+            A_BACK => {
+                self.linking = false;
+                self.field.focused = false;
+                ctx.want_keyboard(false);
+            }
+            A_FIELD => {
+                self.field.focused = true;
+                ctx.want_keyboard(true);
+            }
+            A_SAVE => self.save_link(ctx),
+            A_FILE => PICK_ICS.store(true, std::sync::atomic::Ordering::Relaxed),
+            A_UNLINK => {
+                ctx.settings.extra.remove(crate::modules::meetings::URL_KEY);
+                crate::features::set_on(ctx.settings, "meetings", false);
+                crate::modules::meetings::refresh("");
+                self.url.clear();
+                self.field.text.clear();
+            }
+            i if (A_JOIN..A_JOIN + 20).contains(&i) => {
+                if let Some(l) = self.events.get((i - A_JOIN) as usize).and_then(|e| e.link.clone()) {
+                    crate::app::open_later(l);
+                }
+            }
             A_PREV => self.step(-1),
             A_NEXT => self.step(1),
             A_TODAY => {
@@ -270,8 +401,41 @@ impl Module for Calendar {
     }
 
     fn scroll(&mut self, delta: f32) -> bool {
+        if self.linking {
+            return false;
+        }
         self.step(if delta > 0.0 { -1 } else { 1 });
         true
+    }
+
+    fn key(&mut self, vk: u16, ctrl: bool, ctx: &mut Ctx) -> bool {
+        match self.field.key(vk, ctrl) {
+            FieldKey::Submit => {
+                self.save_link(ctx);
+                true
+            }
+            FieldKey::Cancel => {
+                self.field.focused = false;
+                ctx.want_keyboard(false);
+                true
+            }
+            FieldKey::Edited => true,
+            FieldKey::Ignored => false,
+        }
+    }
+
+    fn chr(&mut self, c: char, _ctx: &mut Ctx) -> bool {
+        self.field.chr(c)
+    }
+
+    fn blur(&mut self) {
+        self.field.focused = false;
+    }
+
+    fn picked(&mut self, paths: Vec<String>, ctx: &mut Ctx) {
+        if let Some(p) = paths.into_iter().next() {
+            self.use_file(p, ctx);
+        }
     }
 
     fn debug_state(&self) -> String {

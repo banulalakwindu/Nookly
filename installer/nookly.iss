@@ -17,7 +17,7 @@ AppPublisher=Banula Lakwindu
 AppPublisherURL=https://github.com/banulalakwindu/Nookly
 AppSupportURL=https://github.com/banulalakwindu/Nookly/issues
 AppUpdatesURL=https://github.com/banulalakwindu/Nookly/releases
-AppCopyright=Copyright (C) 2026 Banula Lakwindu; based on WindyLand by Shabab
+AppCopyright=Copyright (C) 2026 Banula Lakwindu
 AppMutex=Nookly.SingleInstance
 CloseApplications=yes
 DefaultDirName={autopf}\Nookly
@@ -42,7 +42,7 @@ VersionInfoDescription=Nookly Setup
 VersionInfoProductName=Nookly
 VersionInfoProductVersion={#AppVersion}
 VersionInfoVersion={#AppVersion}
-VersionInfoCopyright=Copyright (C) 2026 Banula Lakwindu; based on WindyLand by Shabab
+VersionInfoCopyright=Copyright (C) 2026 Banula Lakwindu
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"

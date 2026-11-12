@@ -62,6 +62,11 @@ impl Item {
     }
 }
 
+/// The Share zone shown while files are dragged over (where to drop).
+pub static SHARE_ZONE: std::sync::Mutex<Option<Rect>> = std::sync::Mutex::new(None);
+/// Files dropped on Share, for the app to hand to Windows' Share window.
+pub static SHARE_NOW: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
 pub struct Shelf {
     items: Vec<Item>,
     drag_hover: bool,
@@ -101,6 +106,7 @@ impl Module for Shelf {
     fn title(&self) -> &'static str {
         "Shelf"
     }
+
     fn accent(&self) -> Color {
         col::PURPLE
     }
@@ -118,6 +124,21 @@ impl Module for Shelf {
     }
 
     fn draw(&mut self, ui: &mut Ui, mut r: Rect) {
+        // While files are dragged over: a Share zone on the right.
+        if self.drag_hover {
+            let share = r.cut_right(150.0, 10.0);
+            let on = ui.hovered(share);
+            *SHARE_ZONE.lock().unwrap() = Some(share);
+            let c = if on { col::BLUE } else { col::FAINT };
+            ui.fill_rr(share, 14.0, c.with_a(if on { 0.18 } else { 0.05 }));
+            ui.stroke_rr(share.inset(0.5), 14.0, c.with_a(0.6), 1.2);
+            let mut mid = share;
+            let ic = mid.cut_top(mid.h * 0.55, 0.0);
+            ui.icon("\u{E72D}", Rect::new(ic.x, ic.b() - 26.0, ic.w, 24.0), 20.0, c);
+            ui.text("Share", Rect::new(mid.x, mid.y + 2.0, mid.w, 20.0), 13.0, if on { c } else { col::DIM }, Weight::Semi, Align::Center);
+        } else {
+            *SHARE_ZONE.lock().unwrap() = None;
+        }
         let mut foot = r.cut_bottom(16.0, 6.0);
         if !self.items.is_empty() {
             ui.button(foot.cut_right(60.0, 8.0).inset_xy(0.0, -3.0), "Clear", A_CLEAR);
@@ -277,6 +298,12 @@ impl Module for Shelf {
     }
 
     fn drop_files(&mut self, paths: Vec<String>, _ctx: &mut Ctx) -> bool {
+        // Dropped on Share: Windows' Share window instead of the shelf.
+        let at = *crate::modules::DROP_AT.lock().unwrap();
+        if SHARE_ZONE.lock().unwrap().take().map_or(false, |z| z.contains(at.0, at.1)) {
+            *SHARE_NOW.lock().unwrap() = paths;
+            return true;
+        }
         for p in paths {
             if self.items.iter().any(|i| i.path.eq_ignore_ascii_case(&p)) {
                 continue;

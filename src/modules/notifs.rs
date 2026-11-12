@@ -76,11 +76,20 @@ pub struct Notifs {
     /// Notes that arrived while the notch was hidden (full-screen app),
     /// shown together when it's back.
     backlog: Vec<Note>,
+    /// Today's notifications the notch showed, newest first: (time, note).
+    history: Vec<(f64, Note)>,
+    /// Notifications are on (the tab shows only then).
+    on: bool,
+    with_text: bool,
+    scroll: f32,
 }
+
+pub const A_HIST: u32 = 100; // + index
+pub const A_CLEAR: u32 = 5;
 
 impl Notifs {
     pub fn new(hwnd: HWND) -> Notifs {
-        Notifs { hwnd: hwnd.0 as isize, inbox: Arc::default(), started: false, was_on: None, told_denied: false, shown: None, backlog: Vec::new() }
+        Notifs { hwnd: hwnd.0 as isize, inbox: Arc::default(), started: false, was_on: None, told_denied: false, shown: None, backlog: Vec::new(), history: Vec::new(), on: false, with_text: true, scroll: 0.0 }
     }
 
     /// Feed a note as if the watcher had found it (self-test, docs).
@@ -378,6 +387,8 @@ impl Module for Notifs {
             A_MUTE => "Stop showing this app's notifications in the notch",
             A_BANNERS => "Windows' notification settings",
             A_PRIVACY => "Notification privacy settings",
+            A_CLEAR => "Clear today's list",
+            i if (A_HIST..A_HIST + 100).contains(&i) => "Open the app that sent it",
             _ => "",
         }
     }
@@ -385,10 +396,67 @@ impl Module for Notifs {
         "Notifications"
     }
     fn has_tab(&self) -> bool {
-        false
+        self.on
+    }
+    fn icon(&self) -> &'static str {
+        glyph::BELL
+    }
+    fn accent(&self) -> Color {
+        col::BLUE
+    }
+    fn size(&self) -> (f32, f32) {
+        (500.0, 170.0)
+    }
+    fn scroll(&mut self, delta: f32) -> bool {
+        let max = (self.history.len() as f32 - 4.0).max(0.0) * 40.0;
+        self.scroll = (self.scroll - delta * 40.0).clamp(0.0, max);
+        max > 0.0
+    }
+    fn draw(&mut self, ui: &mut crate::ui::Ui, mut r: Rect) {
+        let mut head = r.cut_top(24.0, 8.0);
+        if !self.history.is_empty() {
+            ui.button(head.cut_right(64.0, 0.0), "Clear", A_CLEAR);
+        }
+        let n = self.history.len();
+        ui.text(&if n == 0 { "Nothing today yet".to_string() } else { format!("Today · {n}") }, head, 12.0, col::DIM, Weight::Semi, Align::Left);
+        if n == 0 {
+            ui.text_wrap("Notifications the notch shows today are listed here, so you can catch the ones you missed.", r, 12.0, col::FAINT, Weight::Regular, Align::Left);
+            return;
+        }
+        ui.push_clip(r);
+        let mut y = r.y - self.scroll;
+        for (k, (t, n)) in self.history.iter().enumerate() {
+            let row = Rect::new(r.x, y, r.w, 36.0);
+            y += 40.0;
+            if row.b() < r.y || row.y > r.b() {
+                continue;
+            }
+            let hov = ui.hovered(row) && r.contains(ui.mouse.0, ui.mouse.1);
+            ui.fill_rr(row, 10.0, if hov { col::BTN_HOVER } else { col::BTN });
+            let mut c = row.inset_xy(10.0, 3.0);
+            let dot = c.cut_left(8.0, 8.0);
+            ui.circle(dot.cx(), dot.cy(), 4.0, n.color.unwrap_or(col::BLUE));
+            let (_, _, _, mins) = crate::time::local_time(*t);
+            ui.text(&crate::time::fmt_mod(mins), c.cut_right(60.0, 4.0), 10.5, col::DIM, Weight::Regular, Align::Right);
+            let line1 = if n.title.is_empty() { n.app.clone() } else { format!("{} · {}", n.app, n.title) };
+            ui.text(&line1, c.cut_top(15.0, 0.0), 11.5, col::TEXT, Weight::Semi, Align::Left);
+            if self.with_text {
+                ui.text(&n.body.replace('\n', " "), c, 10.5, col::DIM, Weight::Regular, Align::Left);
+            }
+            ui.hit(row, A_HIST + k as u32);
+        }
+        ui.pop_clip();
     }
 
     fn tick(&mut self, ctx: &mut Ctx) {
+        self.on = ctx.settings.notif_on;
+        self.with_text = ctx.settings.notif_text;
+        // Only today's.
+        let day0 = {
+            let n = crate::time::Now::get();
+            crate::modules::meetings::local_to_unix(n.year as i32, n.month as u32, n.day as u32, 0, 0, 0)
+        };
+        self.history.retain(|(t, _)| *t >= day0);
         let on = ctx.settings.notif_on && !crate::time::demo();
         ON.store(on, Ordering::Relaxed);
         let stuck = self.started && crate::time::unix_now() as u64 > BEAT.load(Ordering::Relaxed) + 30;
@@ -446,7 +514,19 @@ impl Module for Notifs {
     }
 
     fn action(&mut self, id: u32, _rel: Rel, ctx: &mut Ctx) {
-        self.act(id, ctx);
+        match id {
+            A_CLEAR => {
+                self.history.clear();
+                self.scroll = 0.0;
+            }
+            i if (A_HIST..A_HIST + 100).contains(&i) => {
+                if let Some((_, n)) = self.history.get((i - A_HIST) as usize).cloned() {
+                    self.shown = Some(n);
+                    self.act(A_OPEN, ctx);
+                }
+            }
+            _ => self.act(id, ctx),
+        }
     }
 
     fn debug_state(&self) -> String {
@@ -466,6 +546,11 @@ impl Notifs {
             crate::app::dlog("notif: all muted");
             return;
         }
+        let now = crate::time::unix_now();
+        for n in &notes {
+            self.history.insert(0, (now, n.clone()));
+        }
+        self.history.truncate(50);
         // Several at once (e.g. after a full-screen game): show the newest,
         // and say how many more there were.
         let extra = notes.len() - 1;

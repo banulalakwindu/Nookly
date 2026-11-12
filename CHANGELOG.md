@@ -1,7 +1,35 @@
 # Changelog
 
-Nookly continues [WindyLand](https://github.com/shabab239/WindyLand) by Shabab
-(MIT License). Versions up to 0.1.21 below are WindyLand's own releases.
+Versions 0.1.x below came before the Nookly name.
+
+## 0.3.0: a lot more in the notch
+
+- **A new welcome tour**: hello, the look and where it sits, a colour, what you want in it, and four things to know. 30 seconds, all changeable later.
+- **Fresh look everywhere**: new screenshots, README and website.
+
+- **New panels** (each off until you switch it on in Settings > Features, or by a preset):
+  - **Notes**: a scratchpad that saves as you type.
+  - **Countdowns**: a name and a date picked with arrows (or the mouse wheel), "Every year" for birthdays and holidays, and a "12 days" widget.
+  - **Launcher**: pin apps, files, folders and sites: **Add apps...** (opens in the Start menu folder, several at once), **Folder...**, drop them on the notch while the tab is open, or paste a link.
+  - **Commands**: up to 5 of your own commands, each on its own schedule (1 minute to daily), with the first line each prints here and as widgets on the closed notch.
+  - **Toggles**: Wi-Fi, Bluetooth, dark mode and microphone mute, plus shortcuts to Night light, hotspot, Focus and display.
+  - **Health**: screen time today (top apps), eye breaks (20-20-20), stand-up reminders every 30 to 90 minutes and battery care (unplug at 80%).
+  - **Mirror**: a camera preview before a call; the camera runs only while the panel is on screen.
+  - **Notifications**: today's notifications in their own tab when "Show them in the notch" is on.
+- **Calendar files**: besides a link, choose an exported `.ics` file (Calendar > link > Choose file...).
+- **Liquid Glass no longer blocks screen recorders**: the notch used to stay hidden from capture while Liquid Glass was on, which some recorders refuse ("Nookly is preventing desktop capture"). Now it hides only for the instant it looks behind itself, so it also shows in screenshots and recordings.
+- **Next meeting**: link your calendar (its private iCal link, or an exported `.ics` file) in the Calendar tab. Events show in the month and the day panel, and the closed notch shows "Standup in 8 min" with a Join button for Teams, Zoom and Meet. Repeating events, exceptions and cancelled ones are handled.
+- **Downloads finished**: a live activity and a toast when a file lands in Downloads; click to open it.
+- **Ramadan mode** in Prayer: Sehri and Iftar countdowns in the panel and on the closed notch (auto by the Hijri calendar, or on / off).
+- **Money** in the Converter: USD, EUR, GBP, LKR, BDT, INR, SAR and AED at today's rates (fetched once a day, only after you ask).
+- **Share** zone: drag files onto the notch and drop them on Share to open Windows' Share window (Nearby Share, Phone Link, mail).
+- **Music**: drag the seek bar; "Song colour around the notch" puts a soft glow in the album art's colour around the closed notch that breathes with the music (read from Windows' audio meter, only while it's shown).
+- **Mouse on the closed notch** (Settings > Features > Keyboard & mouse shortcuts): scroll for volume or brightness (Shift + scroll is always brightness, with an overlay), middle-click play/pause, double-click for a screenshot, clipboard or a note. A fourth keyboard shortcut opens a quick note.
+- **Settings > Look** across the whole panel: **your own theme** (background and text colour, with a contrast check and "Fix it"), **size** (smaller, normal, larger), **reduce motion**, and **hide the notch for chosen apps**.
+- **Profiles**: Home, Work and Focus each keep their own features, widgets and theme; **Auto** switches to Work on weekdays 9 to 5.
+- Chiming reminders wait while you're on a call (the microphone is in use), as they already did during full-screen games and videos.
+- The Features page has 24 switches in four groups; what each does is in its tooltip. Switched-on ones are tinted with a coloured icon, switched-off ones plain with an outlined switch.
+- **More panels** (⋯) shows compact tiles that always fit the panel.
 
 ## 0.2.0: first Nookly release
 

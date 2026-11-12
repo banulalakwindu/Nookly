@@ -166,7 +166,7 @@ pub fn command(app: &mut App, id: u32) {
 pub fn about() {
     unsafe {
         let text = HSTRING::from(format!(
-            "Nookly {}\n\nA living notch for Windows.\nMusic, lyrics, timer, Pomodoro, to-do, water reminder, file shelf and clipboard history.\n\nBased on WindyLand by Shabab (MIT License).\nLyrics provided by LRCLIB (lrclib.net).\nYour data stays in %APPDATA%\\Nookly.\n\nhttps://github.com/{}",
+            "Nookly {}\n\nA living notch for Windows.\nMusic, widgets, calendar, notes, timers, health and much more, one hover away.\n\nBy Banula Lakwindu. Free and open source (MIT License).\nLyrics provided by LRCLIB (lrclib.net).\nYour data stays in %APPDATA%\\Nookly.\n\nhttps://github.com/{}",
             crate::modules::update::VERSION,
             crate::modules::update::REPO
         ));

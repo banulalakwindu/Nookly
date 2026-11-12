@@ -146,20 +146,24 @@ def read_raw(path: Path) -> Image.Image:
 
 
 def wallpaper(w, h, t=0.0):
-    """Purple-to-teal desktop wallpaper with two slowly drifting glows."""
+    """Nookly's desktop: deep ink with a warm amber glow up top, a teal one
+    low down, and a faint dot grid (the brand colours of the logo)."""
     y, x = np.mgrid[0:h, 0:w].astype(np.float32)
     x /= w
     y /= h
-    a = np.array([58, 45, 107], np.float32)
-    b = np.array([22, 104, 118], np.float32)
-    k = np.clip(0.55 * x + 0.45 * y, 0, 1)[..., None]
+    a = np.array([30, 24, 48], np.float32)
+    b = np.array([14, 30, 40], np.float32)
+    k = np.clip(0.35 * x + 0.65 * y, 0, 1)[..., None]
     img = a * (1 - k) + b * k
-    for cx, cy, r, col, sp in [(0.18, 0.25, 0.35, (150, 90, 220), 0.07), (0.82, 0.8, 0.4, (40, 190, 190), 0.05)]:
-        cx += 0.05 * math.sin(t * sp * 6.28)
-        cy += 0.04 * math.cos(t * sp * 6.28)
+    for cx, cy, r, col, amt, sp in [(0.5, -0.05, 0.42, (255, 150, 60), 0.42, 0.06), (0.88, 0.95, 0.45, (60, 200, 185), 0.32, 0.05), (0.08, 0.7, 0.35, (120, 80, 220), 0.25, 0.04)]:
+        cx += 0.04 * math.sin(t * sp * 6.28)
+        cy += 0.03 * math.cos(t * sp * 6.28)
         g = np.exp(-(((x - cx) * w / h) ** 2 + (y - cy) ** 2) / (r * r))[..., None]
-        img = img * (1 - 0.35 * g) + np.array(col, np.float32) * 0.35 * g
-    img *= 0.92
+        img = img * (1 - amt * g) + np.array(col, np.float32) * amt * g
+    # Dot grid, every 28 px.
+    yy, xx = np.mgrid[0:h, 0:w]
+    dots = ((xx % 28 == 0) & (yy % 28 == 0))[..., None]
+    img = np.where(dots, img * 0.8 + 255 * 0.2 * 0.35, img)
     return Image.fromarray(img.clip(0, 255).astype(np.uint8)).convert("RGBA")
 
 
@@ -178,8 +182,8 @@ def fake_windows(card: Image.Image):
     w, h = card.size
     for x0, y0, x1, y1 in [(0.06, 0.42, 0.44, 0.97), (0.54, 0.5, 0.95, 1.05)]:
         box = (int(x0 * w), int(y0 * h), int(x1 * w), int(y1 * h))
-        d.rounded_rectangle(box, 18, fill=(12, 14, 22, 92), outline=(255, 255, 255, 26), width=2)
-        d.rounded_rectangle((box[0], box[1], box[2], box[1] + 44), 18, fill=(255, 255, 255, 18))
+        d.rounded_rectangle(box, 22, fill=(255, 255, 255, 16), outline=(255, 255, 255, 40), width=2)
+        d.rounded_rectangle((box[0], box[1], box[2], box[1] + 44), 22, fill=(255, 255, 255, 14))
         for i in range(3):
             d.ellipse((box[0] + 22 + i * 26, box[1] + 15, box[0] + 36 + i * 26, box[1] + 29), fill=(255, 255, 255, 46))
         for i in range(4):

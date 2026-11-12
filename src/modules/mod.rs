@@ -16,7 +16,16 @@ use crate::ui::Ui;
 
 pub mod agents;
 pub mod calendar;
+pub mod countdown;
+pub mod downloads;
+pub mod launcher;
+pub mod health;
+pub mod meetings;
+pub mod mirror;
+pub mod notes;
+pub mod toggles;
 pub mod clipboard;
+pub mod commands;
 pub mod example;
 pub mod monitor;
 pub mod music;
@@ -51,10 +60,17 @@ pub fn all(hwnd: HWND) -> Vec<Box<dyn Module>> {
         Box::new(water::Water::load()),
         Box::new(todo::Todo::load()),
         Box::new(calendar::Calendar::new()),
+        Box::new(notes::Notes::load()),
+        Box::new(countdown::Countdowns::load()),
         Box::new(shelf::Shelf::load()),
         Box::new(clipboard::Clipboard::new(hwnd)),
         Box::new(prayer::Prayer::load()),
         Box::new(tools::Tools::new(hwnd)),
+        Box::new(launcher::Launcher::load()),
+        Box::new(toggles::Toggles::new()),
+        Box::new(mirror::Mirror::new()),
+        Box::new(health::Health::load()),
+        Box::new(commands::Commands::load()),
         Box::new(agents::Agents::new()),
         Box::new(monitor::Monitor::new()),
         Box::new(widgets::Widgets::new()),
@@ -62,6 +78,8 @@ pub fn all(hwnd: HWND) -> Vec<Box<dyn Module>> {
         Box::new(privacy::Privacy::new()),
         Box::new(notifs::Notifs::new(hwnd)),
         Box::new(update::Updater::new(hwnd)),
+        Box::new(downloads::Downloads::new()),
+        Box::new(meetings::Meetings::new()),
         // Box::new(example::Example::default()),
     ]
 }
@@ -248,6 +266,9 @@ impl<'a> Ctx<'a> {
     }
 }
 
+/// Where files were dropped on the notch (DIPs), for modules with zones.
+pub static DROP_AT: std::sync::Mutex<(f32, f32)> = std::sync::Mutex::new((-1e4, -1e4));
+
 /// Relative click position inside the clicked hit rect (0..1, 0..1).
 pub type Rel = (f32, f32);
 
@@ -362,6 +383,8 @@ pub trait Module {
     fn drop_files(&mut self, paths: Vec<String>, ctx: &mut Ctx) -> bool {
         false
     }
+    /// Paths picked in a file dialog this module asked for.
+    fn picked(&mut self, paths: Vec<String>, ctx: &mut Ctx) {}
     /// The user is dragging the hit `id` out of the notch: return paths to drag.
     fn drag_out(&mut self, id: u32) -> Option<Vec<String>> {
         None
@@ -372,4 +395,34 @@ pub trait Module {
     fn debug_state(&self) -> String {
         String::new()
     }
+}
+
+/// A simple live activity across both wings: icon and label on the left,
+/// a value on the right (downloads, the next meeting...).
+pub fn live_simple(ui: &mut Ui, left: Rect, right: Rect, icon: &str, c: Color, label: &str, value: &str) {
+    let size = if left.h < 22.0 { 11.5 } else { 12.5 };
+    let mut l = left;
+    let ic = l.cut_left(l.h.min(18.0), 6.0);
+    ui.icon(icon, ic, (left.h * 0.55).min(13.0), c);
+    if left.h >= 18.0 {
+        let mut s = label.to_string();
+        while !s.is_empty() && ui.measure(&s, size, crate::gfx::Weight::Semi) > l.w {
+            s.pop();
+        }
+        if s.len() < label.len() && s.len() > 1 {
+            s.pop();
+            s.push('…');
+        }
+        ui.text(&s, l, size, crate::gfx::col::TEXT, crate::gfx::Weight::Semi, crate::gfx::Align::Left);
+    }
+    ui.text(value, right, size, c, crate::gfx::Weight::Semi, crate::gfx::Align::Right);
+}
+
+/// The same on one side of the clock: icon and value.
+pub fn live_simple_side(ui: &mut Ui, r: Rect, right: bool, icon: &str, c: Color, value: &str) {
+    let size = if r.h < 22.0 { 11.5 } else { 12.5 };
+    let tw = ui.measure(value, size, crate::gfx::Weight::Semi);
+    let (ic, tr) = side_rects(r, right, r.h.min(18.0), tw, 5.0);
+    ui.icon(icon, ic, 12.0, c);
+    ui.text(value, tr, size, crate::gfx::col::TEXT, crate::gfx::Weight::Semi, crate::gfx::Align::Left);
 }

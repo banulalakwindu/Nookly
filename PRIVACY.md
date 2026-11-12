@@ -88,6 +88,15 @@ information to them:
    page, the text you type goes to Open-Meteo's place search. Open-Meteo's
    own terms apply to those requests.
 
+4. **Your calendar** (Google, Outlook or any iCal link), only if you
+   paste your calendar's private iCal link in the Calendar tab: about every
+   15 minutes Nookly downloads that calendar straight from where it lives,
+   to show your events and the next meeting. The link stays in your
+   settings file on your PC; remove it in the Calendar tab.
+5. **[open.er-api.com](https://www.exchangerate-api.com)** (currency rates),
+   only after you click **Get today's rates** in Tools > Converter > Money,
+   then at most once a day while you use it. Nothing about you is sent.
+
 If you pick **Windows location** on the Place page, Nookly asks Windows'
 location service for your position (on your PC; Windows itself may use
 your network to work it out). It's only used for the weather and, if you
@@ -95,6 +104,15 @@ choose, prayer times, and is saved in your settings file on your PC.
 
 Like any internet request, these services can see your IP address.
 Nookly sends no identifiers, cookies or usage data with them.
+
+## Camera, screen time and commands
+
+- **Mirror** turns the camera on only while its panel is on screen, to show
+  you a preview. Frames stay in memory and are never saved or sent.
+- **Health** counts screen time from the app in front, while you use the
+  PC. It keeps today's totals per app name in `screentime.txt` on your PC.
+- **Commands** runs the commands you type, on your PC, with cmd.exe, on
+  the schedule you pick, only while the Commands panel is switched on.
 
 ## Children
 

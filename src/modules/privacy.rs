@@ -19,6 +19,9 @@ pub const CAM: Color = col::GREEN;
 /// Self-test: pretend a demo app is using the mic (toggle).
 pub const A_DEMO: u32 = 990;
 
+/// The microphone is in use (a call): chiming reminders wait for it.
+pub static IN_CALL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Default)]
 pub struct Privacy {
     mic: Vec<String>,
@@ -130,6 +133,8 @@ impl Module for Privacy {
         }
         self.last_scan = now;
         let (mut mic, cam) = (in_use("microphone"), in_use("webcam"));
+        // A call (an app other than Nookly using the mic): reminders wait.
+        IN_CALL.store(mic.iter().any(|a| !a.to_lowercase().contains("nookly")), std::sync::atomic::Ordering::Relaxed);
         if self.demo {
             mic.push("Demo Recorder".into());
         }

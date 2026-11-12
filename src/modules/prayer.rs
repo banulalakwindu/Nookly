@@ -73,6 +73,8 @@ const A_BELL: u32 = 90; // + prayer
 const A_MINUS: u32 = 100; // + prayer
 const A_PLUS: u32 = 110; // + prayer
 const A_T_OK: u32 = 200;
+const A_RAMADAN: u32 = 120;
+const A_HIJRI: u32 = 121; // + 0 one day earlier, 1 later
 /// Self-test: put Dhuhr at this minute (reminder due) / ten minutes away
 /// (countdown in the notch), without saving; reload the saved settings.
 pub const A_TEST_DUE: u32 = 990;
@@ -242,6 +244,25 @@ pub struct Prayer {
     /// "Use it for prayer times too" (Widgets > Place): that place instead
     /// of the city above, without changing what's saved.
     ovr: Option<(f64, f64, String)>,
+    /// Ramadan mode: 0 by the Hijri calendar, 1 on, 2 off.
+    ramadan: u8,
+    /// Days to move the Hijri date (moon sighting where you live).
+    hijri_adj: i64,
+}
+
+/// The Hijri date (tabular calendar; your local moon sighting may differ by
+/// a day, which `hijri_adj` fixes).
+pub fn hijri(y: i32, m: u32, d: u32, adj: i64) -> (i64, i64, i64) {
+    let jd = crate::modules::countdown::day_number(y, m, d) + 2440588 + adj;
+    let l = jd - 1948440 + 10632;
+    let n = (l - 1) / 10631;
+    let l = l - 10631 * n + 354;
+    let j = ((10985 - l) / 5316) * ((50 * l) / 17719) + (l / 5670) * ((43 * l) / 15238);
+    let l = l - ((30 - j) / 15) * ((17719 * j) / 50) - (j / 16) * ((15238 * j) / 43) + 29;
+    let hm = (24 * l) / 709;
+    let hd = l - (709 * hm) / 24;
+    let hy = 30 * n + j - 30;
+    (hy, hm, hd)
 }
 
 /// The prayer-times place: latitude, longitude and its name (the Weather
@@ -276,6 +297,12 @@ impl Prayer {
             fired: Vec::new(),
             cache: None,
             ovr: None,
+            ramadan: match kv.get("ramadan").map(String::as_str) {
+                Some("on") => 1,
+                Some("off") => 2,
+                _ => 0,
+            },
+            hijri_adj: kv.get("hijri_adj").and_then(|v| v.parse().ok()).unwrap_or(0).clamp(-2, 2),
         };
         for (i, n) in NAMES.iter().enumerate() {
             let k = n.to_lowercase();
@@ -303,6 +330,8 @@ impl Prayer {
         kv.insert("asr".to_string(), if self.hanafi { "hanafi" } else { "shafi" }.to_string());
         kv.insert("before".to_string(), self.before.to_string());
         kv.insert("live".to_string(), (self.live_on as u8).to_string());
+        kv.insert("ramadan".to_string(), ["auto", "on", "off"][self.ramadan as usize].to_string());
+        kv.insert("hijri_adj".to_string(), self.hijri_adj.to_string());
         for (i, n) in NAMES.iter().enumerate() {
             let k = n.to_lowercase();
             kv.insert(format!("off_{k}"), self.offsets[i].to_string());
@@ -359,6 +388,34 @@ impl Prayer {
         }
     }
 
+    /// It's Ramadan (by the Hijri date, unless switched on or off).
+    pub fn in_ramadan(&self) -> bool {
+        match self.ramadan {
+            1 => true,
+            2 => false,
+            _ => {
+                let n = Now::get();
+                hijri(n.year as i32, n.month as u32, n.day as u32, self.hijri_adj).1 == 9
+            }
+        }
+    }
+
+    /// Ramadan: what's next, Sehri ending (Fajr) or Iftar (Maghrib), and
+    /// minutes until it.
+    fn fast(&mut self) -> (&'static str, f64) {
+        let now = Now::get();
+        let m = now.hour as f64 * 60.0 + now.min as f64 + now.sec as f64 / 60.0;
+        let t = self.today();
+        let (fajr, maghrib) = (t[0] * 60.0, t[4] * 60.0);
+        if m < fajr {
+            ("Sehri ends", fajr - m)
+        } else if m < maghrib {
+            ("Iftar", maghrib - m)
+        } else {
+            ("Sehri ends", fajr + 24.0 * 60.0 - m)
+        }
+    }
+
     fn commit_custom(&mut self) {
         if let Some(s) = self.editing.take() {
             let nums: Vec<f64> = s.split([',', ' ']).filter_map(|x| x.trim().parse().ok()).collect();
@@ -375,10 +432,19 @@ impl Prayer {
         let t = self.today();
         let (current, next, left) = self.status();
         let mut l = r.cut_left(196.0, 18.0);
-        // Next prayer, big, with a countdown and progress through the gap.
-        ui.text(&format!("Next · {}", NAMES[next]), l.cut_top(18.0, 2.0), 12.0, col::DIM, Weight::Semi, Align::Left);
+        let ramadan = self.in_ramadan();
+        let (fast_name, fast_left) = self.fast();
+        // Ramadan: Sehri and Iftar come first; otherwise the next prayer,
+        // big, with a countdown and progress through the gap.
+        let (label, at, left) = if ramadan {
+            let i = if fast_name == "Iftar" { 4 } else { 0 };
+            (format!("Ramadan · {fast_name}"), t[i], fast_left)
+        } else {
+            (format!("Next · {}", NAMES[next]), t[next], left)
+        };
+        ui.text(&label, l.cut_top(18.0, 2.0), 12.0, col::DIM, Weight::Semi, Align::Left);
         let head = l.cut_top(40.0, 2.0);
-        ui.text(&hhmm(t[next]), head, 32.0, ACCENT, Weight::Semi, Align::Left);
+        ui.text(&hhmm(at), head, 32.0, ACCENT, Weight::Semi, Align::Left);
         let (h, m) = ((left / 60.0).floor() as i64, (left % 60.0).floor() as i64);
         let count = if h > 0 { format!("in {h} h {m} min") } else { format!("in {m} min") };
         ui.text(&count, l.cut_top(18.0, 8.0), 12.5, col::TEXT, Weight::Regular, Align::Left);
@@ -387,6 +453,9 @@ impl Prayer {
         ui.progress(l.cut_top(5.0, 14.0), (1.0 - left / span).clamp(0.0, 1.0) as f32, ACCENT, None);
         let mut row = l.cut_top(28.0, 0.0);
         ui.icon_btn(row.cut_right(28.0, 0.0), glyph::SETTINGS, A_SETTINGS, 12.0, col::DIM, Some(col::BTN), "Location and method");
+        let rl = ["Ramadan: auto", "Ramadan: on", "Ramadan: off"][self.ramadan as usize];
+        let rw = ui.measure(rl, 11.5, Weight::Semi) + 18.0;
+        ui.chip(row.cut_right(rw, 6.0).centered(rw, 24.0), rl, A_RAMADAN, ramadan, ACCENT);
         ui.text(&format!("{} · {}{}", self.place(), METHODS[self.method].1, if self.hanafi { " · Hanafi" } else { "" }), row, 10.5, col::FAINT, Weight::Regular, Align::Left);
 
         // The six times.
@@ -487,6 +556,7 @@ impl Module for Prayer {
     fn tip(&self, id: u32) -> &'static str {
         match id {
             A_SETTINGS => "Location, calculation method and minute adjustments",
+            A_RAMADAN => "Ramadan mode: Sehri and Iftar countdowns (auto follows the Hijri calendar)",
             A_DONE => "Back to today's times",
             i if (A_PAGE..A_PAGE + 5).contains(&i) => "Switch settings page",
             i if (A_CITY..A_CITY + 30).contains(&i) => "Use this city's times",
@@ -571,6 +641,10 @@ impl Module for Prayer {
             ctx.want_keyboard(false);
         }
         match id {
+            A_RAMADAN => {
+                self.ramadan = (self.ramadan + 1) % 3;
+                self.save();
+            }
             A_TEST_DUE | A_TEST_SOON => {
                 self.offsets = [0; 6];
                 self.cache = None;
@@ -684,10 +758,14 @@ impl Module for Prayer {
     }
 
     fn live(&self) -> Option<u8> {
+        let mut me = Prayer { cache: self.cache.clone(), ovr: self.ovr.clone(), fired: Vec::new(), editing: None, page: Page::Main, ..*self };
+        // Ramadan: an hour before Sehri ends and before Iftar.
+        if me.in_ramadan() && me.fast().1 <= 60.0 {
+            return Some(57);
+        }
         if !self.live_on {
             return None;
         }
-        let mut me = Prayer { cache: self.cache.clone(), ovr: self.ovr.clone(), fired: Vec::new(), editing: None, page: Page::Main, ..*self };
         let (_, next, left) = me.status();
         (next != 1 && left <= 15.0).then_some(55)
     }
@@ -709,6 +787,7 @@ impl Module for Prayer {
     fn draw_live_side(&mut self, ui: &mut Ui, r: Rect, right: bool) {
         // Moon and the countdown.
         let (_, _, mins) = self.status();
+        let mins = if self.in_ramadan() && self.fast().1 <= 60.0 { self.fast().1 } else { mins };
         let secs = (mins * 60.0).max(0.0) as i64;
         let text = format!("{}:{:02}", secs / 60, secs % 60);
         let tw = ui.measure_digits(&text, 13.0);
@@ -719,6 +798,13 @@ impl Module for Prayer {
 
     fn draw_live(&mut self, ui: &mut Ui, left: Rect, right: Rect) {
         let (_, next, mins) = self.status();
+        if self.in_ramadan() && self.fast().1 <= 60.0 {
+            let (name, mins) = self.fast();
+            let label = if name == "Iftar" { "Iftar" } else { "Sehri" };
+            let secs = (mins * 60.0).max(0.0) as i64;
+            crate::modules::live_simple(ui, left, right, MOON, ACCENT, label, &format!("{}:{:02}", secs / 60, secs % 60));
+            return;
+        }
         // Narrow wings (Slim): a tighter moon, and no moon if the name
         // would not fit beside it.
         let iw = if left.w < 80.0 { left.h.min(20.0) } else { left.h };

@@ -13,10 +13,12 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 IMAGES = ROOT / "docs" / "images"
-BG = (18, 20, 25)
+BG = (13, 12, 20)
 TEXT = (245, 245, 247)
 DIM = (160, 164, 176)
-CHIP = (38, 42, 52)
+CHIP = (30, 26, 40)
+AMBER = (255, 180, 60)
+TEAL = (92, 225, 210)
 W = 1600
 PAD = 40
 
@@ -46,6 +48,8 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
         im.paste(card_img, (PAD, PAD), mask)
         d = ImageDraw.Draw(im)
         y = PAD + ch + 36
+        d.rounded_rectangle((PAD + 4, y - 14, PAD + 64, y - 8), 3, fill=AMBER)
+        d.ellipse((PAD + 72, y - 15, PAD + 80, y - 7), fill=TEAL)
         d.text((PAD + 4, y), title, font=font(54, "bold"), fill=TEXT)
         y += 72
         d.text((PAD + 4, y), sub, font=font(28), fill=DIM)
@@ -54,8 +58,8 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
         f = font(22, "semibold")
         for c in chips:
             tw = d.textlength(c, font=f)
-            d.rounded_rectangle((x, y, x + tw + 36, y + 42), 21, fill=CHIP)
-            d.text((x + 18, y + 21), c, font=f, fill=TEXT, anchor="lm")
+            d.rounded_rectangle((x, y, x + tw + 36, y + 42), 21, fill=CHIP, outline=AMBER + (150,), width=2)
+            d.text((x + 18, y + 21), c, font=f, fill=(255, 214, 150), anchor="lm")
             x += tw + 48
         return im.convert("RGB")
 
@@ -79,6 +83,8 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
         im.alpha_composite(top, (0, 0))
         d = ImageDraw.Draw(im)
         y = top.height + 6
+        d.rounded_rectangle((PAD + 4, y - 14, PAD + 64, y - 8), 3, fill=AMBER)
+        d.ellipse((PAD + 72, y - 15, PAD + 80, y - 7), fill=TEAL)
         d.text((PAD + 4, y), title, font=font(54, "bold"), fill=TEXT)
         y += 72
         d.text((PAD + 4, y), sub, font=font(28), fill=DIM)
@@ -87,8 +93,8 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
             x = PAD
             for c in row:
                 tw = d.textlength(c, font=f)
-                d.rounded_rectangle((x, y, x + tw + 36, y + 42), 21, fill=CHIP)
-                d.text((x + 18, y + 21), c, font=f, fill=TEXT, anchor="lm")
+                d.rounded_rectangle((x, y, x + tw + 36, y + 42), 21, fill=CHIP, outline=AMBER + (150,), width=2)
+                d.text((x + 18, y + 21), c, font=f, fill=(255, 214, 150), anchor="lm")
                 x += tw + 48
             y += 54
         return im.convert("RGB")
@@ -105,11 +111,12 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
     # Hero: every panel at a glance (a collage), so the first image shows
     # how much is in it.
     pairs = [
-        [("panel_agents", "AI agents: Hermes, Claude Code, Codex"), ("panel_tools_color", "Tools: color picker, calculator, QR, converter")],
-        [("panel_monitor", "System monitor"), ("panel_clipboard", "Clipboard: click to paste")],
+        [("panel_calendar", "Calendar with your meetings"), ("panel_health", "Health: screen time and breaks")],
+        [("panel_countdowns", "Countdowns"), ("panel_commands", "Commands on a schedule")],
+        [("panel_agents", "AI agents: Claude Code, Codex, Hermes"), ("panel_tools_color", "Tools: colour, maths, QR, money")],
+        [("panel_launcher", "Launcher"), ("panel_toggles", "Quick toggles")],
         [("panel_timer", "Timer and stopwatch"), ("panel_pomodoro", "Pomodoro")],
-        [("panel_todo", "To-do with reminders"), ("panel_water", "Water reminder")],
-        [("panel_prayer", "Prayer times"), ("panel_shelf", "File shelf and screenshots")],
+        [("panel_clipboard", "Clipboard: click to paste"), ("panel_shelf", "Shelf and Share")],
     ]
     cw = W - 2 * PAD
     gap = 22
@@ -235,7 +242,13 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
     single("calendar", "panel_calendar", "Calendar", "The month at a glance, with the days your tasks are due.", ["Today in red", "Due-task dots", "Wheel for months"])
     single("themes", "settings_look", "Themes", "Ten themes, Liquid Glass included, every one checked for readable contrast.", ["Black", "Rose", "Forest", "Paper", "Liquid Glass"])
     single("settings-features", "settings_features", "Features", "Switch on only what you use; what's off doesn't run at all.", ["Minimal", "Student", "Work", "Everything", "Win+Alt+N"])
-    single("tour", "tour_style", "Welcome tour", "First run asks how the notch should look, then where it sits.", ["Full", "Slim", "Compact", "Pill", "Hidden"])
+    single("tour", "tour_hello", "A friendly start", "Five quick steps: look, place, colour, what's in it, and how to use it.", ["30 seconds", "Change it anytime"])
+    single("notes", "panel_notes", "Notes", "A scratchpad that saves as you type.", ["Saves itself", "Quick-note shortcut"])
+    single("countdowns", "panel_countdowns", "Countdowns", "Exams, trips, birthdays: \"12 days\" right on the notch.", ["Date picker", "Every year", "Notch widget"])
+    single("launcher", "panel_launcher", "Launcher", "Your apps, folders and sites, one click away.", ["Add apps...", "Drop to pin", "Links"])
+    single("commands", "panel_commands", "Commands", "Run your own commands on a schedule and see what they print.", ["1 min to daily", "Up to 5", "On the notch"])
+    single("toggles", "panel_toggles", "Quick toggles", "Wi-Fi, Bluetooth, dark mode and the microphone in one place.", ["Wi-Fi", "Bluetooth", "Dark mode", "Mic mute"])
+    single("health", "panel_health", "Health", "Screen time today, eye breaks, stand-up reminders and battery care.", ["Screen time", "20-20-20", "Stand up", "Unplug at 80%"])
     single("notifications", "toast_notification", "Windows notifications", "Other apps' notifications drop out of the notch, with their icon and colour.", ["Click to open the app", "Mute an app", "Respects Do Not Disturb"], min_h=300)
 
     # Styles: five small cards, two per row.

@@ -24,9 +24,8 @@ pub fn dir() -> PathBuf {
     p
 }
 
-/// First start of Nookly on a PC that had WindyLand (the project Nookly is
-/// based on): copy its settings and data over. WindyLand's folder stays as
-/// it is.
+/// First start of Nookly on a PC that had a version from before the Nookly
+/// name: copy its settings and data over. The old folder stays as it is.
 fn copy_from_windyland(old: &std::path::Path, new: &std::path::Path) {
     let Ok(list) = fs::read_dir(old) else { return };
     if fs::create_dir_all(new).is_err() {
@@ -465,7 +464,7 @@ pub struct NotchLayout {
 const DEFAULT_PICKED: [&str; 6] = ["pomodoro", "timer", "prayer", "music", "agents", "due"];
 
 /// Live activities: each fills both sides of the clock.
-const LIVE: [&str; 6] = ["pomodoro", "timer", "prayer", "music", "agents", "due"];
+const LIVE: [&str; 8] = ["pomodoro", "timer", "prayer", "music", "agents", "due", "meeting", "downloads"];
 
 impl Default for NotchLayout {
     /// Today's order: timers above prayer above music above agents above

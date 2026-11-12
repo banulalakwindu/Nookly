@@ -453,7 +453,38 @@ const A_LINE: u32 = 1000; // + line index
 /// `--render-docs` hook: load the demo lyrics and open the lyrics view.
 pub const A_DEMO_LYRICS: u32 = 990;
 
+/// The album art's main colour while a song plays (the notch's glow).
+pub static ART_COLOR: Mutex<Option<Color>> = Mutex::new(None);
+
+/// A lively average colour of a picture (premultiplied BGRA): dark, grey
+/// and washed-out pixels count less, then it's brightened a little.
+pub fn main_color(w: u32, h: u32, px: &[u8]) -> Option<Color> {
+    let (mut r, mut g, mut b, mut n) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let step = ((w * h) as usize / 4000).max(1);
+    for p in px.chunks_exact(4).step_by(step) {
+        let (pb, pg, pr) = (p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0);
+        let mx = pr.max(pg).max(pb);
+        let mn = pr.min(pg).min(pb);
+        let wgt = (mx - mn) * 2.0 + 0.05 + mx * 0.2;
+        r += pr * wgt;
+        g += pg * wgt;
+        b += pb * wgt;
+        n += wgt;
+    }
+    if n <= 0.0 {
+        return None;
+    }
+    let (r, g, b) = (r / n, g / n, b / n);
+    let mx = r.max(g).max(b).max(1e-3);
+    let k = (0.85 / mx).min(3.0);
+    Some(Color { r: (r * k).min(1.0), g: (g * k).min(1.0), b: (b * k).min(1.0), a: 1.0 })
+}
+
 pub struct Music {
+    /// Dragging the seek bar: where it would jump (0..1).
+    scrub: Option<f32>,
+    seek_bar: Rect,
+    art_seen: u64,
     shared: Arc<Mutex<MediaInfo>>,
     tx: Sender<Cmd>,
     info: MediaInfo,
@@ -481,6 +512,9 @@ impl Music {
             tx,
             info: MediaInfo::default(),
             art: None,
+            scrub: None,
+            seek_bar: Rect::new(0.0, 0.0, 0.0, 0.0),
+            art_seen: u64::MAX,
             show_lyrics,
             lyrics: Arc::new(Mutex::new((String::new(), Lyrics::Off))),
             lyric_scroll: 0.0,
@@ -559,8 +593,20 @@ impl Music {
         ui.text(&fmt_dur(pos), lt, 10.5, col::DIM, Weight::Regular, Align::Left);
         let remain = if info.dur > 0.0 { format!("-{}", fmt_dur(info.dur - pos)) } else { String::new() };
         ui.text(&remain, rt, 10.5, col::DIM, Weight::Regular, Align::Right);
-        let frac = if info.dur > 0.0 { (pos / info.dur) as f32 } else { 0.0 };
-        ui.progress(prog.centered(prog.w, 4.0), frac, col::TEXT, if info.dur > 0.0 { Some(A_SEEK) } else { None });
+        let frac = match self.scrub {
+            Some(f) => f,
+            None if info.dur > 0.0 => (pos / info.dur) as f32,
+            None => 0.0,
+        };
+        let bar = prog.centered(prog.w, 4.0);
+        self.seek_bar = bar;
+        ui.progress(bar, frac, col::TEXT, if info.dur > 0.0 { Some(A_SEEK) } else { None });
+        if let Some(f) = self.scrub {
+            // The time you'd land on, and a knob.
+            ui.circle(bar.x + bar.w * f, bar.cy(), 6.0, col::TEXT);
+            ui.fill_rr(lt, 4.0, col::NOTCH);
+            ui.text(&fmt_dur(f as f64 * info.dur), lt, 10.5, col::TEXT, Weight::Semi, Align::Left);
+        }
 
         let mut ctl = r.cut_top(32.0, 0.0);
         let lyr = ctl.cut_right(32.0, 0.0);
@@ -663,6 +709,33 @@ impl Music {
 }
 
 impl Module for Music {
+    fn drag_begin(&mut self, id: u32, x: f32, _y: f32) -> bool {
+        if id != A_SEEK || self.info.dur <= 0.0 {
+            return false;
+        }
+        self.drag_to(x, 0.0);
+        true
+    }
+
+    fn drag_to(&mut self, x: f32, _y: f32) {
+        let b = self.seek_bar;
+        if b.w > 0.0 {
+            self.scrub = Some(((x - b.x) / b.w).clamp(0.0, 1.0));
+        }
+    }
+
+    fn drag_drop(&mut self, _x: f32, _y: f32, _ctx: &mut Ctx) {
+        // Dropped outside the window: x is far away, so keep the last spot.
+        if let Some(f) = self.scrub.take() {
+            let t = f as f64 * self.info.dur;
+            let _ = self.tx.send(Cmd::Seek(t));
+            let mut s = self.shared.lock().unwrap();
+            s.pos = t;
+            s.stamp = unix_now();
+            self.info = s.clone();
+        }
+    }
+
     fn tip(&self, id: u32) -> &'static str {
         match id {
             A_TOGGLE => "Play or pause",
@@ -698,6 +771,15 @@ impl Module for Music {
         }
         self.info = fresh;
         self.ensure_lyrics();
+        // The art's colour, when it changes.
+        if self.info.art_ver != self.art_seen {
+            self.art_seen = self.info.art_ver;
+            *ART_COLOR.lock().unwrap() = self.info.art.as_ref().and_then(|a| main_color(a.0, a.1, &a.2));
+        }
+        if !self.info.playing || !self.info.has {
+            *ART_COLOR.lock().unwrap() = None;
+            self.art_seen = u64::MAX;
+        }
     }
 
     fn draw(&mut self, ui: &mut Ui, r: Rect) {

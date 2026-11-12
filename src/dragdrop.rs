@@ -27,8 +27,13 @@ impl IDropTarget_Impl for Target_Impl {
         Ok(())
     }
 
-    fn DragOver(&self, _k: MODIFIERKEYS_FLAGS, _pt: &POINTL, eff: *mut DROPEFFECT) -> Result<()> {
-        let ok = with_app(|a| !a.dragging_out).unwrap_or(false);
+    fn DragOver(&self, _k: MODIFIERKEYS_FLAGS, pt: &POINTL, eff: *mut DROPEFFECT) -> Result<()> {
+        let (x, y) = (pt.x, pt.y);
+        let ok = with_app(|a| {
+            a.drag_over(x, y);
+            !a.dragging_out
+        })
+        .unwrap_or(false);
         unsafe { *eff = if ok { DROPEFFECT_COPY } else { DROPEFFECT_NONE } };
         Ok(())
     }
@@ -38,8 +43,10 @@ impl IDropTarget_Impl for Target_Impl {
         Ok(())
     }
 
-    fn Drop(&self, d: Option<&IDataObject>, _k: MODIFIERKEYS_FLAGS, _pt: &POINTL, eff: *mut DROPEFFECT) -> Result<()> {
+    fn Drop(&self, d: Option<&IDataObject>, _k: MODIFIERKEYS_FLAGS, pt: &POINTL, eff: *mut DROPEFFECT) -> Result<()> {
         let paths = d.map(|d| unsafe { extract(d) }).unwrap_or_default();
+        let (x, y) = (pt.x, pt.y);
+        with_app(|a| a.drag_over(x, y));
         with_app(|a| a.drop_paths(paths));
         unsafe { *eff = DROPEFFECT_COPY };
         Ok(())

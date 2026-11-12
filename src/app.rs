@@ -76,11 +76,15 @@ const O_EDGE: u32 = 20; // + index into Edge::ALL
 const O_PRESET: u32 = 30; // + index into features::PRESETS
 const ONBOARD_STEPS: u8 = 5;
 /// Tour step 3: how to use it.
-const TOUR_TIPS: [(&str, &str, &str); 3] = [
-    (glyph::PLAY, "Hover to open", "Click works too. Move the mouse away and it closes."),
-    ("\u{E962}", "Scroll to switch", "Roll the mouse wheel on the open notch to change panels."),
-    (glyph::BACK, "Right-drag: move it", "Drop it on any edge of any screen."),
+const TOUR_TIPS: [(&str, &str, &str); 4] = [
+    (glyph::PLAY, "Hover to open", "Move the mouse away and it tucks itself back."),
+    ("\u{E962}", "Scroll to switch", "Roll the wheel on the open notch to change panels."),
+    ("\u{E765}", "Win+Alt+N", "Opens it from anywhere, no mouse needed."),
+    (glyph::SETTINGS, "Right-click", "Settings. Right-drag moves it to any edge."),
 ];
+/// Tour step 3: themes to start with (indices into gfx::THEMES).
+const TOUR_THEMES: [usize; 6] = [0, 2, 3, 6, 8, 9];
+const O_THEME: u32 = 40; // + index into TOUR_THEMES
 /// Tour step 4: panels worth knowing about.
 
 /// Tour step 4: what's in Settings, at a glance.
@@ -128,6 +132,21 @@ const S_EXPORT: u32 = 350;
 const S_IMPORT: u32 = 351;
 const S_IMPORT_OK: u32 = 352;
 const S_IMPORT_NO: u32 = 353;
+const S_SHORTCUTS: u32 = 354;
+const S_CUSTOM: u32 = 230;
+const S_GLOW: u32 = 231;
+const S_MOTION: u32 = 232;
+const S_SIZE: u32 = 233; // + 0 smaller, 1 normal, 2 larger
+const S_CFIX: u32 = 236;
+const S_CBG: u32 = 240; // + index into CUSTOM_BG
+const S_CTEXT: u32 = 250; // + index into CUSTOM_TEXT
+const S_HIDEAPP_ADD: u32 = 260;
+const S_HIDEAPP: u32 = 261; // + index
+const S_PROFILE: u32 = 280; // + index into features::PROFILES
+const S_PROFILE_AUTO: u32 = 285;
+const CUSTOM_BG: [u32; 8] = [0x000000, 0x1B1B2F, 0x0F3D3E, 0x3B1F2B, 0x2E2A24, 0xF2F2F2, 0xFFF4E0, 0xE6F0FF];
+const CUSTOM_TEXT: [u32; 8] = [0xFFFFFF, 0xF5F5F7, 0xFFE7B3, 0xCFFAF0, 0x111111, 0x2B2B2B, 0x3A2E1C, 0x0B2545];
+const S_MOUSE: u32 = 360; // + 0.. wheel, + 10.. middle, + 20.. double-click
 const S_CLOCK12: u32 = 110;
 const S_MAKE_ROOM: u32 = 111;
 const S_COPY_TOAST: u32 = 112;
@@ -211,6 +230,12 @@ pub enum Deferred {
     /// Settings > General: save settings and data to a file / load them.
     Export,
     Import,
+    /// Files dropped on Share: Windows' Share window.
+    Share(Vec<String>),
+    /// Launcher: pick apps and files (false) or folders (true) to pin.
+    PickToPin(bool),
+    /// Calendar: pick an .ics file.
+    PickIcs,
     /// Start a fresh Nookly (after an import) and quit this one.
     Restart,
     DragOut(Vec<String>),
@@ -340,11 +365,22 @@ pub struct App {
     /// Recording a keyboard shortcut (index into features::HOTKEYS).
     recording: Option<usize>,
     /// Shortcuts Windows refused (another app has them).
-    hotkey_fail: [bool; 3],
+    hotkey_fail: [bool; 4],
     /// An import waiting for "Replace" (the files in it).
     import_pending: Option<Vec<(String, String)>>,
     /// Hovered feature on the Features page (its description shows).
     feature_hover: Option<usize>,
+    /// Settings > Features > Keyboard & mouse shortcuts is open.
+    shortcuts_page: bool,
+    /// Audio meter of the speakers (for the album glow) and when it was
+    /// opened; the smoothed level.
+    meter: Option<(windows::Win32::Media::Audio::Endpoints::IAudioMeterInformation, f64)>,
+    beat: f32,
+    /// The app in front (pid, exe) and the last one that wasn't Nookly.
+    front_cache: (u32, String),
+    last_front: String,
+    /// Last plain click on the closed notch (for double-click).
+    last_notch_click: f64,
 }
 
 thread_local! {
@@ -384,6 +420,24 @@ thread_local! {
 /// shell keeps Windows messages flowing while it starts things; inside a
 /// click Nookly is busy and would miss them (a lost "mouse left" kept the
 /// notch open for good).
+/// The notch window, for background threads that need to wake it.
+pub static MAIN_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// Wake the app from a background thread (it ticks right away).
+pub fn wake() {
+    let h = MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed);
+    if h != 0 {
+        unsafe {
+            let _ = PostMessageW(HWND(h as *mut _), WM_APP_WAKE, WPARAM(0), LPARAM(0));
+        }
+    }
+}
+
+/// A brightness change is running on a worker thread.
+static BRIGHT_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Its result, for the overlay: Some(Some(level)) set, Some(None) failed.
+static BRIGHT_RESULT: std::sync::Mutex<Option<Option<u32>>> = std::sync::Mutex::new(None);
+
 pub fn open_later(target: impl Into<String>) {
     OPEN_LATER.with(|q| q.borrow_mut().push(target.into()));
 }
@@ -530,9 +584,15 @@ impl App {
                 dock_x: None,
                 more_open: false,
                 recording: None,
-                hotkey_fail: [false; 3],
+                hotkey_fail: [false; 4],
                 import_pending: None,
                 feature_hover: None,
+                shortcuts_page: false,
+                front_cache: (0, String::new()),
+                meter: None,
+                beat: 0.0,
+                last_front: String::new(),
+                last_notch_click: 0.0,
             };
             app.place();
             sound::set(app.settings.sound);
@@ -544,6 +604,7 @@ impl App {
                 }
                 app.start_onboarding();
             }
+            MAIN_HWND.store(hwnd.0 as isize, std::sync::atomic::Ordering::Relaxed);
             if visible {
                 app.hotkey_fail = crate::features::register(hwnd, &app.settings);
                 use windows::Win32::UI::Accessibility::SetWinEventHook;
@@ -585,7 +646,7 @@ impl App {
             let _ = GetMonitorInfoW(mon, &mut mi);
             let (mut dx, mut dy) = (96u32, 96u32);
             let _ = GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
-            self.scale = dx as f32 / 96.0;
+            self.scale = dx as f32 / 96.0 * ui_size(&self.settings);
             let pw = (CANVAS_W * self.scale).ceil() as i32;
             let ph = (CANVAS_H * self.scale).ceil() as i32;
             let r = mi.rcWork;
@@ -651,6 +712,15 @@ impl App {
             self.tab = m;
             self.expanded = true;
             self.leave_at = Some(self.t() + 2.5);
+        }
+        if crate::modules::calendar::PICK_ICS.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            self.deferred.push(Deferred::PickIcs);
+        }
+        // A module asked for the file picker (Launcher): right away.
+        match crate::modules::launcher::PICK.swap(0, std::sync::atomic::Ordering::Relaxed) {
+            1 => self.deferred.push(Deferred::PickToPin(false)),
+            2 => self.deferred.push(Deferred::PickToPin(true)),
+            _ => {}
         }
         match keyboard {
             Some(true) => self.grab_keyboard(i),
@@ -737,6 +807,25 @@ impl App {
             let mut p = POINT::default();
             if unsafe { GetCursorPos(&mut p) }.is_ok() && unsafe { WindowFromPoint(p) } != self.hwnd {
                 self.on_mouse_leave();
+            }
+        }
+        match crate::modules::launcher::PICK.swap(0, std::sync::atomic::Ordering::Relaxed) {
+            1 => self.deferred.push(Deferred::PickToPin(false)),
+            2 => self.deferred.push(Deferred::PickToPin(true)),
+            _ => {}
+        }
+        if let Some(res) = BRIGHT_RESULT.lock().unwrap().take() {
+            let t = match res {
+                Some(v) => Toast::new("brightness", "\u{E706}", col::TEXT, "Brightness", "Screen").right(format!("{v}%")).progress(v as f32 / 100.0),
+                None => Toast::new("brightness", "\u{E706}", col::DIM, "Brightness", "This screen doesn't let apps change it"),
+            };
+            self.push_toast(t.secs(1.5));
+        }
+        let now = Now::get();
+        if now.sec == 0 {
+            if let Some(p) = crate::features::auto_profile(&self.settings, crate::time::weekday(now.year as i32, now.month as u32, now.day as u32), now.hour as u32) {
+                crate::features::switch_profile(&mut self.settings, p);
+                self.settings.save();
             }
         }
         // A panel switched off in Settings > Features does no work.
@@ -1151,14 +1240,19 @@ impl App {
     fn apply_theme(&mut self) {
         let th = match self.settings.theme.as_str() {
             "glass" if self.glass_light => crate::gfx::GLASS_LIGHT,
+            "custom" => {
+                let (bg, text) = custom_colors(&self.settings);
+                crate::gfx::custom_theme(bg, text)
+            }
             k => crate::gfx::THEMES.iter().find(|t| t.key == k).copied().unwrap_or(crate::gfx::THEMES[0]),
         };
         self.gfx.theme = th;
-        let testing = crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed);
-        let want = th.glass && !testing;
-        if want != self.excluded {
-            crate::glass::exclude_from_capture(self.hwnd, want);
-            self.excluded = want;
+        // Never left excluded from capture (screen recorders refuse to run
+        // then); Liquid Glass hides the notch only while grabbing its
+        // backdrop.
+        if self.excluded {
+            crate::glass::exclude_from_capture(self.hwnd, false);
+            self.excluded = false;
         }
         if !th.glass {
             self.backdrop = None;
@@ -1169,7 +1263,9 @@ impl App {
     /// moves, once a second at rest.
     fn update_backdrop(&mut self, notch: Rect, t: f64, dist: f32) {
         let fresh = match &self.backdrop {
-            Some((_, g, at)) => *g == self.gfx.gen && t - at < if dist > 0.5 { 0.1 } else { 1.0 },
+            // Kept while the notch moves (each grab waits for a frame);
+            // refreshed about once a second when it's still.
+            Some((_, g, at)) => *g == self.gfx.gen && (dist > 0.5 || t - at < 1.0),
             None => false,
         };
         if fresh {
@@ -1183,7 +1279,7 @@ impl App {
             Some(crate::glass::sample(&kind, w, h))
         } else {
             let (ox, oy, k) = (self.origin.0 as f32, self.origin.1 as f32, self.scale);
-            crate::glass::capture(RECT { left: (ox + notch.x * k) as i32, top: (oy + notch.y * k) as i32, right: (ox + notch.r() * k) as i32, bottom: (oy + notch.b() * k) as i32 })
+            crate::glass::capture_behind(self.hwnd, RECT { left: (ox + notch.x * k) as i32, top: (oy + notch.y * k) as i32, right: (ox + notch.r() * k) as i32, bottom: (oy + notch.b() * k) as i32 })
         };
         let Some((w, h, px, lum)) = data else { return };
         // Light glass over bright backgrounds, dark glass over dark ones (a
@@ -1413,7 +1509,7 @@ impl App {
     pub fn check_fullscreen(&mut self) {
         let busy = !FORCE_VISIBLE.load(std::sync::atomic::Ordering::Relaxed) && unsafe {
             matches!(SHQueryUserNotificationState(), Ok(QUNS_RUNNING_D3D_FULL_SCREEN) | Ok(QUNS_PRESENTATION_MODE)) || self.foreground_fullscreen()
-        };
+        } || self.hide_for_front_app();
         if busy != self.hidden {
             dlog(format!("fullscreen {busy}"));
             self.hidden = busy;
@@ -1425,6 +1521,20 @@ impl App {
             }
             self.request_frame();
         }
+    }
+
+    /// The app in front is one you chose to hide the notch for (Settings >
+    /// Look). Also remembers the last app in front that isn't Nookly.
+    fn hide_for_front_app(&mut self) -> bool {
+        let mut cache = std::mem::take(&mut self.front_cache);
+        let app = crate::modules::health::front_app(&mut cache);
+        self.front_cache = cache;
+        let Some(app) = app else { return false };
+        let l = app.to_lowercase();
+        if l != "nookly" && l != "explorer" && l != "shellexperiencehost" && l != "searchhost" && l != "startmenuexperiencehost" {
+            self.last_front = app.clone();
+        }
+        hidden_apps(&self.settings).iter().any(|a| a.eq_ignore_ascii_case(&app))
     }
 
     /// True when the foreground window really is full screen on our monitor.
@@ -1715,7 +1825,10 @@ impl App {
                     self.toast = None;
                 }
             }
-            if self.toast.is_none() {
+            // Reminders (the ones that chime) wait while you're on a call.
+            let in_call = crate::modules::privacy::IN_CALL.load(std::sync::atomic::Ordering::Relaxed);
+            let front = self.queue.front().map_or(false, |q| q.chime && in_call && q.key != "meeting");
+            if self.toast.is_none() && !front {
                 if let Some(next) = self.queue.pop_front() {
                     let end = t + next.secs as f64;
                     if next.chime {
@@ -1789,6 +1902,12 @@ impl App {
     /// it behaves the same at any frame rate. Returns the remaining distance
     /// (0 once settled).
     fn step_anim(&mut self, target: (f32, f32, f32), dt: f32) -> f32 {
+        // Reduce motion: straight to the new size.
+        if reduce_motion(&self.settings) {
+            self.cur = target;
+            self.vel = (0.0, 0.0, 0.0);
+            return 0.0;
+        }
         const W: f32 = 20.0; // stiffness (rad/s)
         const Z: f32 = 0.74; // damping ratio
         let n = ((dt * 240.0).ceil() as usize).clamp(1, 32);
@@ -1820,6 +1939,9 @@ impl App {
 
     /// Progress (0..1) of the tab-switch transition.
     fn switch_progress(&self, t: f64) -> f32 {
+        if reduce_motion(&self.settings) {
+            return 1.0;
+        }
         ((t - self.switch_t) / 0.32).clamp(0.0, 1.0) as f32
     }
 
@@ -1856,6 +1978,31 @@ impl App {
                         self.gfx.push_layer(Some(&geo), 1.0);
                         self.gfx.image_rr(&b, notch, 0.0);
                         self.gfx.pop_layer();
+                    }
+                }
+                // The song's colour as a soft glow around the closed notch,
+                // breathing with the music (drawn first: the notch covers
+                // its inner half, so only the feathered outside shows).
+                if mode == Mode::Collapsed && self.settings.extra.get("album_glow").map_or(false, |v| v == "1") {
+                    let music = self.modules.iter().position(|m| m.live_id() == "music");
+                    if music.is_some() && self.shown_owner() == music {
+                        if let Some(c) = *crate::modules::music::ART_COLOR.lock().unwrap() {
+                            let level = self.beat_level(t);
+                            let strength = 0.5 + 0.5 * level;
+                            // Around the notch's rounded body (stretched past the
+                            // screen edge), so nothing glows along the edge.
+                            let body = match edge {
+                                Edge::Top => Rect::new(notch.x, notch.y - 60.0, notch.w, notch.h + 60.0),
+                                Edge::Bottom => Rect::new(notch.x, notch.y, notch.w, notch.h + 60.0),
+                                Edge::Left => Rect::new(notch.x - 60.0, notch.y, notch.w + 60.0, notch.h),
+                                Edge::Right => Rect::new(notch.x, notch.y, notch.w + 60.0, notch.h),
+                            };
+                            for k in 0..8 {
+                                let f = k as f32 / 8.0;
+                                let fade = (1.0 - f) * (1.0 - f);
+                                self.gfx.stroke_rr_raw(body, rad, c.with_a(strength * 0.2 * fade), 3.0 + k as f32 * 7.0 + level * 12.0);
+                            }
+                        }
                     }
                 }
                 self.gfx.fill_geometry(&geo, col::NOTCH);
@@ -2181,19 +2328,23 @@ impl App {
         let tiles: Vec<(usize, &'static str, &'static str, Color)> =
             rest.iter().map(|&i| (i, panel_name(self.modules[i].title()), self.modules[i].icon(), self.modules[i].accent())).collect();
         let mut ui = Ui { g: &mut self.gfx, hits: &mut self.hits, module: APP_HIT, mouse, t };
-        let per = tiles.len().clamp(1, 4);
+        // Icon and name side by side; as many to a row as it takes to fit
+        // the panel's height.
+        let (row_h, gap) = (34.0, 6.0);
+        let max_rows = (((r.h + gap) / (row_h + gap)).floor() as usize).max(1);
+        let per = ((tiles.len() + max_rows - 1) / max_rows).max(4).min(tiles.len().max(1));
         let rows = (tiles.len() + per - 1) / per;
-        let grid = r.centered(r.w.min(118.0 * per as f32), (rows as f32 * 62.0 - 8.0).max(0.0));
+        let grid = r.centered(r.w.min(130.0 * per as f32), rows as f32 * (row_h + gap) - gap);
         for (k, (i, name, icon, accent)) in tiles.into_iter().enumerate() {
-            let row = Rect::new(grid.x, grid.y + (k / per) as f32 * 62.0, grid.w, 54.0);
-            let cell = row.columns(per, 8.0)[k % per];
+            let row = Rect::new(grid.x, grid.y + (k / per) as f32 * (row_h + gap), grid.w, row_h);
+            let cell = row.columns(per, gap)[k % per];
             let hov = ui.hovered(cell);
-            ui.fill_rr(cell, 12.0, if hov { col::BTN_HOVER } else { col::BTN });
-            let mut c = cell.inset(6.0);
-            let ic = c.cut_top(24.0, 2.0);
+            ui.fill_rr(cell, 10.0, if hov { col::BTN_HOVER } else { col::BTN });
+            let mut c = cell.inset_xy(8.0, 0.0);
+            let ic = c.cut_left(24.0, 8.0);
             ui.circle(ic.cx(), ic.cy(), 12.0, accent.with_a(0.18));
-            ui.icon(icon, ic, 12.0, accent);
-            ui.text(name, c, 11.5, col::TEXT, Weight::Semi, Align::Center);
+            ui.icon(icon, ic, 11.5, accent);
+            ui.text(name, c, 12.0, col::TEXT, Weight::Semi, Align::Left);
             ui.hit_tip(cell, i as u32, name);
         }
     }
@@ -2218,8 +2369,14 @@ impl App {
     /// The settings panel: look and position on the left, mascot picker
     /// below, general switches and links on the right.
     fn draw_settings(&mut self, r: Rect, t: f64) {
+        if self.settings_page == 2 && self.shortcuts_page {
+            return self.draw_shortcuts(r, t);
+        }
         if self.settings_page == 2 {
             return self.draw_features(r, t);
+        }
+        if self.settings_page == 3 {
+            return self.draw_look(r, t);
         }
         let mouse = self.mouse;
         let st = self.settings.clone();
@@ -2402,7 +2559,7 @@ impl App {
             ui.theme = saved;
             ui.toggle(right.cut_top(26.0, 4.0), "Show seconds", st.seconds, S_SECONDS, accent);
             let note = if st.theme == "glass" {
-                "Liquid Glass blurs what's behind it, so the notch is left out of screenshots and screen sharing."
+                "Liquid Glass blurs what's behind the notch."
             } else {
                 "A theme changes the notch and every panel."
             };
@@ -2469,22 +2626,41 @@ impl App {
             }
         }
 
-        let mut keys = body.cut_bottom(26.0, 0.0);
-        let desc = body.cut_bottom(16.0, 6.0);
+        let mut foot = body.cut_bottom(26.0, 0.0);
+        ui.button(foot.cut_right(180.0, 0.0), "Keyboard & mouse shortcuts", S_SHORTCUTS);
+        ui.text("Profile", foot.cut_left(48.0, 4.0), 11.5, col::DIM, Weight::Semi, Align::Left);
+        let active = crate::features::active_profile(&st);
+        for (k, name) in crate::features::PROFILES.iter().enumerate() {
+            ui.chip(foot.cut_left(60.0, 4.0), name, S_PROFILE + k as u32, active == *name, accent);
+        }
+        let auto = st.extra.get("profile_auto").map_or(false, |v| v == "1");
+        ui.chip(foot.cut_left(52.0, 10.0), "Auto", S_PROFILE_AUTO, auto, accent);
+        let desc = foot;
         for (g, mut col_r) in body.columns(GROUPS.len(), 12.0).into_iter().enumerate() {
             ui.text(GROUPS[g], col_r.cut_top(15.0, 4.0), 11.5, col::DIM, Weight::Semi, Align::Left);
             for &(k, name, icon, _, on) in items.iter().filter(|it| it.3 == g as u8) {
-                let row = col_r.cut_top(24.0, 3.0);
+                let row = col_r.cut_top(22.0, 2.0);
                 let hov = ui.hovered(row);
-                ui.fill_rr(row, 12.0, if hov { col::BTN_HOVER } else if on { col::BTN } else { col::BTN.with_a(0.45) });
+                // On: a warm tint, the icon in colour, a filled switch. Off:
+                // a plain row and an outlined switch (nothing washed out).
+                let bg = match (on, hov) {
+                    (true, false) => accent.with_a(0.13),
+                    (true, true) => accent.with_a(0.2),
+                    (false, false) => col::BTN,
+                    (false, true) => col::BTN_HOVER,
+                };
+                ui.fill_rr(row, 11.0, bg);
                 let mut c = row.inset_xy(8.0, 0.0);
                 let sw = c.cut_right(24.0, 6.0).centered(24.0, 14.0);
-                ui.fill_rr(sw, 7.0, if on { accent } else { col::TEXT.with_a(0.18) });
-                let kx = if on { sw.r() - 7.0 } else { sw.x + 7.0 };
-                ui.circle(kx, sw.cy(), 5.0, if on { hex(0x010101) } else { col::TEXT });
-                let fg = if on { col::TEXT } else { col::DIM };
-                ui.icon(icon, c.cut_left(14.0, 6.0), 11.0, fg);
-                ui.text(name, c, 11.5, fg, Weight::Semi, Align::Left);
+                if on {
+                    ui.fill_rr(sw, 7.0, accent);
+                    ui.circle(sw.r() - 7.0, sw.cy(), 5.0, hex(0x010101));
+                } else {
+                    ui.stroke_rr(sw.inset(0.6), 6.4, col::DIM, 1.2);
+                    ui.circle(sw.x + 7.0, sw.cy(), 3.6, col::DIM);
+                }
+                ui.icon(icon, c.cut_left(14.0, 6.0), 11.0, if on { accent } else { col::DIM });
+                ui.text(name, c, 11.5, if on { col::TEXT } else { col::DIM }, if on { Weight::Semi } else { Weight::Regular }, Align::Left);
                 ui.hit(row, S_FEATURE + k as u32);
                 if hov {
                     about = Some(FEATURES[k].what.to_string());
@@ -2495,12 +2671,143 @@ impl App {
             Some(k) => format!("{}: {}. What's off doesn't run at all.", PRESETS[k].0, PRESETS[k].1),
             None => "Your own mix. What's off doesn't run at all, so it costs nothing.".to_string(),
         });
-        ui.text(&note, desc, 10.5, col::DIM, Weight::Regular, Align::Left);
+        ui.text_wrap(&note, desc, 10.0, col::FAINT, Weight::Regular, Align::Left);
+        let _ = (recording, fail, hotkey_label, hotkey, HOTKEYS);
+        self.settings_room[2] = body.b() - body.y;
+    }
 
-        ui.text("Shortcuts", keys.cut_left(64.0, 6.0), 11.5, col::DIM, Weight::Semi, Align::Left);
-        for (k, mut cell) in keys.columns(HOTKEYS.len(), 12.0).into_iter().enumerate() {
-            let chip = cell.cut_right(100.0, 6.0);
-            ui.text(HOTKEYS[k].1, cell, 11.5, col::TEXT, Weight::Regular, Align::Left);
+    /// Settings > Look, across the whole panel: themes (and your own) on the
+    /// left, size, motion, glow, seconds and apps to hide for on the right.
+    fn draw_look(&mut self, r: Rect, t: f64) {
+        let mouse = self.mouse;
+        let st = self.settings.clone();
+        let accent = col::ACCENT;
+        let last_front = if crate::time::demo() { String::new() } else { self.last_front.clone() };
+        let mut ui = Ui { g: &mut self.gfx, hits: &mut self.hits, module: SETTINGS, mouse, t };
+        let mut body = r;
+        let head = body.cut_top(26.0, 10.0);
+        let left_w = 372.0_f32.min(r.w * 0.6);
+        let seg = Rect::new(head.x + left_w + 20.0, head.y, head.r() - head.x - left_w - 20.0, head.h);
+        settings_pages(&mut ui, seg, 3);
+        ui.text("Look", Rect::new(head.x, head.y, left_w, head.h), 14.0, col::TEXT, Weight::Semi, Align::Left);
+        let mut left = Rect::new(body.x, body.y, left_w, body.h);
+        let mut right = Rect::new(body.x + left_w + 20.0, body.y, body.w - left_w - 20.0, body.h);
+
+        // Themes, five to a row, the last tile is your own.
+        let per = 6;
+        let n = crate::gfx::THEMES.len() + 1;
+        let n_rows = (n + per - 1) / per;
+        let rows: Vec<Rect> = (0..n_rows).map(|k| left.cut_top(44.0, if k + 1 == n_rows { 8.0 } else { 5.0 })).collect();
+        let saved = ui.theme;
+        for i in 0..n {
+            let cell = rows[i / per].columns(per, 5.0)[i % per];
+            let custom = i == crate::gfx::THEMES.len();
+            let th = if custom {
+                let (bg, text) = custom_colors(&st);
+                crate::gfx::custom_theme(bg, text)
+            } else {
+                crate::gfx::THEMES[i]
+            };
+            let sel = st.theme == th.key;
+            ui.theme = crate::gfx::THEMES[0];
+            let bg = if sel { accent.with_a(0.22) } else if ui.hovered(cell) { col::BTN_HOVER } else { col::BTN };
+            ui.fill_rr(cell, 10.0, bg);
+            if sel {
+                ui.stroke_rr(cell, 10.0, accent.with_a(0.85), 1.4);
+            }
+            let mut c = cell.inset(4.0);
+            let screen = c.cut_top(21.0, 2.0);
+            if th.glass {
+                for (k, colr) in [0x7B5CFF, 0xFF8A5B, 0x3CC8C8].into_iter().enumerate() {
+                    let w = screen.w / 3.0;
+                    ui.fill_rr_raw(Rect::new(screen.x + k as f32 * w, screen.y, w + 0.5, screen.h), 0.0, hex(colr));
+                }
+            } else {
+                ui.fill_rr_raw(screen, 5.0, hex(0x4A4A52));
+            }
+            let nr = Rect::new(screen.cx() - 16.0, screen.y + 3.0, 32.0, 13.0);
+            ui.fill_rr_raw(nr, 6.0, th.bg);
+            ui.theme = th;
+            ui.text("4:20", nr, 7.5, col::TEXT, Weight::Semi, Align::Center);
+            ui.theme = saved;
+            ui.text(if custom { "Yours" } else { th.name }, c, 9.5, if sel { col::TEXT } else { col::DIM }, Weight::Semi, Align::Center);
+            ui.theme = crate::gfx::THEMES[0];
+            ui.hit(cell, if custom { S_CUSTOM } else { S_THEME + i as u32 });
+        }
+        ui.theme = saved;
+        if st.theme == "custom" {
+            let (bg, text) = custom_colors(&st);
+            for (label, list, base, cur) in [("Background", &CUSTOM_BG, S_CBG, bg), ("Text", &CUSTOM_TEXT, S_CTEXT, text)] {
+                let mut row = left.cut_top(24.0, 4.0);
+                ui.text(label, row.cut_left(76.0, 4.0), 11.0, col::DIM, Weight::Semi, Align::Left);
+                for (k, cell) in row.columns(list.len(), 4.0).into_iter().enumerate() {
+                    let d = cell.centered(20.0, 20.0);
+                    ui.fill_rr_raw(d, 10.0, hex(list[k]));
+                    ui.stroke_rr(d, 10.0, if cur == list[k] { accent } else { col::TEXT.with_a(0.25) }, if cur == list[k] { 2.0 } else { 1.0 });
+                    ui.hit(cell, base + k as u32);
+                }
+            }
+            let ratio = crate::gfx::contrast(hex(bg), hex(text));
+            let mut row = left.cut_top(22.0, 0.0);
+            if ratio < 4.5 {
+                ui.button_c(row.cut_right(70.0, 6.0), "Fix it", S_CFIX, col::RED.with_a(0.2), col::RED);
+            }
+            ui.text(&format!("Contrast {ratio:.1}:1 {}", if ratio >= 7.0 { "(great)" } else if ratio >= 4.5 { "(readable)" } else { "(too low to read well)" }), row, 11.0, if ratio >= 4.5 { col::DIM } else { col::RED }, Weight::Regular, Align::Left);
+        }
+
+        // Options on the right.
+        let x = |k: &str| st.extra.get(k).map_or(false, |v| v == "1");
+        ui.toggle(right.cut_top(24.0, 1.0), "Seconds on the clock", st.seconds, S_SECONDS, accent);
+        ui.toggle(right.cut_top(24.0, 1.0), "Song colour around the notch", x("album_glow"), S_GLOW, accent);
+        ui.toggle(right.cut_top(24.0, 4.0), "Reduce motion", x("reduce_motion"), S_MOTION, accent);
+        let mut row = right.cut_top(24.0, 8.0);
+        ui.text("Size", row.cut_left(36.0, 4.0), 11.5, col::DIM, Weight::Semi, Align::Left);
+        let size = st.extra.get("ui_size").cloned().unwrap_or_else(|| "m".into());
+        for (k, (cell, (key, label))) in row.columns(3, 4.0).into_iter().zip([("s", "Smaller"), ("m", "Normal"), ("l", "Larger")]).enumerate() {
+            ui.chip(cell, label, S_SIZE + k as u32, size == key, accent);
+        }
+        ui.text("Hide the notch for these apps", right.cut_top(16.0, 4.0), 11.5, col::DIM, Weight::Semi, Align::Left);
+        let apps = hidden_apps(&st);
+        let mut row = right.cut_top(24.0, 4.0);
+        for (k, a) in apps.iter().enumerate().take(4) {
+            let name = crate::modules::health::friendly(a);
+            let w = ui.measure(&name, 11.0, Weight::Semi) + 30.0;
+            if w > row.w {
+                break;
+            }
+            let cell = row.cut_left(w, 4.0);
+            ui.chip(cell, &format!("{name}  ×"), S_HIDEAPP + k as u32, true, accent);
+        }
+        if apps.is_empty() {
+            ui.text("None", row, 11.0, col::FAINT, Weight::Regular, Align::Left);
+        }
+        if !last_front.is_empty() && !apps.iter().any(|a| a.eq_ignore_ascii_case(&last_front)) {
+            let label = format!("+ Hide for {}", crate::modules::health::friendly(&last_front));
+            ui.button(right.cut_top(24.0, 4.0), &label, S_HIDEAPP_ADD);
+        }
+        self.settings_room[3] = right.b() - right.y;
+    }
+
+    /// Settings > Features > Keyboard & mouse shortcuts.
+    fn draw_shortcuts(&mut self, r: Rect, t: f64) {
+        use crate::features::{hotkey, hotkey_label, HOTKEYS};
+        let mouse = self.mouse;
+        let st = self.settings.clone();
+        let accent = col::ACCENT;
+        let recording = self.recording;
+        let fail = self.hotkey_fail;
+        let mut ui = Ui { g: &mut self.gfx, hits: &mut self.hits, module: SETTINGS, mouse, t };
+        let mut body = r;
+        let mut head = body.cut_top(26.0, 10.0);
+        ui.button(head.cut_right(70.0, 0.0), "Back", S_SHORTCUTS);
+        ui.text("Keyboard & mouse shortcuts", head, 14.0, col::TEXT, Weight::Semi, Align::Left);
+        let cols = body.columns(2, 24.0);
+        let (mut l, mut rr) = (cols[0], cols[1]);
+        ui.text("Keyboard (works anywhere in Windows)", l.cut_top(16.0, 6.0), 11.5, col::DIM, Weight::Semi, Align::Left);
+        for k in 0..HOTKEYS.len() {
+            let mut row = l.cut_top(26.0, 6.0);
+            let chip = row.cut_right(130.0, 0.0);
+            ui.text(HOTKEYS[k].1, row, 12.0, col::TEXT, Weight::Regular, Align::Left);
             let (label, sel) = if recording == Some(k) {
                 ("Press keys...".to_string(), true)
             } else if fail[k] {
@@ -2513,7 +2820,23 @@ impl App {
                 ui.stroke_rr(chip, chip.h / 2.0, col::RED.with_a(0.7), 1.0);
             }
         }
-        self.settings_room[2] = desc.y - body.y;
+        ui.text_wrap("Click one, then press the keys (with Ctrl, Alt or Win, or an F key). Backspace removes it, Esc cancels.", l, 10.5, col::FAINT, Weight::Regular, Align::Left);
+        ui.text("Mouse on the closed notch", rr.cut_top(16.0, 6.0), 11.5, col::DIM, Weight::Semi, Align::Left);
+        let x = |k: &str, d: &str| st.extra.get(k).cloned().unwrap_or_else(|| d.to_string());
+        let rows: [(&str, &str, &str, &[(&str, &str)], u32); 3] = [
+            ("Scroll wheel", "mouse_wheel", "off", &[("off", "Nothing"), ("volume", "Volume"), ("brightness", "Brightness")], S_MOUSE),
+            ("Middle click", "mouse_middle", "play", &[("off", "Nothing"), ("play", "Play / pause")], S_MOUSE + 10),
+            ("Double-click", "mouse_double", "off", &[("off", "Nothing"), ("shot", "Screenshot"), ("clip", "Clipboard"), ("note", "Note")], S_MOUSE + 20),
+        ];
+        for (name, key, def, opts, base) in rows {
+            ui.text(name, rr.cut_top(16.0, 2.0), 12.0, col::TEXT, Weight::Regular, Align::Left);
+            let row = rr.cut_top(24.0, 8.0);
+            let cur = x(key, def);
+            for (k, (cell, (v, label))) in row.columns(4, 5.0).into_iter().zip(opts.iter()).enumerate() {
+                ui.chip(cell, label, base + k as u32, cur == *v, accent);
+            }
+        }
+        ui.text_wrap("Shift + scroll changes the brightness whatever the wheel does.", rr, 10.5, col::FAINT, Weight::Regular, Align::Left);
     }
 
     /// Record a shortcut: the window takes the keyboard until a key is
@@ -2596,12 +2919,16 @@ impl App {
                     }
                 }
             }
-            2 | 3 => {
-                let (title, action) = if id == 2 { ("Clipboard", crate::modules::clipboard::A_SEARCH) } else { ("Shelf", crate::modules::shelf::A_SNIP) };
+            2 | 3 | 4 => {
+                let (title, action) = match id {
+                    2 => ("Clipboard", crate::modules::clipboard::A_SEARCH),
+                    3 => ("Shelf", crate::modules::shelf::A_SNIP),
+                    _ => ("Notes", crate::modules::notes::A_FOCUS),
+                };
                 let Some(i) = self.modules.iter().position(|m| m.title() == title) else { return };
                 if !self.enabled(i) {
                     self.push_toast(Toast::new("feature_off", glyph::SETTINGS, col::ACCENT, &format!("{} is off", feature_name(title)), "Switch it on in Settings > Features").secs(4.0));
-                } else if id == 2 {
+                } else if id == 2 || id == 4 {
                     self.tab = i;
                     self.settings_open = false;
                     self.more_open = false;
@@ -2614,6 +2941,95 @@ impl App {
             _ => {}
         }
         self.request_frame();
+    }
+
+    /// Mouse wheel over the closed notch: volume or brightness, as set in
+    /// Settings > Features > Keyboard & mouse shortcuts (Shift: brightness).
+    fn wheel_closed(&mut self, delta: f32) {
+        let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
+        let what = self.settings.extra.get("mouse_wheel").cloned().unwrap_or_else(|| "off".into());
+        let what = if shift { "brightness".to_string() } else { what };
+        let up = delta > 0.0;
+        match what.as_str() {
+            "volume" => {
+                use windows::Win32::Media::Audio::*;
+                use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+                unsafe {
+                    let ep: Option<windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume> = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                        .ok()
+                        .and_then(|e| e.GetDefaultAudioEndpoint(eRender, eConsole).ok())
+                        .and_then(|d| d.Activate(CLSCTX_ALL, None).ok());
+                    if let Some(ep) = ep {
+                        let _ = if up { ep.VolumeStepUp(std::ptr::null()) } else { ep.VolumeStepDown(std::ptr::null()) };
+                    }
+                }
+            }
+            "brightness" => {
+                // Brightness calls can take a moment (WMI): off the UI thread.
+                if BRIGHT_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    return;
+                }
+                let h = self.hwnd.0 as isize;
+                std::thread::spawn(move || {
+                    let hwnd = HWND(h as *mut _);
+                    let now = crate::brightness::get(hwnd).map(|b| (b as i32 + if up { 5 } else { -5 }).clamp(0, 100) as u32);
+                    let set = now.and_then(|v| crate::brightness::set(hwnd, v));
+                    *BRIGHT_RESULT.lock().unwrap() = Some(set);
+                    BRIGHT_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+                    crate::app::wake();
+                });
+            }
+            _ => {}
+        }
+    }
+
+    /// How loud the music is right now (0..1), from Windows' audio meter,
+    /// quick to rise and slow to fall like a VU meter. Only read while the
+    /// glow is drawn.
+    fn beat_level(&mut self, t: f64) -> f32 {
+        use windows::Win32::Media::Audio::*;
+        use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+        if self.meter.as_ref().map_or(true, |m| t - m.1 > 30.0) {
+            // (Re)open now and then: the output device may have changed.
+            let m: Option<windows::Win32::Media::Audio::Endpoints::IAudioMeterInformation> = unsafe {
+                CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                    .ok()
+                    .and_then(|e| e.GetDefaultAudioEndpoint(eRender, eConsole).ok())
+                    .and_then(|d| d.Activate(CLSCTX_ALL, None).ok())
+            };
+            self.meter = m.map(|m| (m, t));
+        }
+        let peak = self.meter.as_ref().and_then(|m| unsafe { m.0.GetPeakValue().ok() }).unwrap_or(0.0).clamp(0.0, 1.0);
+        // Loudness feels logarithmic: lift the quiet part.
+        let peak = peak.sqrt();
+        self.beat = if peak > self.beat { self.beat + (peak - self.beat) * 0.6 } else { self.beat * 0.9 + peak * 0.1 };
+        self.beat
+    }
+
+    /// Middle click on the closed notch.
+    fn middle_click(&mut self) {
+        if self.mode() == Mode::Expanded {
+            return;
+        }
+        if self.settings.extra.get("mouse_middle").map_or(true, |v| v == "play") {
+            if let Some(i) = self.modules.iter().position(|m| m.live_id() == "music") {
+                self.call(i, |m, c| m.action(1, (0.0, 0.0), c));
+            }
+        }
+    }
+
+    /// A second click on the closed notch soon after the first.
+    fn double_click(&mut self) -> bool {
+        let what = self.settings.extra.get("mouse_double").cloned().unwrap_or_else(|| "off".into());
+        let id = match what.as_str() {
+            "shot" => 3,
+            "clip" => 2,
+            "note" => 4,
+            _ => return false,
+        };
+        self.expanded = false;
+        self.on_hotkey(id);
+        true
     }
 
     /// Apply a click in the settings panel.
@@ -2663,6 +3079,57 @@ impl App {
                 self.settings.theme = crate::gfx::THEMES[(i - S_THEME) as usize].key.to_string();
                 self.backdrop = None;
             }
+            S_CUSTOM => {
+                self.settings.theme = "custom".into();
+                self.backdrop = None;
+            }
+            i if (S_CBG..S_CBG + 8).contains(&i) => {
+                self.settings.extra.insert("custom_bg".into(), format!("{:06X}", CUSTOM_BG[(i - S_CBG) as usize]));
+            }
+            i if (S_CTEXT..S_CTEXT + 8).contains(&i) => {
+                self.settings.extra.insert("custom_text".into(), format!("{:06X}", CUSTOM_TEXT[(i - S_CTEXT) as usize]));
+            }
+            S_CFIX => {
+                // The readable one of white and near-black.
+                let (bg, _) = custom_colors(&self.settings);
+                let w = crate::gfx::contrast(hex(bg), hex(0xFFFFFF));
+                let b = crate::gfx::contrast(hex(bg), hex(0x111111));
+                self.settings.extra.insert("custom_text".into(), if w >= b { "FFFFFF" } else { "111111" }.into());
+            }
+            S_GLOW | S_MOTION => {
+                let k = if id == S_GLOW { "album_glow" } else { "reduce_motion" };
+                let on = self.settings.extra.get(k).map_or(false, |v| v == "1");
+                self.settings.extra.insert(k.into(), if on { "0" } else { "1" }.into());
+            }
+            i if (S_SIZE..S_SIZE + 3).contains(&i) => {
+                self.settings.extra.insert("ui_size".into(), ["s", "m", "l"][(i - S_SIZE) as usize].into());
+                self.settings.save();
+                self.place();
+            }
+            S_HIDEAPP_ADD => {
+                let mut v = hidden_apps(&self.settings);
+                if !self.last_front.is_empty() && !v.contains(&self.last_front) {
+                    v.push(self.last_front.clone());
+                }
+                self.settings.extra.insert("hide_apps".into(), v.join("|"));
+            }
+            i if (S_HIDEAPP..S_HIDEAPP + 10).contains(&i) => {
+                let mut v = hidden_apps(&self.settings);
+                let k = (i - S_HIDEAPP) as usize;
+                if k < v.len() {
+                    v.remove(k);
+                }
+                self.settings.extra.insert("hide_apps".into(), v.join("|"));
+            }
+            i if (S_PROFILE..S_PROFILE + 3).contains(&i) => {
+                crate::features::switch_profile(&mut self.settings, crate::features::PROFILES[(i - S_PROFILE) as usize]);
+                crate::time::SECONDS.store(self.settings.seconds, std::sync::atomic::Ordering::Relaxed);
+                self.backdrop = None;
+            }
+            S_PROFILE_AUTO => {
+                let on = self.settings.extra.get("profile_auto").map_or(false, |v| v == "1");
+                self.settings.extra.insert("profile_auto".into(), if on { "0" } else { "1" }.into());
+            }
             S_SECONDS => {
                 self.settings.seconds = !self.settings.seconds;
                 crate::time::SECONDS.store(self.settings.seconds, std::sync::atomic::Ordering::Relaxed);
@@ -2696,6 +3163,20 @@ impl App {
                 }
                 self.request_frame();
                 return;
+            }
+            S_SHORTCUTS => {
+                self.shortcuts_page = !self.shortcuts_page;
+                self.stop_recording();
+            }
+            i if (S_MOUSE..S_MOUSE + 30).contains(&i) => {
+                let (key, opts): (&str, &[&str]) = match (i - S_MOUSE) / 10 {
+                    0 => ("mouse_wheel", &["off", "volume", "brightness"]),
+                    1 => ("mouse_middle", &["off", "play"]),
+                    _ => ("mouse_double", &["off", "shot", "clip", "note"]),
+                };
+                if let Some(v) = opts.get(((i - S_MOUSE) % 10) as usize) {
+                    self.settings.extra.insert(key.into(), v.to_string());
+                }
             }
             S_EXPORT => self.deferred.push(Deferred::Export),
             S_IMPORT => self.deferred.push(Deferred::Import),
@@ -2779,6 +3260,11 @@ impl App {
             i if (O_EDGE..O_EDGE + Edge::ALL.len() as u32).contains(&i) => {
                 self.set_edge(Edge::ALL[(i - O_EDGE) as usize], true);
             }
+            i if (O_THEME..O_THEME + TOUR_THEMES.len() as u32).contains(&i) => {
+                self.settings.theme = crate::gfx::THEMES[TOUR_THEMES[(i - O_THEME) as usize]].key.to_string();
+                self.backdrop = None;
+                self.settings.save();
+            }
             i if (O_PRESET..O_PRESET + crate::features::PRESETS.len() as u32).contains(&i) => {
                 crate::features::apply_preset(&mut self.settings, (i - O_PRESET) as usize);
                 self.settings.save();
@@ -2812,11 +3298,11 @@ impl App {
         }
         ui.text("Welcome to Nookly", head, 15.0, col::TEXT, Weight::Semi, Align::Left);
         let (question, hint) = match step {
-            0 => ("First, how should the notch look when it's closed?", "Pick one. You can change it anytime in Settings."),
-            1 => ("Where should it sit?", "Or right-drag the notch to any edge, on any screen."),
-            2 => ("How to use it", "Three quick tips."),
-            3 => ("What do you want in it?", "Switch anything on or off later in Settings > Features."),
-            _ => (TOUR_Q_SETTINGS, "That's it. Enjoy!"),
+            0 => ("Hi! I'm Nookly, your new notch.", "Let's make it yours. It takes about 30 seconds."),
+            1 => ("How should it look, and where should it sit?", "Right-drag it to any edge of any screen later too."),
+            2 => ("Pick a colour.", "Ten themes, Liquid Glass and your own in Settings > Look."),
+            3 => ("What do you want in it?", "Only what you pick runs. Change it anytime in Settings > Features."),
+            _ => ("Four things to know, and you're done.", "Enjoy! Everything is in Settings."),
         };
         ui.text(question, r.cut_top(20.0, 2.0), 12.5, col::DIM, Weight::Regular, Align::Left);
         let mut foot = r.cut_bottom(28.0, 0.0);
@@ -2834,7 +3320,63 @@ impl App {
 
         match step {
             0 => {
-                // A tile per style, each with a tiny screen showing it.
+                // Hello: the mark, and what it's about.
+                let mut b = body;
+                let mark = b.cut_left(150.0, 24.0).centered(104.0, 104.0);
+                draw_logo(&mut ui, mark);
+                let points: [(&str, &str, &str); 3] = [
+                    ("\u{E8A9}", "One hover away", "Music, calendar, notes, timers, widgets and more."),
+                    ("\u{E945}", "Light and quick", "Only what you switch on runs, so it costs almost nothing."),
+                    ("\u{E72E}", "Yours alone", "No account, no ads. Your data stays on this PC."),
+                ];
+                for (cell, (g, title, sub)) in b.rows(3, 8.0).into_iter().zip(points) {
+                    let mut c = cell;
+                    let ic = c.cut_left(30.0, 10.0);
+                    ui.circle(ic.cx(), ic.cy(), 15.0, accent.with_a(0.18));
+                    ui.icon(g, ic, 12.0, accent);
+                    ui.text(title, c.cut_top(c.h / 2.0, 0.0), 13.0, col::TEXT, Weight::Semi, Align::Left);
+                    ui.text(sub, c, 11.0, col::DIM, Weight::Regular, Align::Left);
+                }
+            }
+            2 => {
+                // A tile per theme, with a little notch in it.
+                for (k, cell) in body.centered(body.w, 74.0).columns(TOUR_THEMES.len(), 8.0).into_iter().enumerate() {
+                    let th = crate::gfx::THEMES[TOUR_THEMES[k]];
+                    let sel = st.theme == th.key;
+                    let saved = ui.theme;
+                    ui.theme = crate::gfx::THEMES[0];
+                    let hov = ui.hovered(cell);
+                    ui.fill_rr(cell, 12.0, if sel { accent.with_a(0.2) } else if hov { col::BTN_HOVER } else { col::BTN });
+                    if sel {
+                        ui.stroke_rr(cell, 12.0, accent.with_a(0.85), 1.4);
+                    }
+                    let mut c = cell.inset(7.0);
+                    let screen = c.cut_top(38.0, 4.0);
+                    if th.glass {
+                        for (j, colr) in [0x7B5CFF, 0xFF8A5B, 0x3CC8C8].into_iter().enumerate() {
+                            let w = screen.w / 3.0;
+                            ui.fill_rr_raw(Rect::new(screen.x + j as f32 * w, screen.y, w + 0.5, screen.h), 0.0, hex(colr));
+                        }
+                    } else {
+                        ui.fill_rr_raw(screen, 6.0, hex(0x4A4A52));
+                    }
+                    let n = Rect::new(screen.cx() - 22.0, screen.y + 4.0, 44.0, 15.0);
+                    ui.fill_rr_raw(n, 7.0, th.bg);
+                    ui.theme = th;
+                    ui.text("4:20", n, 8.5, col::TEXT, Weight::Semi, Align::Center);
+                    ui.theme = saved;
+                    ui.text(th.name, c, 11.0, if sel { col::TEXT } else { col::DIM }, Weight::Semi, Align::Center);
+                    ui.hit_tip(cell, O_THEME + k as u32, "");
+                }
+            }
+            1 => {
+                // A tile per style, each with a tiny screen showing it, and
+                // the edge to put it on underneath.
+                let mut body = body;
+                let edges = body.cut_bottom(26.0, 8.0);
+                for (i, (cell, e)) in edges.columns(4, 8.0).into_iter().zip(Edge::ALL).enumerate() {
+                    ui.chip(cell, e.label(), O_EDGE + i as u32, st.edge == e, accent);
+                }
                 for (i, (cell, s)) in body.columns(NotchStyle::ALL.len(), 10.0).into_iter().zip(NotchStyle::ALL).enumerate() {
                     let sel = st.style == s;
                     let hov = ui.hovered(cell);
@@ -2843,8 +3385,8 @@ impl App {
                     if sel {
                         ui.stroke_rr(cell, 12.0, accent.with_a(0.85), 1.4);
                     }
-                    let mut c = cell.inset(8.0);
-                    let screen = c.cut_top(48.0, 6.0);
+                    let mut c = cell.inset(7.0);
+                    let screen = c.cut_top(30.0, 4.0);
                     ui.fill_rr(screen, 6.0, hex(0x3A3A40));
                     let cx = screen.cx();
                     match s {
@@ -2878,23 +3420,6 @@ impl App {
                     ui.hit_tip(cell, O_STYLE + i as u32, "");
                 }
             }
-            1 => {
-                let mut b = body;
-                let screen = b.cut_left(150.0, 20.0).centered(150.0, 90.0);
-                ui.fill_rr(screen, 8.0, hex(0x3A3A40));
-                let bar = match st.edge {
-                    Edge::Top => Rect::new(screen.cx() - 22.0, screen.y, 44.0, 8.0),
-                    Edge::Bottom => Rect::new(screen.cx() - 22.0, screen.b() - 8.0, 44.0, 8.0),
-                    Edge::Left => Rect::new(screen.x, screen.cy() - 18.0, 8.0, 36.0),
-                    Edge::Right => Rect::new(screen.r() - 8.0, screen.cy() - 18.0, 8.0, 36.0),
-                };
-                ui.fill_rr(bar, 4.0, col::NOTCH);
-                ui.stroke_rr(bar, 4.0, accent, 1.0);
-                let row = b.centered(b.w, 30.0);
-                for (i, (cell, e)) in row.columns(4, 8.0).into_iter().zip(Edge::ALL).enumerate() {
-                    ui.chip(cell, e.label(), O_EDGE + i as u32, st.edge == e, accent);
-                }
-            }
             3 => {
                 // A card per preset, with the icons of what it switches on.
                 let picked = crate::features::current_preset(&st);
@@ -2918,7 +3443,7 @@ impl App {
                     ui.hit_tip(cell, O_PRESET + k as u32, "");
                 }
             }
-            2 => {
+            _ => {
                 let cards: &[(&str, &str, &str)] = &TOUR_TIPS;
                 for (cell, &(g, title, sub)) in body.columns(cards.len(), 10.0).into_iter().zip(cards) {
                     ui.fill_rr(cell, 12.0, col::BTN);
@@ -2928,20 +3453,6 @@ impl App {
                     ui.icon(g, Rect::new(ic.x, ic.y, 26.0, 26.0), 12.0, accent);
                     ui.text(title, c.cut_top(18.0, 2.0), 12.5, col::TEXT, Weight::Semi, Align::Left);
                     ui.text_wrap(sub, c, 11.0, col::DIM, Weight::Regular, Align::Left);
-                }
-            }
-            _ => {
-                // Settings at a glance: two rows of four.
-                let rows = body.rows(2, 8.0);
-                for (k, (g, title, sub)) in TOUR_SETTINGS.iter().enumerate() {
-                    let cell = rows[k / 4].columns(4, 8.0)[k % 4];
-                    ui.fill_rr(cell, 10.0, col::BTN);
-                    let mut c = cell.inset_xy(8.0, 6.0);
-                    let ic = c.cut_left(24.0, 6.0);
-                    ui.circle(ic.cx(), ic.y + 12.0, 12.0, accent.with_a(0.18));
-                    ui.icon(g, Rect::new(ic.x, ic.y, 24.0, 24.0), 11.0, accent);
-                    ui.text(title, c.cut_top(16.0, 1.0), 12.0, col::TEXT, Weight::Semi, Align::Left);
-                    ui.text_wrap(sub, c, 10.5, col::DIM, Weight::Regular, Align::Left);
                 }
             }
         }
@@ -3319,6 +3830,12 @@ impl App {
                 if hit.id == u32::MAX {
                     // Background click: expand (on the panel of what the
                     // closed notch shows), or drop keyboard focus.
+                    let now = self.t();
+                    let quick = now - self.last_notch_click < 0.35;
+                    self.last_notch_click = if quick { 0.0 } else { now };
+                    if quick && self.double_click() {
+                        return;
+                    }
                     if !self.expanded {
                         if let Some(m) = self.shown_owner() {
                             if self.tab_list().contains(&m) {
@@ -3382,7 +3899,11 @@ impl App {
     /// anywhere else (and always over the tab bar) it switches panels, one
     /// per notch of the wheel. Down / toward you = the next tab.
     fn on_wheel(&mut self, delta: f32) {
-        if self.mode() != Mode::Expanded || self.onboarding.is_some() {
+        if self.mode() != Mode::Expanded && self.onboarding.is_none() {
+            self.wheel_closed(delta);
+            return;
+        }
+        if self.onboarding.is_some() {
             return;
         }
         self.request_frame();
@@ -3474,13 +3995,27 @@ impl App {
             return;
         }
         self.drag_files = true;
-        if let Some(i) = self.modules.iter().position(|m| m.wants_drops()) {
-            self.tab = i;
+        // An open tab that takes drops (Launcher) keeps them; otherwise
+        // the first one that's on (Shelf).
+        let keep = self.expanded && !self.settings_open && self.modules[self.tab].wants_drops() && self.enabled(self.tab);
+        if !keep {
+            if let Some(i) = (0..self.modules.len()).find(|&i| self.modules[i].wants_drops() && self.modules[i].has_tab() && self.enabled(i)) {
+                self.tab = i;
+            }
         }
         for m in self.modules.iter_mut() {
             m.drag_hover(true);
         }
         self.request_frame();
+    }
+
+    /// Files are being dragged over the notch at screen point (x, y).
+    pub fn drag_over(&mut self, x: i32, y: i32) {
+        let m = ((x - self.origin.0) as f32 / self.scale, (y - self.origin.1) as f32 / self.scale);
+        if m != self.mouse {
+            self.mouse = m;
+            self.request_frame();
+        }
     }
 
     pub fn drag_leave(&mut self) {
@@ -3497,11 +4032,17 @@ impl App {
         if self.dragging_out || paths.is_empty() {
             return;
         }
+        *crate::modules::DROP_AT.lock().unwrap() = self.mouse;
         let order: Vec<usize> = std::iter::once(self.tab).chain(0..self.modules.len()).collect();
         for i in order {
             if self.modules[i].wants_drops() || i == self.tab {
                 let p = paths.clone();
                 if self.call(i, |m, c| m.drop_files(p, c)) {
+                    let share = std::mem::take(&mut *crate::modules::shelf::SHARE_NOW.lock().unwrap());
+                    if !share.is_empty() {
+                        self.deferred.push(Deferred::Share(share));
+                        break;
+                    }
                     self.tab = i;
                     self.expanded = true;
                     self.leave_at = Some(self.t() + 2.0);
@@ -3665,6 +4206,10 @@ impl App {
             WM_MOUSEWHEEL => {
                 let d = ((wp.0 >> 16) & 0xffff) as i16 as f32 / 120.0;
                 self.on_wheel(d);
+                Some(LRESULT(0))
+            }
+            WM_MBUTTONUP => {
+                self.middle_click();
                 Some(LRESULT(0))
             }
             WM_HOTKEY => {
@@ -4517,11 +5062,11 @@ pub fn selftest() -> String {
             a.leave_at = Some(a.t() - 1.0);
             a.frame();
             out += &format!("{:<4} welcome tour stays open without the mouse\n", if a.mode() == Mode::Expanded && a.onboarding == Some(0) { "OK" } else { "FAIL" });
-            for (k, name) in ["style", "position", "tips", "settings"].iter().enumerate() {
+            for (k, name) in ["hello", "look and place", "colour", "what's in it", "tips"].iter().enumerate() {
                 a.onboarding = Some(k as u8);
                 out += &snap(a, &format!("welcome tour step {} ({name})", k + 1));
             }
-            a.onboarding = Some(0);
+            a.onboarding = Some(1);
             let tiles = {
                 let tgt = a.target();
                 a.cur = tgt;
@@ -4530,14 +5075,17 @@ pub fn selftest() -> String {
             };
             let ok = tiles == 5 && click(a, O_STYLE + 3) && a.settings.style == NotchStyle::Pill && crate::store::read("settings.txt").contains("style=pill");
             out += &format!("{:<4} step 1 offers the 5 styles and picking Pill applies it\n", if ok { "OK" } else { "FAIL" });
-            let ok = click(a, O_NEXT) && a.onboarding == Some(1) && click(a, O_EDGE + 1) && a.settings.edge == Edge::Bottom && a.mode() == Mode::Expanded;
-            out += &format!("{:<4} step 2 moves the notch and the tour stays open\n", if ok { "OK" } else { "FAIL" });
-            let ok = click(a, O_NEXT) && a.onboarding == Some(2) && click(a, O_NEXT) && a.onboarding == Some(3);
-            let panels = a.hits.iter().filter(|h| h.module == ONBOARD).count() > 0;
-            out += &format!("{:<4} tour step 4 introduces AI agents, System monitor, Tools, Clipboard & Shelf\n", if ok && panels { "OK" } else { "FAIL" });
+            let ok = click(a, O_EDGE + 1) && a.settings.edge == Edge::Bottom && a.mode() == Mode::Expanded && a.onboarding == Some(1);
+            out += &format!("{:<4} the same step moves the notch and the tour stays open\n", if ok { "OK" } else { "FAIL" });
+            let ok = click(a, O_NEXT) && a.onboarding == Some(2) && click(a, O_THEME + 1) && a.settings.theme == "midnight";
+            out += &format!("{:<4} step 3 picks a colour theme ({})\n", if ok { "OK" } else { "FAIL" }, a.settings.theme);
+            a.settings.theme = "default".into();
+            let ok = click(a, O_NEXT) && a.onboarding == Some(3);
+            out += &snap(a, "welcome tour presets");
+            let ok = ok && a.hits.iter().any(|h| h.module == ONBOARD && h.id == O_PRESET);
+            out += &format!("{:<4} step 4 offers the presets\n", if ok { "OK" } else { "FAIL" });
             let ok = ok && click(a, O_NEXT) && a.onboarding == Some(4);
-            let glance = a.hits.iter().filter(|h| h.module == ONBOARD).count() > 0 && a.onboarding == Some(4);
-            out += &format!("{:<4} tour shows the mouse-wheel tip and Settings at a glance ({} items)\n", if glance { "OK" } else { "FAIL" }, TOUR_SETTINGS.len());
+            out += &format!("{:<4} the last step shows {} tips\n", if ok { "OK" } else { "FAIL" }, TOUR_TIPS.len());
             let ok = ok && click(a, O_NEXT) && a.onboarding.is_none();
             let saved = crate::store::read("settings.txt").contains("onboarded=1");
             let told = a.queue.iter().any(|t| t.key == "welcome" && t.sub.contains("right-click"));
@@ -5379,7 +5927,7 @@ pub fn selftest() -> String {
             );
             // Hermes: stream start = working, a question/approval = needs you,
             // turn end = done, Esc = stopped, session closed = gone.
-            feed(a, json!({"agent": "hermes", "event": "on_stream_start", "session": "h1", "cwd": "C:\\Users\\Shabab", "surface": "desktop", "model": "anthropic/claude-opus"}));
+            feed(a, json!({"agent": "hermes", "event": "on_stream_start", "session": "h1", "cwd": "C:\\Users\\Dev", "surface": "desktop", "model": "anthropic/claude-opus"}));
             let h_work = a.modules[ai].debug_state().contains("hermes:desktop:Working") && a.modules[ai].live() == Some(45);
             feed(a, json!({"agent": "hermes", "event": "on_human_input_request", "session": "h1", "kind": "approval"}));
             let h_ask = a.modules[ai].debug_state().contains("hermes:desktop:NeedsYou") && toasted(a, &|t| t.title == "Hermes needs you" && t.sub.contains("OK"));
@@ -6534,12 +7082,43 @@ pub fn render_docs(dir: &std::path::Path) -> String {
         shot(a, dir, "settings_look");
         a.settings_page = 2;
         shot(a, dir, "settings_features");
+        a.shortcuts_page = true;
+        shot(a, dir, "settings_shortcuts");
+        a.shortcuts_page = false;
         a.settings_page = 0;
         a.settings_open = false;
+        // The new panels.
+        {
+            let hidden = std::mem::take(&mut a.settings.hidden_panels);
+            let tab = a.tab;
+            for (title, name) in [("Notes", "panel_notes"), ("Countdowns", "panel_countdowns"), ("Launcher", "panel_launcher"), ("Toggles", "panel_toggles"), ("Health", "panel_health"), ("Mirror", "panel_mirror"), ("Commands", "panel_commands")] {
+                if let Some(i) = a.modules.iter().position(|m| m.title() == title) {
+                    a.tab = i;
+                    shot(a, dir, name);
+                }
+            }
+            // Everything on: the panels that don't fit, under the ⋯.
+            a.tab = a.modules.iter().position(|m| m.title() == "Now Playing").unwrap_or(0);
+            a.more_open = true;
+            shot(a, dir, "panel_more_all");
+            a.more_open = false;
+            // The song's colour glowing around the closed notch.
+            a.settings.extra.insert("album_glow".into(), "1".into());
+            a.expanded = false;
+            a.tick();
+            *crate::modules::music::ART_COLOR.lock().unwrap() = Some(hex(0xFF7A3D));
+            shot(a, dir, "notch_glow");
+            a.settings.extra.remove("album_glow");
+            a.expanded = true;
+            (a.settings.hidden_panels, a.tab) = (hidden, tab);
+        }
+        a.open_settings();
+        a.settings_open = false;
         a.start_onboarding();
-        shot(a, dir, "tour_style");
-        a.onboarding = Some(3);
-        shot(a, dir, "tour_presets");
+        for (k, name) in ["tour_hello", "tour_style", "tour_colour", "tour_presets", "tour_tips"].into_iter().enumerate() {
+            a.onboarding = Some(k as u8);
+            shot(a, dir, name);
+        }
         a.onboarding = None;
         a.expanded = true;
         // Every panel on: the ones that don't fit go under ⋯.
@@ -7061,9 +7640,22 @@ fn settings_tip(id: u32) -> &'static str {
         S_CLIP_MODE => "Record copied text only",
         71 => "Record copied text and files",
         72 => "Record text, files and pictures",
-        i if (S_FEATURE..S_FEATURE + 30).contains(&i) => "Switch it on or off; what's off doesn't run",
+        i if (S_FEATURE..S_FEATURE + crate::features::FEATURES.len() as u32).contains(&i) => crate::features::FEATURES[(i - S_FEATURE) as usize].what,
         i if (S_PRESET..S_PRESET + 4).contains(&i) => "Switch on exactly this set (change any of it after)",
-        i if (S_HOTKEY..S_HOTKEY + 3).contains(&i) => "Click, then press the keys (Backspace removes it, Esc cancels)",
+        i if (S_HOTKEY..S_HOTKEY + 4).contains(&i) => "Click, then press the keys (Backspace removes it, Esc cancels)",
+        S_SHORTCUTS => "Global keyboard shortcuts and what the mouse does on the closed notch",
+        S_CUSTOM => "Your own theme: pick a background and a text colour",
+        i if (S_CBG..S_CBG + 8).contains(&i) => "Background colour",
+        i if (S_CTEXT..S_CTEXT + 8).contains(&i) => "Text colour",
+        S_CFIX => "Pick a text colour that's easy to read",
+        S_GLOW => "The song's colour around the closed notch while music plays",
+        S_MOTION => "No springy animations: the notch and panels change at once",
+        i if (S_SIZE..S_SIZE + 3).contains(&i) => "Make the notch and panels smaller or larger",
+        S_HIDEAPP_ADD => "The notch hides while this app is in front",
+        i if (S_HIDEAPP..S_HIDEAPP + 10).contains(&i) => "Stop hiding for this app",
+        i if (S_PROFILE..S_PROFILE + 3).contains(&i) => "Switch profile: its own features, widgets and theme",
+        S_PROFILE_AUTO => "Work on weekdays 9 to 5, Home otherwise",
+        i if (S_MOUSE..S_MOUSE + 30).contains(&i) => "What this does on the closed notch",
         S_EXPORT => "Save your settings and data in one file, for another PC",
         S_IMPORT => "Load settings and data saved with Export",
         _ => "",
@@ -7080,6 +7672,7 @@ fn onboard_tip(id: u32) -> &'static str {
         i if (O_STYLE..O_STYLE + 5).contains(&i) => "Use this look for the closed notch",
         i if (O_EDGE..O_EDGE + 4).contains(&i) => "Put the notch on this screen edge",
         i if (O_PRESET..O_PRESET + 4).contains(&i) => "Switch on these panels",
+        i if (O_THEME..O_THEME + 6).contains(&i) => "Use this colour theme",
         _ => "",
     }
 }
@@ -7280,6 +7873,122 @@ fn widget_tests(a: &mut App) -> String {
     out += &smart_hide_tests(a);
     out += &look_tests(a);
     out += &feature_tests(a);
+    out += &phase_tests(a);
+    out
+}
+
+/// Self-test: the everyday helpers, health, Ramadan, money, look, profiles.
+fn phase_tests(a: &mut App) -> String {
+    use crate::modules::{countdown, meetings};
+    let ok = |b: bool| if b { "OK" } else { "FAIL" };
+    let mut out = String::new();
+    let start = (a.expanded, a.settings_open, a.settings_page, a.tab, a.settings.clone());
+
+    // Countdowns: dates in many forms, years roll over, yearly repeats.
+    let today = (2026, 11, 12);
+    let p = |t: &str| countdown::parse(t, today).map(|c| (c.name, c.y, c.m, c.d));
+    let parsed = [p("Exam 2026-12-20"), p("Mum's birthday, 3 Mar"), p("Eid Jun 6"), p("Trip 20/12"), p("Party 5 Nov"), p("nonsense")];
+    let want = [
+        Some(("Exam".to_string(), 2026, 12, 20)),
+        Some(("Mum's birthday".to_string(), 2027, 3, 3)),
+        Some(("Eid".to_string(), 2027, 6, 6)),
+        Some(("Trip".to_string(), 2026, 12, 20)),
+        Some(("Party".to_string(), 2027, 11, 5)),
+        None,
+    ];
+    let yearly = countdown::Countdown { y: 2000, m: 11, d: 10, yearly: true, name: "B".into() };
+    let days = (countdown::days_left(&countdown::Countdown { y: 2026, m: 12, d: 20, yearly: false, name: "E".into() }, today), countdown::days_left(&yearly, today));
+    out += &format!("{:<4} countdowns read 6 date forms and count days {:?}\n", ok(parsed == want && days == (38, 363)), days);
+
+    // Calendar link: events, a weekly repeat with an exception, Join links.
+    let base = meetings::local_to_unix(2026, 11, 9, 0, 0, 0);
+    let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20261109T093000\r\nDTEND:20261109T094500\r\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=6\r\nEXDATE:20261111T093000\r\nSUMMARY:Standup\r\nDESCRIPTION:Join: https://teams.microsoft.com/l/meetup-join/abc\r\n  more\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261112\r\nSUMMARY:Holiday\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART:20261110T100000Z\r\nSUMMARY:Cancelled thing\r\nSTATUS:CANCELLED\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+    let ev = meetings::parse_ics(ics, base - 86400.0, base + 30.0 * 86400.0);
+    let standups: Vec<f64> = ev.iter().filter(|e| e.title == "Standup").map(|e| ((e.start - base) / 86400.0 * 10.0).round() / 10.0).collect();
+    let link = ev.iter().find(|e| e.title == "Standup").and_then(|e| e.link.clone());
+    let ics_ok = standups.len() == 5 && standups[0] == 0.4 && ev.iter().any(|e| e.title == "Holiday" && e.all_day) && !ev.iter().any(|e| e.title.starts_with("Cancelled")) && link.as_deref() == Some("https://teams.microsoft.com/l/meetup-join/abc");
+    out += &format!("{:<4} calendar link: weekly repeat with an exception ({} standups), all-day events, cancelled skipped, Teams link found\n", ok(ics_ok), standups.len());
+
+    // Currency rates from the API's JSON.
+    let json = r#"{"result":"success","rates":{"USD":1,"EUR":0.92,"GBP":0.79,"LKR":298.5,"BDT":121.2,"INR":84.1,"SAR":3.75,"AED":3.6725}}"#;
+    let rates = crate::modules::tools::parse_rates(json);
+    out += &format!("{:<4} currency rates read from the API ({:?})\n", ok(rates.map_or(false, |r| r[3] == 298.5 && r[0] == 1.0)), rates.map(|r| r[3]));
+
+    // Ramadan: the Hijri date (tabular): 1 March 2026 is in Ramadan 1447.
+    let h = crate::modules::prayer::hijri(2026, 3, 1, 0);
+    let h2 = crate::modules::prayer::hijri(2026, 5, 1, 0);
+    out += &format!("{:<4} Hijri dates: 1 Mar 2026 = {h:?}, 1 May 2026 = {h2:?} (Ramadan mode keys off month 9)\n", ok(h.0 == 1447 && h.1 == 9 && h2.1 != 9));
+
+    // Your own theme: readable, and Fix picks a readable text colour.
+    let th = crate::gfx::custom_theme(0x1B1B2F, 0xF5F5F7);
+    let bad = crate::gfx::contrast(hex(0xF2F2F2), hex(0xFFE7B3));
+    a.settings.extra.insert("custom_bg".into(), "F2F2F2".into());
+    a.settings.extra.insert("custom_text".into(), "FFE7B3".into());
+    a.settings_action(S_CFIX);
+    let fixed = custom_colors(&a.settings);
+    out += &format!("{:<4} your own theme: contrast {:.1}:1; a {:.1}:1 pair is fixed to {:06X}\n", ok(crate::gfx::contrast(th.bg, th.text) >= 7.0 && bad < 4.5 && crate::gfx::contrast(hex(fixed.0), hex(fixed.1)) >= 7.0), crate::gfx::contrast(th.bg, th.text), bad, fixed.1);
+
+    // Profiles keep their own features and theme.
+    let mut st = a.settings.clone();
+    st.extra.remove("profile");
+    st.theme = "rose".into();
+    st.hidden_panels = vec!["Tools".into()];
+    crate::features::switch_profile(&mut st, "Work");
+    st.theme = "ocean".into();
+    st.hidden_panels = vec!["Notes".into()];
+    crate::features::switch_profile(&mut st, "Home");
+    let home = (st.theme.clone(), st.hidden_panels.clone());
+    crate::features::switch_profile(&mut st, "Work");
+    let work = (st.theme.clone(), st.hidden_panels.clone());
+    st.extra.insert("profile_auto".into(), "1".into());
+    let auto = (crate::features::auto_profile(&st, 2, 10), crate::features::auto_profile(&st, 6, 10));
+    out += &format!("{:<4} profiles keep their own features and theme; Auto picks Work on weekdays 9-5 {:?}\n", ok(home.0 == "rose" && home.1 == ["Tools"] && work.0 == "ocean" && work.1 == ["Notes"] && auto == (None, Some("Home"))), auto);
+
+    // Downloads: a finished file shows; a half-downloaded one doesn't.
+    let dir = std::env::temp_dir().join(format!("nookly-dl-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let since = std::time::SystemTime::now() - std::time::Duration::from_secs(2);
+    let _ = std::fs::write(dir.join("movie.mp4.crdownload"), b"partial");
+    let half = crate::modules::downloads::newest_after(&dir, since).is_none();
+    let _ = std::fs::write(dir.join("report.pdf"), b"%PDF done");
+    let done = crate::modules::downloads::newest_after(&dir, since).map(|(p, _)| p.file_name().unwrap().to_string_lossy().into_owned());
+    let _ = std::fs::remove_dir_all(&dir);
+    out += &format!("{:<4} downloads: a finished file is seen ({done:?}), a .crdownload isn't\n", ok(half && done.as_deref() == Some("report.pdf")));
+
+    // Every new panel draws and fits.
+    a.settings.hidden_panels.clear();
+    a.settings_open = false;
+    a.expanded = true;
+    let mut drawn = Vec::new();
+    for title in ["Notes", "Countdowns", "Launcher", "Toggles", "Mirror", "Health"] {
+        if let Some(i) = a.modules.iter().position(|m| m.title() == title) {
+            a.tab = i;
+            let tgt = a.target();
+            a.cur = tgt;
+            a.render(tgt, 0.0);
+            out += &snap(a, &format!("panel {title}"));
+            if a.gfx.last_err.is_none() {
+                drawn.push(title);
+            }
+        }
+    }
+    out += &format!("{:<4} new panels draw: {drawn:?}\n", ok(drawn.len() == 6));
+    // The Look page fits.
+    a.settings_open = true;
+    a.settings_page = 3;
+    a.settings.theme = "custom".into();
+    let tgt = a.target();
+    a.cur = tgt;
+    a.render(tgt, 0.0);
+    out += &snap(a, "look page (custom theme)");
+    let look_ok = a.settings_room[3] >= 0.0 && a.hits.iter().any(|h| h.module == SETTINGS && h.id == S_CBG) && a.hits.iter().any(|h| h.module == SETTINGS && h.id == S_MOTION);
+    out += &format!("{:<4} Look page: 11 themes, your own colours, size, motion, glow and hide-for-apps fit ({:.0} DIPs left)\n", ok(look_ok), a.settings_room[3]);
+
+    let (e, so, sp, tb, st0) = start;
+    (a.expanded, a.settings_open, a.settings_page, a.tab) = (e, so, sp, tb);
+    a.settings = st0;
+    a.settings.save();
+    a.tick();
     out
 }
 
@@ -7370,11 +8079,17 @@ fn feature_tests(a: &mut App) -> String {
     let f4 = a.recording.is_none() && hotkey(&a.settings, 2) == Some((0, 0x73));
     out += &format!("{:<4} recording a shortcut: Esc cancels, a bare letter waits, F4 sets it\n", ok(esc && waits && f4));
     draw(a);
-    out += &snap(a, "features page with shortcuts");
-    let chips: Vec<Rect> = a.hits.iter().filter(|h| h.module == SETTINGS && (S_HOTKEY..S_HOTKEY + 3).contains(&h.id)).map(|h| h.rect).collect();
+    out += &snap(a, "features page");
+    let rows_fit = a.hits.iter().filter(|h| h.module == SETTINGS && (S_FEATURE..S_FEATURE + 64).contains(&h.id)).all(|h| h.rect.b() <= a.edge_rect(a.cur.0, a.cur.1).b() - 4.0);
+    a.shortcuts_page = true;
+    draw(a);
+    out += &snap(a, "shortcuts page");
+    let chips: Vec<Rect> = a.hits.iter().filter(|h| h.module == SETTINGS && (S_HOTKEY..S_HOTKEY + 4).contains(&h.id)).map(|h| h.rect).collect();
+    let mouse_chips = a.hits.iter().filter(|h| h.module == SETTINGS && (S_MOUSE..S_MOUSE + 30).contains(&h.id)).count();
     let panel = a.edge_rect(a.cur.0, a.cur.1);
-    let in_panel = chips.len() == 3 && chips.iter().all(|c| c.b() <= panel.b() - 4.0);
-    out += &format!("{:<4} Features page: groups, description line and shortcuts fit ({} shortcut chips)\n", ok(in_panel && a.settings_room[2] >= 0.0), chips.len());
+    let in_panel = chips.len() == 4 && chips.iter().all(|c| c.b() <= panel.b() - 4.0);
+    a.shortcuts_page = false;
+    out += &format!("{:<4} Features page fits every switch; shortcuts page has {} keyboard and {mouse_chips} mouse choices\n", ok(rows_fit && in_panel && mouse_chips == 9 && a.settings_room[2] >= 0.0), chips.len());
 
     // Export and import.
     let text = bundle();
@@ -7780,6 +8495,8 @@ fn live_names(id: &str) -> (&'static str, &'static str) {
         "prayer" => ("Prayer countdown", "15 min before a prayer"),
         "due" => ("Due tasks", "When a task is due"),
         "agents" => ("AI agents", "While an agent works or needs you"),
+        "meeting" => ("Next meeting", "15 min before a meeting"),
+        "downloads" => ("Downloads", "When a download finishes"),
         _ => ("Live activity", ""),
     }
 }
@@ -7847,6 +8564,50 @@ fn draw_widget_wide(ui: &mut Ui, w: &Widget, left: Rect, right: Rect, vertical: 
 /// clock (so the ⋯ doesn't come and go as the time gets wider).
 fn bar_room(tab_h: f32) -> f32 {
     modules::PANEL.0 - (tab_h + 4.0 + TAB_GAP) - 70.0 - 84.0
+}
+
+thread_local! {
+    /// The logo's pixels, made once per size.
+    static LOGO: std::cell::RefCell<Option<(u32, Vec<u8>)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Nookly's mark, the very same pixels as the app icon (gfx::logo_pixels).
+fn draw_logo(ui: &mut Ui, r: Rect) {
+    let n = (r.w * 2.0).round() as u32;
+    let px = LOGO.with(|l| {
+        let mut l = l.borrow_mut();
+        if l.as_ref().map_or(true, |(s, _)| *s != n) {
+            *l = Some((n, crate::gfx::logo_pixels(n, true)));
+        }
+        l.as_ref().unwrap().1.clone()
+    });
+    if let Some(b) = ui.make_bitmap(n, n, &px) {
+        ui.image_rr(&b, r, 0.0);
+    }
+}
+
+/// Your own theme's colours: (background, text).
+fn custom_colors(st: &Settings) -> (u32, u32) {
+    let get = |k: &str, d: u32| st.extra.get(k).and_then(|v| u32::from_str_radix(v, 16).ok()).unwrap_or(d);
+    (get("custom_bg", 0x1B1B2F), get("custom_text", 0xF5F5F7))
+}
+
+/// Settings > Look > Size: the notch and panels a little smaller or larger.
+fn ui_size(st: &Settings) -> f32 {
+    match st.extra.get("ui_size").map(String::as_str) {
+        Some("s") => 0.9,
+        Some("l") => 1.15,
+        _ => 1.0,
+    }
+}
+
+fn reduce_motion(st: &Settings) -> bool {
+    st.extra.get("reduce_motion").map_or(false, |v| v == "1")
+}
+
+/// Apps (exe names) the notch hides for.
+fn hidden_apps(st: &Settings) -> Vec<String> {
+    st.extra.get("hide_apps").map_or(Vec::new(), |v| v.split('|').filter(|s| !s.is_empty()).map(String::from).collect())
 }
 
 /// Names on the Features page (and in "... is off").
@@ -8048,6 +8809,39 @@ fn run_deferred(list: Vec<Deferred>) {
                         }
                         a.request_frame();
                     });
+                }
+            }
+            Deferred::PickIcs => {
+                let Some(h) = with_app(|a| a.hwnd) else { continue };
+                if let Some(path) = crate::features::pick_ics(h) {
+                    with_app(|a| {
+                        if let Some(i) = a.modules.iter().position(|m| m.title() == "Calendar") {
+                            a.call(i, |m, c| m.picked(vec![path], c));
+                            a.settings.save();
+                        }
+                        a.request_frame();
+                    });
+                }
+            }
+            Deferred::PickToPin(folder) => {
+                let Some(h) = with_app(|a| a.hwnd) else { continue };
+                let paths = crate::features::pick_paths(h, folder);
+                if !paths.is_empty() {
+                    with_app(|a| {
+                        if let Some(i) = a.modules.iter().position(|m| m.title() == "Launcher") {
+                            a.call(i, |m, c| m.picked(paths, c));
+                            a.tab = i;
+                            a.expanded = true;
+                        }
+                        a.request_frame();
+                    });
+                }
+            }
+            Deferred::Share(paths) => {
+                if let Some(h) = with_app(|a| a.hwnd) {
+                    if !crate::share::share(h, paths) {
+                        with_app(|a| a.push_toast(Toast::new("share", "\u{E72D}", col::RED, "Couldn't open Share", "Windows' Share window isn't available")));
+                    }
                 }
             }
             Deferred::Restart => {

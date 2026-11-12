@@ -143,3 +143,119 @@ impl<'a> Ui<'a> {
         }
     }
 }
+
+/// A one-line (or, with `multi`, multi-line) text box owned by a module.
+/// The module asks for the keyboard (`ctx.want_keyboard(true)`) when it is
+/// clicked, then passes keys and characters here.
+#[derive(Clone, Debug, Default)]
+pub struct TextField {
+    pub text: String,
+    pub focused: bool,
+    pub multi: bool,
+    pub max: usize,
+}
+
+/// What a key did to a text field.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FieldKey {
+    /// Nothing for the field.
+    Ignored,
+    Edited,
+    /// Enter (one-line fields).
+    Submit,
+    /// Esc.
+    Cancel,
+}
+
+impl TextField {
+    pub fn new(max: usize) -> TextField {
+        TextField { max, ..Default::default() }
+    }
+    pub fn multi(max: usize) -> TextField {
+        TextField { max, multi: true, ..Default::default() }
+    }
+    pub fn key(&mut self, vk: u16, ctrl: bool) -> FieldKey {
+        if !self.focused {
+            return FieldKey::Ignored;
+        }
+        match vk {
+            0x08 => {
+                if ctrl {
+                    // Ctrl+Backspace: the last word.
+                    let t = self.text.trim_end().len();
+                    let cut = self.text[..t].rfind(|c: char| c.is_whitespace()).map_or(0, |i| i + 1);
+                    self.text.truncate(cut);
+                } else {
+                    self.text.pop();
+                }
+                FieldKey::Edited
+            }
+            0x0D if self.multi && !ctrl => {
+                if self.text.len() < self.max {
+                    self.text.push('\n');
+                }
+                FieldKey::Edited
+            }
+            0x0D => FieldKey::Submit,
+            0x1B => FieldKey::Cancel,
+            0x56 if ctrl => {
+                if let Some(s) = crate::modules::todo::clipboard_text() {
+                    for c in s.chars() {
+                        if self.text.len() >= self.max {
+                            break;
+                        }
+                        if c == '\n' && self.multi || !c.is_control() {
+                            self.text.push(c);
+                        }
+                    }
+                }
+                FieldKey::Edited
+            }
+            _ => FieldKey::Ignored,
+        }
+    }
+    pub fn chr(&mut self, c: char) -> bool {
+        if !self.focused || c.is_control() || self.text.len() >= self.max {
+            return false;
+        }
+        self.text.push(c);
+        true
+    }
+}
+
+impl<'a> Ui<'a> {
+    /// Draw a text box; clicking it sends `id`. A blinking caret shows while
+    /// it has focus, the placeholder while it's empty.
+    pub fn field(&mut self, r: Rect, f: &TextField, placeholder: &str, id: u32, accent: Color) {
+        let hov = self.hovered(r);
+        self.fill_rr(r, 9.0, if f.focused { col::BTN_HOVER } else if hov { col::BTN_HOVER } else { col::BTN });
+        if f.focused {
+            self.stroke_rr(r, 9.0, accent.with_a(0.8), 1.2);
+        }
+        let inner = r.inset_xy(10.0, if f.multi { 7.0 } else { 0.0 });
+        let caret = f.focused && (self.t * 2.0) as i64 % 2 == 0;
+        if f.text.is_empty() {
+            self.text(placeholder, if f.multi { Rect::new(inner.x, inner.y, inner.w, 16.0) } else { inner }, 12.0, col::FAINT, Weight::Regular, Align::Left);
+            if caret {
+                self.fill_rect(Rect::new(inner.x, if f.multi { inner.y + 1.0 } else { inner.cy() - 7.0 }, 1.4, 14.0), accent);
+            }
+        } else if f.multi {
+            let shown = format!("{}{}", f.text, if caret { "|" } else { "" });
+            self.push_clip(inner);
+            self.text_wrap(&shown, inner, 12.0, col::TEXT, Weight::Regular, Align::Left);
+            self.pop_clip();
+        } else {
+            // Long text: show its end.
+            let mut s = f.text.clone();
+            while self.measure(&s, 12.0, Weight::Regular) > inner.w - 6.0 && !s.is_empty() {
+                s.remove(0);
+            }
+            let w = self.measure(&s, 12.0, Weight::Regular);
+            self.text(&s, inner, 12.0, col::TEXT, Weight::Regular, Align::Left);
+            if caret {
+                self.fill_rect(Rect::new(inner.x + w + 1.0, inner.cy() - 7.0, 1.4, 14.0), accent);
+            }
+        }
+        self.hit(r, id);
+    }
+}

@@ -174,6 +174,37 @@ pub struct Theme {
     pub glass: bool,
 }
 
+/// Relative luminance (WCAG) of a colour.
+pub fn luminance(c: Color) -> f32 {
+    let f = |v: f32| if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+    0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
+}
+
+/// WCAG contrast ratio of two colours (1 to 21).
+pub fn contrast(a: Color, b: Color) -> f32 {
+    let (x, y) = (luminance(a), luminance(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// Your own theme from a background and a text colour; the dim and faint
+/// texts sit between them, and coloured labels darken on a light one.
+pub fn custom_theme(bg: u32, text: u32) -> Theme {
+    let (b, t) = (hex(bg), hex(text));
+    let light = luminance(b) > 0.45;
+    Theme {
+        key: "custom",
+        name: "Custom",
+        bg: b,
+        text: t,
+        dim: t.lerp(b, 0.36),
+        faint: t.lerp(b, 0.58),
+        over: t,
+        tip: b.lerp(t, 0.14),
+        tint: if light { 0.6 } else { 1.0 },
+        glass: false,
+    }
+}
+
 const fn theme(key: &'static str, name: &'static str, bg: Color, text: u32, dim: u32, faint: u32, over: u32, tip: Color, tint: f32, glass: bool) -> Theme {
     Theme { key, name, bg, text: hex(text), dim: hex(dim), faint: hex(faint), over: hex(over), tip, tint, glass }
 }
@@ -567,6 +598,13 @@ impl Gfx {
         unsafe { self.rt.FillRoundedRectangle(&rr, &self.brush) }
     }
 
+    /// A rounded outline in exactly this colour (themes don't touch it).
+    pub fn stroke_rr_raw(&mut self, r: Rect, rad: f32, c: Color, w: f32) {
+        self.set_raw(c);
+        let rr = D2D1_ROUNDED_RECT { rect: r.d2d(), radiusX: rad, radiusY: rad };
+        unsafe { self.rt.DrawRoundedRectangle(&rr, &self.brush, w, None) }
+    }
+
     pub fn stroke_rr(&mut self, r: Rect, rad: f32, c: Color, w: f32) {
         self.set(c);
         let rr = D2D1_ROUNDED_RECT { rect: r.d2d(), radiusX: rad, radiusY: rad };
@@ -904,59 +942,68 @@ impl Drop for Gfx {
 }
 
 /// Build a 32×32 tray icon procedurally: the Nookly mark.
+/// Nookly's mark at `n` x `n` pixels, exactly as docs/tools/make_logo.py
+/// draws it (same 32-unit grid): an amber "n" on a dark ink tile, a teal
+/// light in its arch. Each pixel is sampled 4x4. BGRA, straight alpha, or
+/// premultiplied for Direct2D.
+pub fn logo_pixels(n: u32, premultiplied: bool) -> Vec<u8> {
+    let mut px = vec![0u8; (n * n * 4) as usize];
+    let k = 32.0 / n as f32;
+    let tile = |x: f32, y: f32| {
+        let (l, t, r, b, rad) = (1.0, 1.0, 31.0, 31.0, 8.0f32);
+        let (cx, cy) = (x.clamp(l + rad, r - rad), y.clamp(t + rad, b - rad));
+        x >= l && x <= r && y >= t && y <= b && (x - cx).hypot(y - cy) <= rad
+    };
+    let n_dist = |x: f32, y: f32| {
+        let arc = if y <= 15.0 { ((x - 16.0).hypot(y - 15.0) - 6.0).abs() } else { f32::MAX };
+        let leg = |lx: f32| (x - lx).hypot(y - y.clamp(15.0, 25.0));
+        arc.min(leg(10.0)).min(leg(22.0))
+    };
+    let mix = |a: [f32; 3], b: [f32; 3], t: f32| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+    // (b, g, r)
+    let (ink_top, ink_bottom) = ([62.0, 38.0, 42.0], [25.0, 16.0, 17.0]);
+    let (amber_top, amber_bottom) = ([74.0, 196.0, 255.0], [56.0, 128.0, 255.0]);
+    let teal = [210.0, 225.0, 92.0];
+    for y in 0..n {
+        for x in 0..n {
+            let (mut acc, mut cov) = ([0.0f32; 3], 0.0f32);
+            for sy in 0..4 {
+                for sx in 0..4 {
+                    let fx = (x as f32 + (sx as f32 + 0.5) / 4.0) * k;
+                    let fy = (y as f32 + (sy as f32 + 0.5) / 4.0) * k;
+                    if !tile(fx, fy) {
+                        continue;
+                    }
+                    let c = if (fx - 16.0).hypot(fy - 22.4) <= 2.5 {
+                        teal
+                    } else if n_dist(fx, fy) <= 2.4 {
+                        mix(amber_top, amber_bottom, ((fy - 9.0) / 16.0).clamp(0.0, 1.0))
+                    } else {
+                        let glow = (-((fx - 16.0).hypot(fy - 22.4) / 4.5).powi(2)).exp() * 0.35;
+                        mix(mix(ink_top, ink_bottom, fy / 32.0), teal, glow)
+                    };
+                    for j in 0..3 {
+                        acc[j] += c[j];
+                    }
+                    cov += 1.0;
+                }
+            }
+            let i = ((y * n + x) * 4) as usize;
+            let a = cov / 16.0;
+            for j in 0..3 {
+                let v = acc[j] / cov.max(1.0);
+                px[i + j] = (if premultiplied { v * a } else { v }) as u8;
+            }
+            px[i + 3] = (a * 255.0) as u8;
+        }
+    }
+    px
+}
+
 pub fn make_tray_icon() -> HICON {
     unsafe {
         let n = 32i32;
-        let mut px = vec![0u8; (n * n * 4) as usize];
-        // Nookly's mark, as in docs/tools/make_logo.py (same 32-unit grid):
-        // an amber "n" on a dark ink tile, a teal light in its arch. Each
-        // pixel is sampled 4x4 for smooth edges. BGRA, straight alpha.
-        let tile = |x: f32, y: f32| {
-            let (l, t, r, b, rad) = (1.0, 1.0, 31.0, 31.0, 8.0f32);
-            let (cx, cy) = (x.clamp(l + rad, r - rad), y.clamp(t + rad, b - rad));
-            x >= l && x <= r && y >= t && y <= b && (x - cx).hypot(y - cy) <= rad
-        };
-        let n_dist = |x: f32, y: f32| {
-            let arc = if y <= 15.0 { ((x - 16.0).hypot(y - 15.0) - 6.0).abs() } else { f32::MAX };
-            let leg = |lx: f32| (x - lx).hypot(y - y.clamp(15.0, 25.0));
-            arc.min(leg(10.0)).min(leg(22.0))
-        };
-        let mix = |a: [f32; 3], b: [f32; 3], t: f32| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-        // (b, g, r)
-        let (ink_top, ink_bottom) = ([62.0, 38.0, 42.0], [25.0, 16.0, 17.0]);
-        let (amber_top, amber_bottom) = ([74.0, 196.0, 255.0], [56.0, 128.0, 255.0]);
-        let teal = [210.0, 225.0, 92.0];
-        for y in 0..n {
-            for x in 0..n {
-                let (mut acc, mut cov) = ([0.0f32; 3], 0.0f32);
-                for sy in 0..4 {
-                    for sx in 0..4 {
-                        let fx = x as f32 + (sx as f32 + 0.5) / 4.0;
-                        let fy = y as f32 + (sy as f32 + 0.5) / 4.0;
-                        if !tile(fx, fy) {
-                            continue;
-                        }
-                        let c = if (fx - 16.0).hypot(fy - 22.4) <= 2.5 {
-                            teal
-                        } else if n_dist(fx, fy) <= 2.4 {
-                            mix(amber_top, amber_bottom, ((fy - 9.0) / 16.0).clamp(0.0, 1.0))
-                        } else {
-                            let glow = (-((fx - 16.0).hypot(fy - 22.4) / 4.5).powi(2)).exp() * 0.35;
-                            mix(mix(ink_top, ink_bottom, fy / 32.0), teal, glow)
-                        };
-                        for k in 0..3 {
-                            acc[k] += c[k];
-                        }
-                        cov += 1.0;
-                    }
-                }
-                let i = ((y * n + x) * 4) as usize;
-                for k in 0..3 {
-                    px[i + k] = (acc[k] / cov.max(1.0)) as u8;
-                }
-                px[i + 3] = (cov / 16.0 * 255.0) as u8;
-            }
-        }
+        let px = logo_pixels(32, false);
         let bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,

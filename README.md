@@ -1,127 +1,92 @@
-<p align="center"><img src="docs/images/hero.png" alt="Nookly" width="100%"></p>
+<p align="center"><img src="docs/images/logo.png" alt="Nookly" width="120"></p>
 
-<p align="center"><a href="https://banulalakwindu.github.io/Nookly/"><b>Download for Windows</b></a> · <a href="https://banulalakwindu.github.io/Nookly/">Website</a> · <a href="docs/USER_GUIDE.md">User guide</a></p>
+<h1 align="center">Nookly</h1>
 
-# Nookly
+<p align="center"><b>A little notch that does a lot. For Windows 10 and 11.</b><br>
+Music, calendar, notes, timers, widgets, health and quick tools, one hover away at the top of your screen.<br>
+Free, open source, private, and light enough that you'll forget it's running.</p>
 
-> Nookly is based on [WindyLand](https://github.com/shabab239/WindyLand) by
-> Shabab, used under the MIT License. It has since grown its own features
-> (Widgets, smart hide, Calendar, themes, the Features page and more) and is
-> developed separately. It stays free and open source under the same license.
+<p align="center">
+  <a href="https://github.com/banulalakwindu/Nookly/releases/latest"><b>⬇ Download for Windows</b></a> ·
+  <a href="https://banulalakwindu.github.io/Nookly/">Website</a> ·
+  <a href="docs/USER_GUIDE.md">User guide</a> ·
+  <a href="CHANGELOG.md">What's new</a>
+</p>
 
-A living notch for Windows 10 and 11, like the Dynamic Island. Music with
-synced lyrics, your Windows notifications, a timer, Pomodoro, to-do
-reminders, a water reminder, a file shelf, clipboard history and mic and
-camera in-use dots, all in a small pill at the edge of your screen. Hover to
-open, move away to close. Free and open source.
+<p align="center"><img src="docs/images/hero.png" alt="Nookly: every panel at a glance" width="100%"></p>
 
+## Why Nookly
 
-## Features
+- **Everything one hover away.** Rest the mouse on the notch and it opens; move away and it tucks itself back. Or press **Win+Alt+N** from anywhere.
+- **Only what you want.** Start from a preset (Minimal, Student, Work, Everything) and switch every feature on or off. What's off doesn't run at all.
+- **Light and smooth.** Written in Rust, drawn on the GPU, and it reacts to events instead of polling. It idles near zero CPU.
+- **Yours alone.** No account, no ads, no tracking. Your data is plain text on your PC.
+- **Made to look good.** Five notch styles, ten themes plus Liquid Glass and your own, on any edge of any screen.
+
+## What's inside
 
 | | |
 |---|---|
-| <img src="docs/images/lyrics.png" alt="Synced lyrics"> | <img src="docs/images/notifications.png" alt="Windows notifications"> |
-| **Now playing + synced lyrics** from any media app | **Windows notifications** in the notch, with the app's icon |
+| <img src="docs/images/lyrics.png" alt="Music with synced lyrics"> | <img src="docs/images/calendar.png" alt="Calendar"> |
+| **Music** from any app, with synced lyrics, a draggable seek bar and an optional glow in the album's colour that moves with the beat | **Calendar** with your tasks, plus your Google or Outlook calendar (iCal link or `.ics` file): "Standup in 8 min" on the notch and a **Join** button |
+| <img src="docs/images/widgets.png" alt="Widgets"> | <img src="docs/images/health.png" alt="Health"> |
+| **Widgets** on the closed notch: battery, AirPods, weather, Wi-Fi, CPU, countdowns, your commands... in the order you like | **Health**: screen time today, eye breaks (20-20-20), stand-up reminders and battery care. Reminders wait during games and calls |
+| <img src="docs/images/countdowns.png" alt="Countdowns"> | <img src="docs/images/notes.png" alt="Notes"> |
+| **Countdowns** to exams, trips and birthdays, "12 days" on the notch | **Notes**: a scratchpad that saves as you type |
+| <img src="docs/images/launcher.png" alt="Launcher"> | <img src="docs/images/toggles.png" alt="Quick toggles"> |
+| **Launcher**: your apps, folders and sites, one click away | **Quick toggles**: Wi-Fi, Bluetooth, dark mode and mic mute |
+| <img src="docs/images/commands.png" alt="Commands"> | <img src="docs/images/agents.png" alt="AI agents"> |
+| **Commands** on a schedule (1 minute to daily) with their output on the notch | **AI agents**: Claude Code, Codex and Hermes working, needing you, done |
 | <img src="docs/images/timer.png" alt="Timer"> | <img src="docs/images/pomodoro.png" alt="Pomodoro"> |
-| **Timer and stopwatch** with presets, alerts and laps | **Pomodoro** focus sessions |
-| <img src="docs/images/todo.png" alt="To-do"> | <img src="docs/images/water.png" alt="Water reminder"> |
-| **To-do** with timed reminders | **Water reminder** with an hourly chart |
-| <img src="docs/images/shelf.png" alt="File shelf"> | <img src="docs/images/clipboard.png" alt="Clipboard history"> |
-| **File shelf**: drop in, drag out | **Clipboard history**: text, files or images, pin to keep |
+| **Timer and stopwatch** | **Pomodoro** focus sessions |
+| <img src="docs/images/clipboard.png" alt="Clipboard"> | <img src="docs/images/shelf.png" alt="Shelf"> |
+| **Clipboard history** with search and snippets; click to paste | **Shelf and Share**: drop files to keep them close, or to share them |
 | <img src="docs/images/tools.png" alt="Tools"> | <img src="docs/images/prayer.png" alt="Prayer times"> |
-| **Tools**: color picker, calculator, QR codes, unit and time-zone converter | **Prayer times** worked out on your PC, with reminders |
-| <img src="docs/images/agents.png" alt="AI agents"> | <img src="docs/images/monitor.png" alt="System monitor"> |
-| **AI agents**: Hermes, Claude Code and Codex working, waiting for you, done | **System monitor**: CPU, memory, network, also on the closed notch |
+| **Tools**: colour picker, calculator, QR codes, converter with today's currency rates | **Prayer times** worked out on your PC, with reminders and Ramadan mode |
+| <img src="docs/images/notifications.png" alt="Notifications"> | <img src="docs/images/todo.png" alt="To-do"> |
+| **Your notifications** in the notch, with today's list | **To-do** with reminders |
 
-A **Calendar** tab, **themes** (Black, Graphite, Midnight, Rose, Forest, Ocean, Light, Blossom, Paper and Liquid Glass) and an optional seconds clock.
+And more: **Downloads finished** (click to open), **Mirror** (a camera check before calls), **System monitor**, **Water reminder**, **mic and camera dots**, **smart hide** that steps aside for windows under it, **profiles** (Home, Work, Focus), mouse shortcuts on the closed notch (scroll for volume or brightness, middle-click to pause), and **export / import** of your settings.
 
-**Widgets** decide what the closed notch shows, and in which order: battery, AirPods and other Bluetooth batteries, weather, Wi-Fi, volume and mic mute, CPU, memory, network, the date and more, next to music, timers and agents. Pick them, then drag them into rows: one item across both sides of the clock, or two side by side.
+<img src="docs/images/settings-features.png" alt="Settings: Features">
 
-<img src="docs/images/styles.png" alt="Notch styles">
-
-<img src="docs/images/alerts.png" alt="Alerts">
-
-Battery, network, Caps Lock, keyboard language, volume and Bluetooth alerts are
-built in, and a dot shows while any app uses your microphone or camera.
-
-**Prayer times** are calculated on your PC (no internet), for 16 Bangladesh
-cities or any latitude and longitude, with Karachi, MWL, ISNA, Egypt or Makkah
-methods, Shafi or Hanafi Asr, per-prayer minute nudges and optional reminders.
-Switch off any panel you don't use in Settings > Features (or start from a preset: Minimal, Student, Work, Everything), and roll the mouse wheel on
-the open notch to switch panels.
-
-<img src="docs/images/settings.png" alt="Settings">
+<img src="docs/images/themes.png" alt="Themes">
 
 | | |
 |---|---|
-| <img src="docs/images/mascot.png" alt="Mascots"> | <img src="docs/images/positions.png" alt="Any edge"> |
-| **Mascots** that follow your mouse when nothing's on | **Any edge** of any screen |
-
-Your data stays on your PC. The only network requests are to
-[LRCLIB](https://lrclib.net) for lyrics, to GitHub to check for updates, and,
-only if you switch the Weather widget on, to [Open-Meteo](https://open-meteo.com)
-for the weather.
-Notifications, clipboard history and the mic and camera dots are read
-locally, and notifications and clipboard history are off until you turn them
-on. See the [privacy policy](PRIVACY.md).
+| <img src="docs/images/styles.png" alt="Notch styles"> | <img src="docs/images/positions.png" alt="Any edge"> |
+| **Five styles**: Full, Slim, Compact, Pill, Hidden | **Any edge** of any screen |
 
 ## Install
 
-Download `NooklySetup-<version>.exe` from the
-[website](https://banulalakwindu.github.io/Nookly/) or
-[Releases](https://github.com/banulalakwindu/Nookly/releases) and run it. It
-installs per user, no admin rights needed. A short welcome tour lets you pick
-the look, and later versions install with one click from the notch.
+1. Download `NooklySetup-<version>.exe` from [Releases](https://github.com/banulalakwindu/Nookly/releases/latest) or the [website](https://banulalakwindu.github.io/Nookly/).
+2. Run it. It installs just for you, no admin rights needed.
+3. A short welcome tour helps you pick the look, the colour and what you want in it.
 
-**Quick start:** hover the notch to open it, right-click it for settings,
-right-click and drag to move it. See the **[User guide](docs/USER_GUIDE.md)**.
+Updates arrive in the notch, with one click to install.
 
-**"Smart App Control blocked an app"?** Releases aren't code signed, and
-Windows 11's Smart App Control blocks unsigned apps with no way to allow just
-one. The only way to install on such a PC is to turn Smart App Control off in
-Windows Security > App & browser control. Note that on many
-Windows versions it can't be turned back on without resetting Windows. The
-blue "Windows protected your PC" screen is different: click **More info** >
-**Run anyway**.
+**"Windows protected your PC"?** Nookly isn't code-signed yet: click **More info** > **Run anyway**. Windows 11's *Smart App Control* blocks every unsigned app; the only way past it is to turn it off in Windows Security > App & browser control.
 
-## Build
+## Private by design
 
-Needs Rust (stable, GNU or MSVC toolchain).
+Everything Nookly keeps is plain text in `%APPDATA%\Nookly`. It goes online only for lyrics (LRCLIB), update checks (GitHub), and, only if you turn them on, the weather (Open-Meteo), your calendar link and currency rates. Clipboard history and notifications are off until you switch them on. Read the [privacy policy](PRIVACY.md).
+
+## Build it yourself
+
+Needs Rust (stable).
 
 ```powershell
 cargo build --release                       # target\release\nookly.exe
-.\target\release\nookly.exe --selftest   # headless checks
+.\target\release\nookly.exe --selftest     # headless checks
 .\build.ps1                                 # build + icon + self-test + installer (Inno Setup 6)
-python docs\tools\make_images.py shots      # regenerate the screenshots (Pillow, numpy)
+python docs\tools\make_images.py shots      # the screenshots in this README
+python docs\tools\make_logo.py              # the logo and icons
 ```
 
-### Releases and the website
+Each feature is one file in `src/modules/` implementing the `Module` trait: copy `src/modules/example.rs` and register it in `modules::all()`.
 
-- **Website**: `docs/` is the site at
-  [banulalakwindu.github.io/Nookly](https://banulalakwindu.github.io/Nookly/).
-  It goes live by itself after every push to `main` that touches `docs/`
-  (`.github/workflows/pages.yml`).
-- **Releases**: after a batch of good changes, raise `version` in
-  `Cargo.toml` and add a `## <version>` section to `CHANGELOG.md`, then push
-  to `main`. GitHub Actions builds the installer from the source, tags
-  `v<version>` and publishes the release with that section as its notes
-  (`.github/workflows/release.yml`). Pushes that don't change the version
-  release nothing. The in-app update check then offers it to everyone.
-
-## Adding a feature
-
-Each feature is one file in `src/modules/` implementing the `Module` trait.
-Copy `src/modules/example.rs` and register it in `modules::all()`.
-Mascots live in `src/mascot.rs`: add a variant to `store::Mascot` and a draw
-function.
-
-## Credits
-
-Nookly is based on [WindyLand](https://github.com/shabab239/WindyLand) by
-Shabab (MIT License), and keeps its copyright notice in [LICENSE](LICENSE).
-WindyLand was inspired by [Nusa](https://rama2555.github.io/nusa/), a living
-notch for Windows by rama2555, and shares no code with it.
+**Releases and the website** are automatic. The site in `docs/` goes live after every push to `main`. To release, raise `version` in `Cargo.toml`, add a `## <version>` section to `CHANGELOG.md` and push: GitHub Actions builds the installer from the source, tags it and publishes the release.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) · Made by [Banula Lakwindu](https://github.com/banulalakwindu)
