@@ -15,6 +15,7 @@
 
 mod app;
 mod brightness;
+mod dialog;
 mod dragdrop;
 mod features;
 mod gfx;
@@ -23,6 +24,7 @@ mod http;
 mod mascot;
 mod modules;
 mod sound;
+mod setup;
 mod share;
 mod store;
 mod taskbar;
@@ -102,6 +104,22 @@ fn main() {
     if args.iter().any(|a| a == "--disconnect-agents") {
         modules::agents::disconnect_all();
         std::process::exit(0);
+    }
+    // Started as unins000.exe (where the old Inno installer's uninstaller
+    // was, which Windows may still remember): open Nookly's own uninstaller.
+    if setup::is_inno_stub() {
+        let nookly = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("nookly.exe")));
+        if let Some(n) = nookly.filter(|n| n.exists()) {
+            let _ = std::process::Command::new(n).arg("--uninstall").spawn();
+        }
+        std::process::exit(0);
+    }
+    // NooklySetup-<version>.exe is this exe: install it (setup.rs).
+    if setup::wanted(&args) {
+        unsafe {
+            let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+        std::process::exit(setup::run(&args));
     }
     if args.iter().any(|a| a == "--uninstall") {
         unsafe {

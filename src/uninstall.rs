@@ -63,10 +63,6 @@ fn close_running() -> bool {
     }
 }
 
-fn ask(text: &str, buttons: MESSAGEBOX_STYLE) -> MESSAGEBOX_RESULT {
-    let t = HSTRING::from(text);
-    unsafe { MessageBoxW(None, &t, w!("Uninstall Nookly"), buttons | MB_SETFOREGROUND) }
-}
 
 /// What uninstalling would do, one step per line (also the --dry-run output).
 pub fn plan(keep_data: bool) -> Vec<String> {
@@ -79,14 +75,39 @@ pub fn plan(keep_data: bool) -> Vec<String> {
     if !keep_data {
         v.push(format!("delete data folder {}", crate::store::dir().display()));
     }
+    // Inno's own uninstaller always has its .dat next to it; a lone
+    // unins000.exe is Nookly's stand-in link (deleted with the app).
     let unins = dir.join("unins000.exe");
-    if unins.exists() {
+    if unins.exists() && dir.join("unins000.dat").exists() {
         v.push(format!("run {} /VERYSILENT", unins.display()));
     } else {
-        v.push(format!("delete {}", exe.display()));
+        if installed_here(&exe) {
+            v.push("remove the Start menu and desktop shortcuts".into());
+            v.push(format!("remove the Settings > Apps entry HKCU\\{}", crate::setup::UNINSTALL_KEY));
+        }
+        v.push(format!("delete {}, LICENSE.txt and unins000.exe", exe.display()));
         v.push(format!("remove {} if it is empty", dir.display()));
     }
     v
+}
+
+/// This exe is the copy Nookly's setup installed.
+fn installed_here(exe: &Path) -> bool {
+    same_file(&crate::setup::install_dir().join("nookly.exe"), exe)
+}
+
+/// The uninstall question (also drawn for the docs).
+pub fn ask_spec(keep: bool) -> crate::dialog::Spec {
+    let checks: Vec<_> = (!keep).then(|| ("Also delete my Nookly data".to_string(), "Settings, tasks, water log, Shelf list, pinned clipboard".to_string(), false)).into_iter().collect();
+    crate::dialog::Spec {
+        title: "Uninstall Nookly".into(),
+        subtitle: format!("Version {}", crate::modules::update::VERSION),
+        body: "Remove Nookly from this PC? It closes Nookly, takes it out of startup and disconnects Hermes, Claude Code and Codex. Screenshots in Pictures\\Screenshots are kept either way.".into(),
+        checks,
+        buttons: vec![("Cancel".into(), 10, crate::dialog::Kind::Plain), ("Uninstall".into(), 11, crate::dialog::Kind::Danger)],
+        body_h: 70.0,
+        danger_checks: true,
+    }
 }
 
 pub fn run(args: &[String]) -> i32 {
@@ -97,21 +118,18 @@ pub fn run(args: &[String]) -> i32 {
         println!("{}", plan(keep).join("\n"));
         return 0;
     }
+    // The dialogs wear the notch's theme (read before the data may go).
+    let theme = crate::dialog::theme(&crate::store::Settings::load());
     if !quiet {
-        if ask("Remove Nookly from this PC?\n\nIt closes Nookly, takes it out of startup and disconnects Hermes, Claude Code and Codex.", MB_OKCANCEL | MB_ICONQUESTION) != IDOK {
+        let (r, delete) = crate::dialog::show(ask_spec(keep), theme);
+        if r != 11 {
             return 1;
         }
-        if !keep {
-            let r = ask(
-                "Also delete your Nookly data?\n\nSettings, tasks, water log, Shelf list and pinned clipboard entries. Screenshots in Pictures\\Screenshots are kept either way.",
-                MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2,
-            );
-            keep = r != IDYES;
-        }
+        keep = keep || !delete.first().copied().unwrap_or(false);
     }
     if !close_running() {
         if !quiet {
-            ask("Nookly didn't close. Quit it from the tray icon and try again.", MB_OK | MB_ICONWARNING);
+            tell(theme, "Nookly didn't close", "Quit it from the tray icon (right-click it, then Exit) and try again.");
         }
         return 2;
     }
@@ -125,16 +143,35 @@ pub fn run(args: &[String]) -> i32 {
     let exe = exe();
     let dir = exe.parent().map(Path::to_path_buf).unwrap_or_default();
     let unins = dir.join("unins000.exe");
-    if unins.exists() {
+    if unins.exists() && dir.join("unins000.dat").exists() {
         // Inno's uninstaller removes the files, shortcuts and registry entry.
         let _ = std::process::Command::new(&unins).args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]).spawn();
+        if !quiet {
+            tell(theme, "Nookly was removed", "Thanks for trying it. You can always get it again from its GitHub page.");
+        }
         return 0;
     }
-    // No uninstaller (a copied exe): delete it once this process has exited,
-    // and the folder only if nothing else is in it.
+    // Installed by Nookly's own setup: its Start menu and desktop shortcuts
+    // and the Settings > Apps entry go too (only for the installed copy, so
+    // removing a copied exe never touches the real install).
+    if installed_here(&exe) {
+        for l in [crate::setup::start_menu_link(), crate::setup::desktop_link()].into_iter().flatten() {
+            let _ = std::fs::remove_file(l);
+        }
+        for key in [crate::setup::UNINSTALL_KEY, crate::setup::INNO_KEY] {
+            unsafe {
+                let _ = windows::Win32::System::Registry::RegDeleteTreeW(windows::Win32::System::Registry::HKEY_CURRENT_USER, &HSTRING::from(key));
+            }
+        }
+    }
+    // No uninstaller left to run: delete the exe (and the license next to
+    // it) once this process has exited, and the folder only if nothing else
+    // is in it.
     let script = format!(
-        "ping -n 3 127.0.0.1 >nul & del /f /q \"{}\" & rmdir \"{}\"",
+        "ping -n 3 127.0.0.1 >nul & del /f /q \"{}\" & del /f /q \"{}\" & del /f /q \"{}\" & rmdir \"{}\"",
         exe.display(),
+        dir.join("LICENSE.txt").display(),
+        dir.join("unins000.exe").display(),
         dir.display()
     );
     // Run from %TEMP%: a folder that is anyone's current directory can't be removed.
@@ -142,7 +179,23 @@ pub fn run(args: &[String]) -> i32 {
     let _ = std::env::set_current_dir(&tmp);
     let _ = std::process::Command::new("cmd.exe").raw_arg(format!("/c {script}")).current_dir(&tmp).creation_flags(CREATE_NO_WINDOW).spawn();
     if !quiet {
-        ask("Nookly was removed.", MB_OK | MB_ICONINFORMATION);
+        tell(theme, "Nookly was removed", "Thanks for trying it. You can always get it again from its GitHub page.");
     }
     0
+}
+
+/// A short message with an OK button, in Nookly's style.
+fn tell(theme: crate::gfx::Theme, title: &str, body: &str) {
+    crate::dialog::show(
+        crate::dialog::Spec {
+            title: title.into(),
+            subtitle: "Uninstall Nookly".into(),
+            body: body.into(),
+            checks: Vec::new(),
+            buttons: vec![("OK".into(), 10, crate::dialog::Kind::Accent)],
+            body_h: 40.0,
+            danger_checks: false,
+        },
+        theme,
+    );
 }

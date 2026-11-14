@@ -228,7 +228,7 @@ impl Module for Notes {
         }
         let words = self.text.split_whitespace().count();
         let info = if self.text.is_empty() {
-            "Saves as you type. Give it a shortcut in Settings > Features > Keyboard & mouse".to_string()
+            "Saves as you type. Give it a shortcut in Settings > Shortcuts".to_string()
         } else {
             format!("{words} word{}", if words == 1 { "" } else { "s" })
         };

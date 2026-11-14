@@ -1,6 +1,6 @@
-//! System-tray icon. Left-click opens the settings panel in the notch;
-//! right-click shows a short menu (Settings, Check for updates, About, Exit).
-//! The settings themselves live in the notch (`App::draw_settings`).
+//! System-tray icon. Left-click opens the Settings window; right-click shows
+//! a short menu (Settings, Welcome tour, Check for updates, About, Exit).
+//! The Settings window itself is `app/settings.rs`.
 
 use std::sync::OnceLock;
 
@@ -104,43 +104,22 @@ pub fn set_startup(on: bool) {
     }
 }
 
+/// The tray icon's right-click menu, in Nookly's own style and theme.
 pub fn show_menu() {
-    let Some(hwnd) = with_app(|a| a.hwnd) else {
+    let Some((hwnd, theme)) = with_app(|a| (a.hwnd, crate::dialog::theme(&a.settings))) else {
         return;
     };
-    unsafe {
-        let Ok(menu) = CreatePopupMenu() else { return };
-        let item = |id: u32, text: PCWSTR| {
-            let _ = AppendMenuW(menu, MF_STRING, id as usize, text);
-        };
-        item(ID_SETTINGS, w!("Settings"));
-        let _ = SetMenuDefaultItem(menu, ID_SETTINGS, 0);
-        item(ID_TOUR, w!("Welcome tour"));
-        item(ID_UPDATES, w!("Check for updates"));
-        item(ID_ABOUT, w!("About Nookly"));
-        item(ID_UNINSTALL, w!("Uninstall Nookly..."));
-        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
-        item(ID_EXIT, w!("Exit"));
-
-        let mut p = POINT::default();
-        let _ = GetCursorPos(&mut p);
-        let _ = SetForegroundWindow(hwnd);
-        let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, p.x, p.y, 0, hwnd, None);
-        let _ = PostMessageW(hwnd, WM_NULL, WPARAM(0), LPARAM(0));
-        let _ = DestroyMenu(menu);
-        let cmd = cmd.0 as u32;
-        match cmd {
-            0 => {}
-            ID_ABOUT => about(),
-            ID_UNINSTALL => {
-                let _ = std::process::Command::new(exe_path()).arg("--uninstall").spawn();
-            }
-            ID_EXIT => {
-                let _ = DestroyWindow(hwnd);
-            }
-            c => {
-                with_app(|a| command(a, c));
-            }
+    match crate::dialog::menu(menu_items(), theme) {
+        None => {}
+        Some(ID_ABOUT) => about(),
+        Some(ID_UNINSTALL) => {
+            let _ = std::process::Command::new(exe_path()).arg("--uninstall").spawn();
+        }
+        Some(ID_EXIT) => unsafe {
+            let _ = DestroyWindow(hwnd);
+        },
+        Some(c) => {
+            with_app(|a| command(a, c));
         }
     }
 }
@@ -163,18 +142,50 @@ pub fn command(app: &mut App, id: u32) {
     app.request_frame();
 }
 
+/// The tray menu's rows (also drawn for the docs).
+pub fn menu_items() -> Vec<crate::dialog::Item> {
+    vec![
+        (crate::gfx::glyph::SETTINGS, "Settings", ID_SETTINGS, false),
+        ("\u{E8BC}", "Welcome tour", ID_TOUR, false),
+        ("\u{E895}", "Check for updates", ID_UPDATES, false),
+        ("\u{E946}", "About Nookly", ID_ABOUT, false),
+        ("", "", 0, false),
+        ("\u{E74D}", "Uninstall Nookly...", ID_UNINSTALL, false),
+        ("\u{E7E8}", "Exit", ID_EXIT, true),
+    ]
+}
+
+const GITHUB: u32 = 10;
+const UPDATES: u32 = 11;
+const CLOSE: u32 = 12;
+
+/// The About window's contents (also drawn for the docs).
+pub fn about_spec() -> crate::dialog::Spec {
+    use crate::dialog::Kind;
+    crate::dialog::Spec {
+        title: "Nookly".into(),
+        subtitle: format!("Version {}  \u{00B7}  by Banula Lakwindu", crate::modules::update::VERSION),
+        body: "A living notch for Windows: music, widgets, calendar, notes, timers, health and much more, one hover away.\n\nFree and open source (MIT License). Lyrics by LRCLIB (lrclib.net). Your data stays on this PC, in %APPDATA%\\Nookly.".into(),
+        checks: Vec::new(),
+        buttons: vec![("GitHub page".into(), GITHUB, Kind::Plain), ("Check for updates".into(), UPDATES, Kind::Plain), ("Close".into(), CLOSE, Kind::Accent)],
+        body_h: 100.0,
+        danger_checks: false,
+    }
+}
+
+/// About Nookly, in Nookly's own style and theme.
 pub fn about() {
-    unsafe {
-        let text = HSTRING::from(format!(
-            "Nookly {}\n\nA living notch for Windows.\nMusic, widgets, calendar, notes, timers, health and much more, one hover away.\n\nBy Banula Lakwindu. Free and open source (MIT License).\nLyrics provided by LRCLIB (lrclib.net).\nYour data stays in %APPDATA%\\Nookly.\n\nhttps://github.com/{}",
-            crate::modules::update::VERSION,
-            crate::modules::update::REPO
-        ));
-        MessageBoxW(
-            None,
-            &text,
-            w!("About Nookly"),
-            MB_OK | MB_ICONINFORMATION,
-        );
+    let theme = with_app(|a| crate::dialog::theme(&a.settings)).unwrap_or(crate::gfx::THEMES[0]);
+    match crate::dialog::show(about_spec(), theme).0 {
+        GITHUB => {
+            let u = HSTRING::from(format!("https://github.com/{}", crate::modules::update::REPO));
+            unsafe {
+                ShellExecuteW(None, w!("open"), &u, None, None, SW_SHOWNORMAL);
+            }
+        }
+        UPDATES => {
+            with_app(|a| command(a, ID_UPDATES));
+        }
+        _ => {}
     }
 }

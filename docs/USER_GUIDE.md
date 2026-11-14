@@ -29,8 +29,8 @@
 
 ## Getting started
 
-1. Run `NooklySetup-<version>.exe`. Tick **Start Nookly when Windows starts** if you like.
-2. The notch opens with a 30-second **welcome tour** in five steps: a hello, how it looks when closed (Full, Slim, Compact, Pill or Hidden) and which edge it sits on, a colour theme, what you want in it (Minimal, Student, Work or Everything), and four things to know (hover to open, scroll to switch panels, **Win+Alt+N** from anywhere, right-click for Settings). You can skip it, and replay it later from the tray icon's menu (**Welcome tour**). Everything you pick can be changed later in Settings.
+1. Run `NooklySetup-<version>.exe`. Nookly's own install window installs it just for you, in `%LOCALAPPDATA%\Programs\Nookly`, with no admin rights. Choose **Start with Windows**, a **Desktop shortcut** and **Check for updates automatically**, then **Install**; **Open Nookly** starts it. Running a newer setup over an installed Nookly says **Update** and keeps your choices and data.
+2. The notch opens with a 30-second **welcome tour** in five steps: a hello, how it looks when closed (Full, Slim, Compact, Pill or Hidden) and which edge it sits on, a colour theme, what you want in it (Minimal, Student, Work or Everything), and four things to know (hover to open, scroll to switch panels, **Win+Alt+N** from anywhere, the gear or a right-click for Settings). You can skip it, and replay it later from the tray icon's menu (**Welcome tour**). Everything you pick can be changed later in Settings.
 
    <img src="images/tour.png" alt="Welcome tour">
 
@@ -44,7 +44,7 @@
 - The icons along the top of the open panel switch between features. The **mouse wheel** does too: roll down for the next panel, up for the previous one. On a list that scrolls (to-do, clipboard, lyrics) the wheel scrolls the list; over the icons it always switches.
 - It always opens on the panel you last picked, even after a restart. (A reminder can open another panel for a moment; next time it's back to yours.)
 - Don't use a panel? Switch it off in **Settings > Features**. When more panels are on than fit in the tab bar, the rest sit under **⋯**.
-- **Win+Alt+N** opens and closes the notch from anywhere (change it in Settings > Features).
+- **Win+Alt+N** opens and closes the notch from anywhere (change it in Settings > Shortcuts).
 - The smaller styles (Compact, Pill, Hidden) wait a moment before opening, so reaching for browser tabs does not open them by accident.
 
 <img src="images/music.png" alt="Open panel">
@@ -72,7 +72,7 @@ Open **Settings** and pick one under **Notch style**:
 | Pill | A thin bar, tinted while music or a timer runs | Almost invisible |
 | Hidden | Nothing | Rest the mouse at the edge to open |
 
-**Windows under the notch (smart hide):** when a window's top (title bar, tabs, address bar) is under the notch, for example a maximized browser or one dragged to the top, the notch steps aside to a thin line and clicks go straight through to the window. After about 2.5 seconds it comes back, still click-through. When your mouse comes near it (to reach the tabs or address bar), it steps aside again and comes back 2 seconds after the mouse leaves. Rest the mouse on the notch itself to open it. Switching to a window under it, or dragging a window across the top, makes it step aside too. Alerts still drop down as usual. Turn this off with **Step aside for windows under it** in Settings > General.
+**Windows under the notch (smart hide):** when a window's top (title bar, tabs, address bar) is under the notch, for example a maximized browser or one dragged to the top, the notch steps aside to a thin line and clicks go straight through to the window. After about 2.5 seconds it comes back, still click-through. When your mouse comes near it (to reach the tabs or address bar), it steps aside again and comes back 2 seconds after the mouse leaves. Rest the mouse on the notch itself to open it. Switching to a window under it, or dragging a window across the top, makes it step aside too. Alerts still drop down as usual. Turn this off with **Step aside for windows** in Settings > Appearance.
 
 ## Now playing and lyrics
 
@@ -229,7 +229,7 @@ The page always shows the place in use, by name, so you can see when it's wrong.
 
 ### Notes
 
-- A panel turned off in **Settings > Features** drops out of the Widgets tab too.
+- A panel turned off in **Settings > Features** drops out of Settings > Widgets too.
 - Clicking the closed notch opens the panel of what it's showing.
 - With the mascot in the **Slim** style: in the middle it takes the clock's place; at the left or right it takes that side, and the notch stays the same size. Only beside an item using both sides does the notch grow to make room.
 - **Bluetooth** shows the battery Windows knows for connected headsets, mice and keyboards. AirPods don't share theirs with Windows, so Nookly listens for about 3 seconds once a minute to the battery broadcast AirPods send (left, right and case, in 10% steps). It only does this while the Bluetooth widget is on (or the Widgets tab is open) and AirPods are connected. Nothing is saved or sent. In a crowded place it may sometimes pick up someone else's AirPods.
@@ -245,9 +245,9 @@ The **Calendar** tab shows the month. Today has a red circle; days with to-do ta
 
 ## Themes and seconds
 
-**Settings > Look** now also has **your own theme** (the *Yours* tile: pick a background and a text colour; it shows the contrast and **Fix it** picks a readable text colour), **Size** (smaller, normal or larger notch and panels), **Reduce motion** (no springy animations), **Song colour around the notch** and **Hide the notch for these apps** (it lists the last app you used; click to add it).
+**Settings > Theme** also has **your own theme** (the *Yours* tile: pick a background and a text colour; it shows the contrast and **Fix it** picks a readable text colour), and **Song colour around the notch**; **Size** and **Reduce motion** are in Settings > Appearance, and **Hide the notch for these apps** (it offers the last app you used; click to add it) in Settings > Privacy.
 
-**Settings > Look** has the themes and the seconds switch.
+**Settings > Theme** has the themes, the clock and the seconds switch.
 - **Themes**: **Black** (the default), **Graphite**, **Midnight**, **Rose**, **Forest**, **Ocean**, **Light**, **Blossom** (light pink), **Paper** (old paper) and **Liquid Glass**. A theme changes the notch and every panel. On the light themes, coloured labels are a little darker so they stay readable.
 - **Liquid Glass** shows a blurred view of what's behind the notch under a clear tint, with a bright edge. Over a bright window it turns into light glass with dark text, over a dark one into dark glass with white text. The notch still shows in screenshots and screen recordings (it hides only for the instant it looks behind itself).
 - **Show seconds** puts seconds on the clock (4:20:15). The Slim and Compact notches get a little wider so nothing gets squeezed.
@@ -288,7 +288,7 @@ The Tools tab has four small tools; the chips at the top switch between them. Ev
 <img src="images/clipboard.png" alt="Clipboard history">
 
 - Clipboard history is **off** until you turn it on: open the **Clipboard** tab and click **Turn on clipboard history**, or use the switch in Settings.
-- **What it records** (Settings > Clipboard history): **Text** (the default), **Text + files** (files you copy in Explorer), or **Everything** (also pictures, shown as thumbnails).
+- **What it records** (Settings > Privacy > Clipboard history): **Text** (the default), **Text + files** (files you copy in Explorer), or **Everything** (also pictures, shown as thumbnails).
 - What you copy appears here, newest first. The last 30 are kept, and up to 10 pictures.
 - **Search** (magnifier icon): type to filter the history; **Enter** pastes the first match, **Esc** clears, Esc again closes.
 - **Snippets** (+ icon): type text you paste often (your address, bKash number, an email signature) and press Enter. It's kept like a pinned entry, even with recording off.
@@ -311,7 +311,7 @@ The Tools tab has four small tools; the chips at the top switch between them. Ev
 
 Nookly can show other apps' notifications (messages, mail, calendar, browser sites) in the notch, with the app's icon and colour, instead of Windows' banner in the corner.
 
-- Turn it on in **Settings > Privacy > Show them in the notch**. It's off until you do.
+- Turn it on in **Settings > Alerts > Show them in the notch**. It's off until you do.
 - Windows keeps showing its own banner too, unless you turn banners off: click **Windows banners** in the same place (or open Windows **Settings > System > Notifications**) and turn off **Show notification banners** for the apps you want in the notch only. Notifications still go to Notification Center as usual.
 - **Click** a notification (or **Open**) to open the app that sent it. **Mute app** stops that app's notifications appearing in the notch; **Unmute** in Settings brings them all back. Buttons inside a notification (Reply, Accept) only work in Windows' own banner.
 - **Include message text** off shows only the app's name, handy if you share your screen.
@@ -358,7 +358,7 @@ Pick one in **Settings > Mascot**: Eyes, Cat, Ghost, Robot, Sparky (an electric 
 - At least one panel always stays on.
 - With more panels on than fit in the tab bar, the rest sit under **⋯** at the end of the bar. The panel you're on always shows in the bar.
 
-**Shortcuts** (bottom of the Features page):
+**Shortcuts** (Settings > Shortcuts):
 
 | Shortcut | What it does |
 |---|---|
@@ -370,7 +370,7 @@ Click a shortcut, then press the keys you want: it needs Ctrl, Alt or Win (or us
 
 ## Notes, countdowns, launcher and toggles
 
-- **Notes**: type anything; it's saved as you go. Click or drag to place the caret and select; arrows (with Shift to select, Ctrl to jump words), Home / End, Ctrl+A, Ctrl+C, Ctrl+X and Ctrl+V work as usual, and the wheel scrolls. **Copy** copies the selection, or the whole note. Give it a keyboard shortcut in Settings > Features > Keyboard & mouse shortcuts.
+- **Notes**: type anything; it's saved as you go. Click or drag to place the caret and select; arrows (with Shift to select, Ctrl to jump words), Home / End, Ctrl+A, Ctrl+C, Ctrl+X and Ctrl+V work as usual, and the wheel scrolls. **Copy** copies the selection, or the whole note. Give it a keyboard shortcut in Settings > Shortcuts.
 - **Countdowns**: type a name, pick the date with the arrows (or roll the mouse wheel over the day, month or year) and click **Add**. **Every year** repeats it (birthdays, holidays); the **↻** button on a countdown switches that later. Switch on the **Countdown** widget in the Widgets tab for "12 days" on the closed notch.
 - **Launcher**: **Add apps...** opens a file picker in the Start menu folder (pick several at once), **Folder...** pins folders, or drag apps, folders or files onto the notch while the Launcher tab is open, or paste a link and press **Pin**. Click one to open it.
 - **Commands**: type a command, pick how often it runs (1 minute to daily) and click **Add**. Each shows the first line it printed and when; ▶ runs it now. Switch them on in the Widgets tab to see the output on the closed notch. They run with cmd.exe on your PC, only while the Commands panel is on.
@@ -406,30 +406,30 @@ At the bottom of **Settings > Features**, **Home**, **Work** and **Focus** each 
 
 <img src="images/settings.png" alt="Settings">
 
-<img src="images/settings-privacy.png" alt="Privacy and alerts">
+<img src="images/settings-privacy.png" alt="Settings > Privacy">
 
-Open Settings with the **gear** at the end of the tab bar, a plain **right-click** on the notch, or a **left-click** on the tray icon. The notch opens into a large settings panel. Style, position, mascot and sound are on the left; the right side has four pages, **General**, **Look**, **Privacy** and **Features**:
+<img src="images/settings-taskbar.png" alt="Settings > Taskbar: coming soon">
 
-| Item | What it does |
+Open Settings with the **gear** at the end of the tab bar, a plain **right-click** on the notch (or on the taskbar mascot), or a **left-click** on the tray icon. Settings opens in a small window of its own, in your notch's theme; drag it by its header, close it with the **x** or Esc. It exists only while it's open, so it costs nothing the rest of the time.
+
+The window has two tabs, each with a **master switch** at the top of its sidebar:
+
+- **Notch**: the switch turns the whole notch on or off. Off, the notch hides and none of its features run (no reminders, no shortcuts); the tray icon stays so you can come back and turn it on.
+- **Taskbar**: a custom Nookly taskbar, coming soon. Its switch stays off for now.
+
+Under the Notch tab's switch are its sections. At the bottom of each, a line explains whatever control the mouse is on.
+
+| Section | What's in it |
 |---|---|
-| Notch style | Full, Compact, Pill or Hidden |
-| Position | Top, Bottom, Left, Right, Center |
-| Mascot | Which companion shows, or Clock for none; **Always** and **Left / Center / Right** |
-| Sound for reminders | Chime, Bell, Pop, Marimba, Windows (your system sound) or Off; picking one plays it |
-| **General** page: Start with Windows | Launch at sign-in |
-| Volume overlay | Show volume changes |
-| 12-hour clock | 4:20 PM (the default) or 16:20, everywhere in Nookly |
-| Step aside for windows under it | Smart hide: steps aside while a window's top is under the notch, comes back after a moment, steps aside when the mouse is near (on by default) |
-| Check for updates | Looks for a newer version now |
-| Check for updates automatically | Asks GitHub for the latest version about twice a day. On by default; also offered by the installer |
-| Open data folder | Opens `%APPDATA%\Nookly` |
-| Export settings / Import settings | Save your settings and data in one `.nookly` file, and load it on another PC. Import shows what's in the file and asks before replacing anything; then Nookly starts again |
-| GitHub / Privacy / Quit | The privacy policy is [PRIVACY.md](../PRIVACY.md) |
-| **Privacy** page: Windows notifications | Show them in the notch, include message text, Windows banners, unmute apps |
-| Mic & camera dots | Dots while the mic or camera is in use |
-| Clipboard history | Record on/off, and Text, Text + files or Everything |
-| Show what I copy | A small preview of each copy (off by default) |
-| **Features** page | Switch features on or off, presets, keyboard shortcuts (see [Features](#features-switch-on-only-what-you-use)) |
+| **Appearance** | Style (Full, Slim, Compact, Pill or Hidden); position (Top, Bottom, Left, Right, Center); **Size** (smaller, normal or larger notch and panels); **Step aside for windows** (smart hide, on by default); **Reduce motion** |
+| **Theme** | Ten themes including Liquid Glass, and **Yours** (pick a background and a text colour; it shows the contrast and **Fix it** picks a readable text colour); **12-hour clock** (4:20 PM, the default, or 16:20); **Seconds on the clock**; **Song colour around the notch** |
+| **Mascot** | Which companion shows, or Clock for none; where it sits (Left / Center / Right); **Always out**; **On the taskbar** |
+| **Features** | Switch each feature on or off, **Start from** a preset, and **Profile** (Home, Work, Focus, or Auto by work hours). See [Features](#features-switch-on-only-what-you-use) |
+| **Widgets** | The Widgets panel, moved here from the notch's tab bar: Show, Order, Alerts and Place (see [Widgets](#widgets-what-the-closed-notch-shows)) |
+| **Alerts** | Reminder sound (Chime, Bell, Pop, Marimba, Windows or Off; picking one plays it); **Volume overlay**; Windows notifications: show them in the notch, include message text, Windows banners, unmute apps |
+| **Privacy** | **Mic & camera dots**; clipboard history: record on/off, Text, Text + files or Everything; **Show what I copy** (off by default); **Hide the notch while these apps are in front** |
+| **Shortcuts** | Keyboard shortcuts that work anywhere in Windows, and what the scroll wheel, middle click and double-click do on the closed notch |
+| **General** | **Start with Windows**; **Check for updates** automatically (about twice a day, on by default) or now; **Open data folder** (`%APPDATA%\Nookly`); **Welcome tour**; **Export settings / Import settings** (one `.nookly` file for another PC; import shows what's in the file and asks before replacing anything, then Nookly starts again); About: GitHub page, Privacy policy ([PRIVACY.md](../PRIVACY.md)), Quit Nookly |
 
 Right-clicking the tray icon shows a short menu: Settings, Welcome tour, Check for updates, About and Exit. Resting the mouse on any icon button shows what it does.
 
@@ -437,8 +437,10 @@ Everything is stored as plain text in `%APPDATA%\Nookly` (`settings.txt`, `todo.
 
 ## Uninstalling
 
-- **Settings > Apps > Nookly > Uninstall**, as usual, or **Uninstall Nookly...** in the tray icon's menu.
-- The tray item works even where Windows blocks the unsigned uninstaller (Smart App Control). It asks whether to keep your data, closes Nookly, takes it out of startup, disconnects Claude Code and Codex, then removes the app. From a command line: `nookly.exe --uninstall` (`--keep-data`, `--quiet`).
+<img src="images/windows.png" alt="Nookly's own install, uninstall, About and tray menu windows">
+
+- **Settings > Apps > Nookly > Uninstall**, as usual, or **Uninstall Nookly...** in the tray icon's menu. Both open Nookly's own uninstall window.
+- It asks (with a switch to delete your data too), closes Nookly, takes it out of startup, disconnects Claude Code and Codex, removes the Start menu and desktop shortcuts and the Apps entry, then removes the app. From a command line: `nookly.exe --uninstall` (`--keep-data`, `--quiet`).
 - Screenshots in Pictures\Screenshots are never deleted.
 
 ## Updates

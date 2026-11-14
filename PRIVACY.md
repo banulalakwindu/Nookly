@@ -81,7 +81,7 @@ information to them:
    updates automatically") or in Settings > General; **Check for updates**
    still works when you click it.
 3. **[Open-Meteo](https://open-meteo.com)** (weather), only while you have
-   the **Weather** widget switched on in the Widgets tab: about every 30
+   the **Weather** widget switched on in Settings > Widgets: about every 30
    minutes it asks for the current weather at your place (Widgets > Place),
    with the latitude and longitude rounded to one decimal (about 10 km).
    It's off until you switch it on. When you search for a city on the Place

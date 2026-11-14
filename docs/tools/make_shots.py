@@ -9,7 +9,7 @@ positions) arrange several renders on one card.
 import shutil
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 IMAGES = ROOT / "docs" / "images"
@@ -108,6 +108,26 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
         page(c, m, title, sub, chips).save(IMAGES / f"{name}.png")
         print("  ", name)
 
+    def shadowed(img, blur=26, alpha=150):
+        """A window with a soft drop shadow (room around it for the shadow)."""
+        pad = blur * 2
+        sh = Image.new("RGBA", (img.width + 2 * pad, img.height + 2 * pad), (0, 0, 0, 0))
+        mask = img.split()[3].point(lambda v: alpha if v > 0 else 0)
+        sh.paste((0, 0, 0, 255), (pad, pad + 10), mask)
+        sh = sh.filter(ImageFilter.GaussianBlur(blur))
+        sh.alpha_composite(img, (pad, pad))
+        return sh
+
+    def window(name, raw, title, sub, chips, scale=0.78):
+        """A window render (Settings) floating in the middle of a desktop."""
+        img = shot(raw)
+        img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
+        img = shadowed(img)
+        c, m = card(img.height + 40)
+        c.alpha_composite(img, ((c.width - img.width) // 2, (c.height - img.height) // 2))
+        page(c, m, title, sub, chips).save(IMAGES / f"{name}.png")
+        print("  ", name)
+
     # Hero: every panel at a glance (a collage), so the first image shows
     # how much is in it.
     pairs = [
@@ -156,44 +176,24 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
         y += img.height + 6
     badge(side, "Alerts drop out of the notch", big_h)
 
-    # Last row: the mascot on the Windows taskbar, the panel opening above it.
+    # Last row: what's new, the Settings window floating on the desktop.
     small_h = 330
-    tb_h = 360
+    tb_h = 470
 
     def taskbar_tile(w, h):
         wp = wallpaper(w, h, 2.2)
-        bar = 64
-        layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        d = ImageDraw.Draw(layer)
-        d.rectangle((0, h - bar, w, h), fill=(28, 30, 38, 255))
-        d.line((0, h - bar, w, h - bar), fill=(70, 74, 88, 255), width=1)
-        # Centred app icons, then the clock on the right, like Windows 11.
-        icons = [(0, 120, 215), (240, 240, 240), (255, 185, 0), (16, 124, 16), (232, 17, 35), (125, 85, 199), (0, 183, 195)]
-        s, g = 38, 14
-        x = (w - (len(icons) * s + (len(icons) - 1) * g)) // 2
-        for c in icons:
-            d.rounded_rectangle((x, h - bar + 13, x + s, h - bar + 13 + s), 9, fill=c + (255,))
-            x += s + g
-        f = font(17)
-        d.text((w - 24, h - bar / 2 - 10), "4:20 PM", font=f, fill=TEXT, anchor="rm")
-        d.text((w - 24, h - bar / 2 + 11), "9 Nov 2026", font=f, fill=DIM, anchor="rm")
-        wp.alpha_composite(layer)
-        # The mascot in the corner.
-        m = shot("taskbar_mascot_cat")
-        k = (bar - 10) / m.height
-        m = m.resize((round(m.width * k), round(m.height * k)), Image.LANCZOS)
-        wp.alpha_composite(m, (14, h - bar + 5))
-        # The panel above it.
-        p = shot("edge_bottom_panel")
-        k = min((h - bar - 12) / p.height, (w * 0.56) / p.width, 1.0)
-        p = p.resize((round(p.width * k), round(p.height * k)), Image.LANCZOS)
-        wp.alpha_composite(p, (6, h - bar - p.height))
+        win = shot("settings_general")
+        k = min((h - 40) / win.height, (w * 0.55) / win.width)
+        win = shadowed(win.resize((round(win.width * k), round(win.height * k)), Image.LANCZOS), blur=18)
+        wp.alpha_composite(win, (10, (h - win.height) // 2))
         d = ImageDraw.Draw(wp)
-        # Text on the right half, where the screen is empty.
-        tx = round(w * 0.6)
-        d.text((tx, 70), "New: a mascot on your taskbar", font=font(34, "bold"), fill=TEXT)
-        d.text((tx, 122), "It lives in the empty corner, like the weather.", font=font(22), fill=TEXT)
-        d.text((tx, 154), "Hover it and the panel opens above it.", font=font(22), fill=TEXT)
+        # Text on the right, where the desktop is empty.
+        tx = round(w * 0.62)
+        d.text((tx, 120), "New: Settings in its", font=font(34, "bold"), fill=TEXT)
+        d.text((tx, 162), "own window", font=font(34, "bold"), fill=TEXT)
+        lines = ["Every setting in one place, grouped,", "with a switch to turn the notch on or off.", "A custom taskbar is coming next."]
+        for i, line in enumerate(lines):
+            d.text((tx, 222 + i * 32), line, font=font(22), fill=TEXT)
         return wp
 
     total_h = big_h + len(pairs) * (small_h + gap) + tb_h + gap
@@ -228,20 +228,40 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
     single("water-settings", "panel_water_settings", "Water settings", "Bottle size, daily goal and reminder hours.", ["Bottle", "Goal", "Sip", "Hours"])
     single("shelf", "panel_shelf", "File shelf", "Drop files on the notch to keep them handy, drag them out when you need them.", ["Drag in", "Drag out", "Open with a click"])
     single("clipboard", "panel_clipboard", "Clipboard history", "Everything you copy, newest first. Off until you turn it on.", ["Text, files or images", "Pin to keep", "Skips password managers"])
-    single("settings", "settings_general", "Settings", "Right-click the notch. Style, position, mascot, sound and more.", ["Notch style", "Position", "Mascot", "Sound", "Start with Windows"])
+    window("settings", "settings_general", "Settings", "Its own window: the gear, a right-click on the notch or the tray icon opens it.", ["Notch on / off", "Appearance", "Theme", "Mascot", "Features", "Widgets", "Shortcuts"])
+    window("settings-taskbar", "settings_taskbar", "Taskbar: coming soon", "A custom Nookly taskbar in the same style, with its own on / off switch.", ["Coming soon", "Taskbar mascot today"])
     single("prayer", "panel_prayer", "Prayer times", "Worked out on your PC for your city, with optional reminders.", ["16 cities or any place", "Hanafi or Shafi Asr", "Minute nudges"])
     single("agents", "panel_agents", "AI agents", "See when Hermes, Claude Code or Codex is working, needs your OK, or is done.", ["Connect with one click", "Status only, stays on your PC", "Alerts when it needs you"])
     single("monitor", "panel_monitor", "System monitor", "CPU, memory and network speed, with a minute of history.", ["Free disk space", "Optional on the closed notch"])
-    single("widgets", "panel_widgets_order", "Widgets", "Choose what the closed notch shows, and drag it into the order you want.", ["Battery and AirPods", "Two side by side", "Drag to reorder"])
+    window("widgets", "settings_widgets", "Widgets", "Settings > Widgets: choose what the closed notch shows, and drag it into the order you want.", ["Battery and AirPods", "Two side by side", "Drag to reorder"])
     single("tools", "panel_tools_color", "Color picker", "Pick any color on your screen, then copy it as HEX, RGB or HSL.", ["Magnifier", "Recent colors", "Contrast check"])
     single("tools-calc", "panel_tools_calc", "Calculator", "Type a sum and see the answer as you type.", ["15% and +10%", "sqrt, sin, 5!", "Hex and binary"])
     single("tools-qr", "panel_tools_qr", "QR code", "Whatever you copy, as a QR code for your phone.", ["From clipboard or typed", "Copy as image", "Works offline"])
     single("tools-convert", "panel_tools_convert", "Converter", "Units, including katha, bigha and maund, and world time zones.", ["Length to data", "Bangladesh units", "12 cities"])
     single("tools-zones", "panel_tools_zones", "Time zones", "What time it is in 12 cities, now or an hour from now.", ["Daylight saving handled", "Pick any city as base"])
-    single("settings-privacy", "settings_privacy", "Privacy settings", "Notifications, mic and camera dots, and clipboard history: all opt-in.", ["Windows notifications", "Hide message text", "Mute apps"])
+    window("settings-privacy", "settings_privacy", "Privacy", "Mic and camera dots, clipboard history, and apps to hide the notch for: all opt-in.", ["Mic & camera dots", "Clipboard history", "Hide for apps"])
     single("calendar", "panel_calendar", "Calendar", "The month at a glance, with the days your tasks are due.", ["Today in red", "Due-task dots", "Wheel for months"])
-    single("themes", "settings_look", "Themes", "Ten themes, Liquid Glass included, every one checked for readable contrast.", ["Black", "Rose", "Forest", "Paper", "Liquid Glass"])
-    single("settings-features", "settings_features", "Features", "Switch on only what you use; what's off doesn't run at all.", ["Minimal", "Student", "Work", "Everything", "Win+Alt+N"])
+    window("themes", "settings_look", "Themes", "Ten themes, Liquid Glass included, and your own colours, checked for readable contrast.", ["Black", "Rose", "Forest", "Paper", "Liquid Glass", "Yours"])
+    window("settings-features", "settings_features", "Features", "Switch on only what you use; what's off doesn't run at all.", ["Minimal", "Student", "Work", "Everything", "Profiles"])
+
+    # Nookly's own windows: install, uninstall, About and the tray menu.
+    names = [("dlg_setup", "Install"), ("dlg_uninstall", "Uninstall"), ("dlg_about", "About"), ("dlg_menu", "Tray menu")]
+    imgs = [shadowed(shot(n), blur=18) for n, _ in names]
+    colw = (W - 2 * PAD - 30) // 2
+    k = min(1.0, (colw - 20) / max(i.width for i in imgs))
+    imgs = [i.resize((round(i.width * k), round(i.height * k)), Image.LANCZOS) for i in imgs]
+    rows = [max(imgs[0].height, imgs[1].height), max(imgs[2].height, imgs[3].height)]
+    gh = sum(rows) + 60
+    c, m = card(gh)
+    y = 20
+    for r in range(2):
+        for col in range(2):
+            img = imgs[r * 2 + col]
+            x = 20 + col * (colw + 30) + (colw - img.width) // 2
+            c.alpha_composite(img, (x, y + (rows[r] - img.height) // 2))
+        y += rows[r] + 20
+    page(c, m, "Nookly's own windows", "Install, uninstall, About and the tray menu, in the notch's style and theme.", ["Just for you, no admin", "Minimize and close", "Your theme"]).save(IMAGES / "windows.png")
+    print("   windows")
     single("tour", "tour_hello", "A friendly start", "Five quick steps: look, place, colour, what's in it, and how to use it.", ["30 seconds", "Change it anytime"])
     single("notes", "panel_notes", "Notes", "A scratchpad that saves as you type.", ["Saves itself", "Quick-note shortcut"])
     single("countdowns", "panel_countdowns", "Countdowns", "Exams, trips, birthdays: \"12 days\" right on the notch.", ["Date picker", "Every year", "Notch widget"])
@@ -274,7 +294,7 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
     im.alpha_composite(grid, (PAD, PAD))
     d = ImageDraw.Draw(im)
     d.text((PAD + 4, PAD + grid.height + 30), "Notch styles", font=font(54, "bold"), fill=TEXT)
-    d.text((PAD + 4, PAD + grid.height + 102), "Right-click the notch, then pick a style. The welcome tour asks first.", font=font(28), fill=DIM)
+    d.text((PAD + 4, PAD + grid.height + 102), "Settings > Appearance, or the welcome tour, picks the style.", font=font(28), fill=DIM)
     im.convert("RGB").save(IMAGES / "styles.png")
     print("   styles")
 
@@ -326,6 +346,6 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
     d = ImageDraw.Draw(c)
     d.text((c.width // 2, c.height // 2 - 24), "Right-click and drag", font=font(56, "bold"), fill=TEXT, anchor="mm")
     d.text((c.width // 2, c.height // 2 + 34), "to any edge of any screen, like the taskbar", font=font(30), fill=TEXT, anchor="mm")
-    page(c, m, "Top, bottom, left or right", "Or pick a position in Settings. Panels always open upright.", []).save(IMAGES / "positions.png")
+    page(c, m, "Top, bottom, left or right", "Or pick one in Settings > Appearance. Panels always open upright.", []).save(IMAGES / "positions.png")
     print("   positions")
     shutil.rmtree(out)

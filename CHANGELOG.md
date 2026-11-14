@@ -1,6 +1,20 @@
 # Changelog
 
-Versions 0.1.x below came before the Nookly name.
+Versions 0.1.x below were released before the Nookly name.
+
+## 0.4.0: Settings in its own window, and Nookly's own installer
+
+- **Settings has its own window**: a small rounded window in the notch's style and theme, instead of a big panel inside the notch. Drag it by the header, close it with the x or Esc. The gear in the tab bar, a right-click on the notch or the taskbar mascot, and the tray icon all open it.
+- **Two tabs with master switches**: **Notch**, whose switch turns the whole notch on or off (off: hidden, nothing runs, the tray icon stays), and **Taskbar**, a custom Nookly taskbar that is coming soon (its switch stays off for now).
+- **Every setting in one place, grouped**: Appearance, Theme, Mascot, Features, Widgets, Alerts, Privacy, Shortcuts and General, with a line at the bottom that explains whatever the mouse is on.
+- **Widgets moved into Settings**: the closed notch's Show, Order, Alerts and Place pages live in Settings > Widgets now; the notch's tab bar holds only your panels and the gear.
+- The welcome tour mentions the new window and shows once more after updating.
+- **Nookly's own installer**: `NooklySetup-<version>.exe` is Nookly itself under its setup name, so the download is no bigger than the app and no Inno Setup is involved. One themed window: Start with Windows, desktop shortcut and automatic update checks, then Install (or Update over an installed Nookly). Installs from the old installer upgrade in place, and in-app updates install silently and start the new version as before.
+- **Themed uninstaller, About and tray menu**: Settings > Apps > Uninstall and the tray's Uninstall open Nookly's own uninstall window (one question, with a switch to delete your data too); About and the tray icon's right-click menu are in Nookly's style and theme too. Dialogs and Settings have a minimize button next to close.
+- **Side edges**: with music, a timer or widgets on the closed notch, the clock (hours over minutes) now stays in the middle, and it follows the 12-hour setting.
+- Light by design: the window exists only while it's open and draws only when something changes.
+- Updating from 0.3.x moves you off the old installer: its Apps entry and uninstaller are replaced by Nookly's own, so Windows' Uninstall always opens Nookly's window.
+- Fresh screenshots everywhere, with new made-up demo content.
 
 ## 0.3.1: Weather, Volume and a real Notes editor
 
@@ -43,13 +57,13 @@ Versions 0.1.x below came before the Nookly name.
 
 ## 0.2.0: first Nookly release
 
-- **New name, Nookly**, with its own logo, installer, data folder (`%APPDATA%\Nookly`) and update channel. On first start, settings and data from `%APPDATA%\WindyLand` are copied over, so nothing is lost; WindyLand itself is left untouched.
+- **New name, Nookly**, with its own logo, installer, data folder (`%APPDATA%\Nookly`) and update channel. On first start, settings and data from the earlier version's folder are copied over, so nothing is lost.
 
 - **Settings > Features** (was Panels): every feature on one page, in four groups (Everyday, Focus & health, Work & tools, System), each with a switch; resting the mouse on one says what it does. A feature that's off has no tab, no reminders and does no work in the background (its panel isn't ticked; clipboard history stops listening).
   - **Presets**: Minimal (music, timer, to-do, calendar, widgets), Student, Work and Everything switch on exactly that set; change any of it after. A new install starts on Minimal, and the welcome tour has a step to pick one.
   - **Keyboard shortcuts**: **Win+Alt+N** opens and closes the notch from anywhere; optional shortcuts for clipboard history (opens it with search) and a screenshot. Click a shortcut and press the keys to change it; Backspace removes it. A shortcut another app already has shows "In use".
 - **⋯ in the tab bar**: when more panels are on than fit, the rest sit under ⋯ as big tiles. The panel you're on always stays in the bar, and the mouse wheel still goes through all of them.
-- **Export / Import settings** (Settings > General): saves your settings and data (to-do, water, prayer, tools, shelf, pinned clipboard) in one `.windyland` file for another PC. Import shows what's in the file and asks before replacing anything, then WindyLand starts again on it.
+- **Export / Import settings** (Settings > General): saves your settings and data (to-do, water, prayer, tools, shelf, pinned clipboard) in one `.nookly` file for another PC. Import shows what's in the file and asks before replacing anything, then Nookly starts again on it.
 - **Calendar** tab: the month with today highlighted, days with to-do tasks due marked, previous / next month (or the mouse wheel), Today, and the chosen day's tasks beside the grid. The week starts on Windows' first day of the week.
 - **Themes** (Settings > Look): Black (default), Graphite, Midnight, Rose, Forest, Ocean, Light, Blossom, Paper and **Liquid Glass**, which blurs what's behind the notch under a clear tint with a bright rim and switches between light and dark glass with the background. While Liquid Glass is on the notch is left out of screenshots and screen sharing. Every theme meets WCAG AA text contrast, and coloured labels on the light themes reach 3:1 (checked by the self-test, Liquid Glass over light, dark and colourful backgrounds).
 - **Show seconds** (Settings > Look): seconds on the clock; Slim and Compact grow 24 px so nothing gets squeezed.
@@ -59,14 +73,14 @@ Versions 0.1.x below came before the Nookly name.
   - **Order** arranges them in rows: one item across both sides of the clock, or two one-side items in a row. Drag items between sides and rows, drag rows (or ▲ ▼) to reorder. The first row with something to show wins, so you choose, for example, whether a song or a working agent shows when both are on.
   - **When it matters** skips widgets with nothing to say (battery on the charger, no Bluetooth device, good Wi-Fi, sound not muted).
   - More widgets: **Weather** (from Open-Meteo, about every 30 min, only while it's on; the privacy policy lists it), **Wi-Fi** (signal and network name), **Volume** and **Microphone** mute.
-  - Simple by default: the **Show** page switches things on and WindyLand orders them (most urgent first). **Custom order** reveals the Order page; **Reset to default** (asks first). Each widget can show **Always**, when it **Matters**, or for a few seconds when it **Changes**.
+  - Simple by default: the **Show** page switches things on and Nookly orders them (most urgent first). **Custom order** reveals the Order page; **Reset to default** (asks first). Each widget can show **Always**, when it **Matters**, or for a few seconds when it **Changes**.
   - **Alerts** page: Volume, Copied, Battery, Network, Caps Lock, Language, Bluetooth and Mic & camera can each be **Off**, **Small** (a few seconds inside the closed notch, beside what it shows) or a **Pop-up**.
   - **Place** page for the weather (and prayer times if you like): the city of Windows' time zone, Windows location, or a city you search for.
   - Slim with the mascot: in the middle it takes the clock's place, at a side it takes that side, so the notch stays 200 wide and nothing gets cut short. Tight values switch to a shorter form ("11" for "11 Nov") instead of "...".
   - Clicking the closed notch opens the panel of what it shows. The welcome tour mentions widgets.
   - `--selftest` and `--render-docs` use a throwaway data folder unless given `--real-data`.
   - Weather in °C by default, °F on the Place page. The Show and Order pages open taller.
-- Fixed: after **Open data folder** (or GitHub page, Privacy policy, opening a Shelf file or a notification's app, the update page) the notch could stay open and stop reacting to hover until WindyLand restarted. Links now open after the click is handled, and a once-a-second check catches a lost "mouse left" message.
+- Fixed: after **Open data folder** (or GitHub page, Privacy policy, opening a Shelf file or a notification's app, the update page) the notch could stay open and stop reacting to hover until Nookly restarted. Links now open after the click is handled, and a once-a-second check catches a lost "mouse left" message.
 - Fixed: a drag in the Widgets order list that lost the mouse (Alt+Tab) kept the panel open.
   - The default order is the same as before. The System monitor's "Show on closed notch" switch is gone: CPU and network are widgets now (switched on for you if you used it).
 - The clock now stays in the middle of the closed notch while something is
@@ -113,7 +127,7 @@ Versions 0.1.x below came before the Nookly name.
 - Screenshot and Pick from screen: the notch now hides completely while the
   screen is frozen, and the panel no longer reopens under the cursor, so
   nothing covers the screen you're capturing.
-- Music: when a player turns down previous/next (or play/pause), WindyLand
+- Music: when a player turns down previous/next (or play/pause), Nookly
   presses the matching media key instead, which most players and browsers
   still act on. The buttons dim when the player says it can't skip.
 
@@ -129,7 +143,7 @@ Versions 0.1.x below came before the Nookly name.
 - Shelf: Screenshot button. Drag over part of the screen (or click for the
   whole screen); the PNG goes to Pictures\Screenshots, onto the Shelf and
   onto the clipboard.
-- Uninstall WindyLand... in the tray menu, and `windyland.exe --uninstall`:
+- Uninstall Nookly... in the tray menu, and `nookly.exe --uninstall`:
   works even where the installer's own uninstaller is blocked, and
   disconnects the agents. The installer's uninstaller disconnects them too.
 - The welcome tour has a new step for these panels.
@@ -152,7 +166,7 @@ Versions 0.1.x below came before the Nookly name.
   and no mouse movement, which made the mascot doze).
 - Releases are built by GitHub Actions from the version tag
   (`.github/workflows/release.yml`), as a draft release to check and publish.
-- `windyland.exe` and the installer carry version info (product name and
+- `nookly.exe` and the installer carry version info (product name and
   version).
 - The installer shows a short privacy summary and has a "Check for updates
   automatically" option; the same switch is in Settings > General.
@@ -205,14 +219,14 @@ Versions 0.1.x below came before the Nookly name.
   composition (about 250 ms when nothing else changes). Frames now sleep
   until the display's next refresh, from the compositor's timing.
 - New README demo video and screenshots, rebuilt from the real app by
-  `docs/tools/make_images.py` (`windyland --render-demo` plays a scripted
+  `docs/tools/make_images.py` (`nookly --render-demo` plays a scripted
   session on a virtual clock).
 
 ## 0.1.17
 
 - Update checks keep working when GitHub's API refuses: it allows only 60
   requests an hour per internet address, and many ISPs share one address
-  between lots of customers, so checks could silently fail for days. WindyLand
+  between lots of customers, so checks could silently fail for days. Nookly
   now falls back to the normal release pages, and retries a failed check
   within the hour instead of 12 hours later.
 - The downloaded installer is checked against the SHA-256 that GitHub
@@ -233,7 +247,7 @@ Versions 0.1.x below came before the Nookly name.
   closing, notices) now draw once per display refresh, so 144 fps on a 144 Hz
   screen, and live content (lyrics, progress, stopwatch) uses a precise
   60 fps timer. Nothing changes when idle: no frames are drawn.
-- With WINDYLAND_DEBUG=1, each animation's frame rate and worst gap is
+- With NOOKLY_DEBUG=1, each animation's frame rate and worst gap is
   written to debug.log.
 
 ## 0.1.14
@@ -256,7 +270,7 @@ Versions 0.1.x below came before the Nookly name.
 
 - Fixed the notch (especially the Pill) sometimes vanishing until the Start
   menu was opened. Windows' "busy" signal also fires while the desktop has
-  focus and for some normal windows; WindyLand now hides only when a window
+  focus and for some normal windows; Nookly now hides only when a window
   really fills the screen (games, full-screen video, presentations), never
   for the desktop, Start, the taskbar or a maximized window, and re-checks the
   moment another window comes to the front.
@@ -324,7 +338,7 @@ Versions 0.1.x below came before the Nookly name.
 
 ## 0.1.5
 
-- Update check: shortly after start and twice a day WindyLand looks for a
+- Update check: shortly after start and twice a day Nookly looks for a
   newer GitHub release and offers Update / Later / Skip. Update downloads
   the installer, upgrades in place and restarts. Also in the tray menu as
   Check for updates. About now shows the version.

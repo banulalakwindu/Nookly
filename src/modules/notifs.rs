@@ -594,8 +594,8 @@ impl Notifs {
                     id: 1,
                     app: "Messages".into(),
                     aumid: "Nookly.Demo".into(),
-                    title: "Nadia".into(),
-                    body: "Are we still on for 7? I'll bring the slides".into(),
+                    title: "Amaya".into(),
+                    body: "Lunch at 1? I booked the table by the window".into(),
                     icon: Some(Arc::new(demo_icon())),
                     color: Some(col::GREEN),
                 };

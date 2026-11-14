@@ -65,11 +65,7 @@ jobs:
           Start-Process .\target\release\nookly.exe -ArgumentList '--selftest' -Wait
           Get-Content $env:NOOKLY_SELFTEST_OUT | ForEach-Object { if ($_ -like 'FAIL*') { Write-Host "::warning::$_" } else { Write-Host $_ } }
 
-      - name: Install Inno Setup
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
-
+      # The installer is nookly.exe under its setup name (src/setup.rs).
       - name: Build installer
         shell: pwsh
         run: .\build.ps1 -InstallerOnly

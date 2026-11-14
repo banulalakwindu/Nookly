@@ -77,7 +77,7 @@ def seed(data: Path):
         (1, 0, now + 25 * 60, "", "Send the weekly update"),
         (2, 0, now + 70 * 60, "", "Review pull request #42"),
         (3, 0, 0, "", "Book flights for the conference"),
-        (4, 1, 0, today, "Reply to Dina"),
+        (4, 1, 0, today, "Call Kasun back"),
         (5, 1, 0, today, "Pick up groceries"),
     ]
     (data / "todo.txt").write_text("".join(f"{i}\t{d}\t{due}\t{day}\t{t}\t0\n" for i, d, due, day, t in todo), encoding="utf-8")
@@ -90,40 +90,51 @@ def seed(data: Path):
 
 
 def album_art(path: Path, n=480):
-    """Made-up cover for "Night Train Home": a rainy night skyline with lit
-    windows, a glowing moon and rain streaks."""
-    rng = np.random.default_rng(3)
+    """Made-up cover for "Golden Hour Drive": the sun setting over the sea,
+    its light on the water, and a palm tree against the sky."""
+    rng = np.random.default_rng(7)
     y, x = np.mgrid[0:n, 0:n] / n
-    top = np.array([18, 32, 74]) / 255
-    bottom = np.array([20, 120, 140]) / 255
-    img = top * (1 - y[..., None]) + bottom * y[..., None]
-    moon = np.exp(-(((x - 0.72) ** 2 + (y - 0.24) ** 2) / 0.004))[..., None]
-    halo = np.exp(-(((x - 0.72) ** 2 + (y - 0.24) ** 2) / 0.04))[..., None]
-    img = img + np.array([1.0, 0.85, 0.55]) * (0.9 * moon + 0.18 * halo)
-    # Skyline: blocks of different heights with a few lit windows.
-    sky = np.zeros((n, n), bool)
-    windows = np.zeros((n, n), bool)
-    xs = 0
-    while xs < n:
-        w = int(rng.integers(n // 14, n // 7))
-        top_y = int(n * rng.uniform(0.5, 0.78))
-        sky[top_y:, xs:xs + w] = True
-        for wy in range(top_y + 10, n - 6, 16):
-            for wx in range(xs + 6, xs + w - 6, 12):
-                if rng.random() < 0.35:
-                    windows[wy:wy + 6, wx:wx + 5] = True
-        xs += w + int(rng.integers(0, 4))
-    img = np.where(sky[..., None], np.array([10, 16, 36]) / 255, img)
-    img = np.where(windows[..., None], np.array([255, 196, 92]) / 255, img)
-    # Rain: thin slanted streaks.
-    rain = np.zeros((n, n))
-    for _ in range(260):
-        cx, cy, ln = rng.integers(0, n), rng.integers(0, n), int(rng.integers(8, 22))
-        for k in range(ln):
-            px, py = cx + k // 3, cy + k
-            if 0 <= px < n and 0 <= py < n:
-                rain[py, px] = 0.22
-    img = img + rain[..., None] * np.array([0.7, 0.85, 1.0])
+    horizon = 0.62
+    # Sky: violet at the top through pink to warm orange at the horizon.
+    stops = [(0.0, (58, 36, 110)), (0.35, (214, 76, 120)), (horizon, (255, 166, 77))]
+    sky = np.zeros((n, n, 3))
+    for (y0, c0), (y1, c1) in zip(stops, stops[1:]):
+        k = ((y - y0) / (y1 - y0)).clip(0, 1)[..., None]
+        band = ((y >= y0) & (y <= y1))[..., None]
+        sky = np.where(band, np.array(c0) * (1 - k) + np.array(c1) * k, sky)
+    img = sky / 255
+    # The sun, half under the horizon, with a soft glow.
+    d2 = (x - 0.5) ** 2 + ((y - horizon) * 1.0) ** 2
+    sun = (d2 < 0.018) & (y < horizon)
+    glow = np.exp(-d2 / 0.05)[..., None]
+    img = img + np.array([1.0, 0.75, 0.4]) * 0.35 * glow
+    img = np.where(sun[..., None], np.array([255, 226, 150]) / 255, img)
+    # The sea: deep teal, darker towards the bottom, with the sun's path.
+    k = ((y - horizon) / (1 - horizon)).clip(0, 1)[..., None]
+    sea = np.array([24, 70, 96]) / 255 * (1 - k) + np.array([8, 28, 44]) / 255 * k
+    img = np.where((y >= horizon)[..., None], sea, img)
+    for _ in range(160):
+        cy = rng.uniform(horizon + 0.01, 0.98)
+        spread = 0.04 + (cy - horizon) * 0.35
+        cx = 0.5 + rng.normal(0, spread / 2)
+        w = rng.uniform(0.01, 0.05)
+        row = int(cy * n)
+        a, b = int((cx - w) * n), int((cx + w) * n)
+        img[row:row + 2, max(a, 0):max(min(b, n), 0)] = np.array([255, 200, 120]) / 255
+    # A palm tree on the left, in silhouette.
+    palm = np.zeros((n, n), bool)
+    for t in np.linspace(0, 1, 400):
+        px, py = 0.16 + 0.06 * t ** 2, 1.0 - 0.62 * t
+        r = 0.012 * (1.2 - t * 0.5)
+        palm |= (x - px) ** 2 + (y - py) ** 2 < r * r
+    top = (0.22, 0.38)
+    for ang in np.linspace(-2.9, -0.1, 7):
+        for t in np.linspace(0, 1, 160):
+            px = top[0] + 0.2 * t * np.cos(ang)
+            py = top[1] + 0.2 * t * np.sin(ang) + 0.12 * t * t
+            r = 0.011 * (1 - t) + 0.002
+            palm |= (x - px) ** 2 + (y - py) ** 2 < r * r
+    img = np.where(palm[..., None], np.array([30, 14, 34]) / 255, img)
     Image.fromarray((img * 255).clip(0, 255).astype(np.uint8)).save(path)
 
 

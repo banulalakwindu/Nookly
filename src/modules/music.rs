@@ -949,9 +949,9 @@ fn demo_media() -> MediaInfo {
         .map(Arc::new);
     MediaInfo {
         has: true,
-        title: "Night Train Home".into(),
-        artist: "Monsoon Avenue".into(),
-        album: "Rain City".into(),
+        title: "Golden Hour Drive".into(),
+        artist: "Coastline Echo".into(),
+        album: "Sea Road".into(),
         app: "Spotify".into(),
         playing: true,
         pos: 134.0,
@@ -968,15 +968,15 @@ impl Music {
     /// Demo lyrics (original lines, not a real song).
     pub fn demo_lyrics(&mut self) {
         let lines = [
-            (112.0, "Rain on the window, city lights"),
-            (118.0, "every street I know by heart"),
-            (124.0, "Hold the night a little longer"),
-            (129.0, "let the station lights go by"),
-            (134.0, "Night train running home"),
-            (139.0, "to the place where rivers meet"),
-            (144.0, "Hum it softly, let it fade"),
-            (149.0, "the rain will walk me home"),
-            (155.0, "Rain on the window, city lights"),
+            (112.0, "Windows down along the coast"),
+            (118.0, "salt and sunlight in the air"),
+            (124.0, "Every song we know by heart"),
+            (129.0, "palm trees counting down the miles"),
+            (134.0, "Golden hour, take the long way"),
+            (139.0, "the sea road is ours tonight"),
+            (144.0, "Turn it up and let it play"),
+            (149.0, "till the lighthouse says goodnight"),
+            (155.0, "Windows down along the coast"),
         ];
         let l = lines.iter().map(|(t, s)| (*t, s.to_string())).collect();
         *self.lyrics.lock().unwrap() = (self.info.key(), Lyrics::Synced(l));

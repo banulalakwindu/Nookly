@@ -1,9 +1,9 @@
 # Release build: compile, stamp the exe icon and version info, run the
-# self-test, build the installer.
+# self-test, make the installer (the same exe under its setup name).
 #   .\build.ps1                      -> dist\NooklySetup-<version>.exe
 #   .\build.ps1 -OutDir $HOME\Desktop
 # GitHub Actions (release.yml) builds in two halves (a step can go between
-# them, e.g. signing the exe before it goes into the installer):
+# them, e.g. signing the exe before it becomes the installer):
 #   .\build.ps1 -SkipInstaller -NoSelfTest   (exe only)
 #   .\build.ps1 -InstallerOnly               (installer from the existing exe)
 param(
@@ -127,15 +127,10 @@ if ($fails.Count -gt 0) { $fails | Write-Host; throw "self-test failed" }
 
 if ($SkipInstaller) { return }
 
-$iscc = @(
-    $env:ISCC,
-    "$env:LOCALAPPDATA\Programs\InnoSetup6\ISCC.exe",
-    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-    "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
-) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-if (-not $iscc) { throw "Inno Setup 6 (ISCC.exe) not found. Install it or set `$env:ISCC." }
-
+# The installer is nookly.exe itself under the setup name: started as
+# NooklySetup-<version>.exe it shows Nookly's own install window and copies
+# itself into place (src/setup.rs). No Inno Setup needed.
 New-Item -ItemType Directory $OutDir -Force | Out-Null
-& $iscc "/DAppVersion=$version" "/DOutDir=$OutDir" "$PSScriptRoot\installer\nookly.iss"
-if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
-Write-Host "Installer: $OutDir\NooklySetup-$version.exe"
+$setup = Join-Path $OutDir "NooklySetup-$version.exe"
+Copy-Item $exe $setup -Force
+Write-Host "Installer: $setup"

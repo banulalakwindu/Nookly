@@ -711,14 +711,14 @@ fn spawn_search(q: String, shared: Arc<Mutex<Search>>) {
 // ------------------------------------------------------------ module
 
 // Pages and switches.
-const A_SHOW: u32 = 1;
+pub const A_SHOW: u32 = 1;
 const A_ORDER: u32 = 2;
-const A_ALERTS: u32 = 3;
+pub const A_ALERTS: u32 = 3;
 const A_SMART: u32 = 4;
 const A_PLACE: u32 = 5;
 const A_CUSTOM: u32 = 6;
 const A_RESET: u32 = 7;
-const A_ALERT_RESET: u32 = 8;
+pub const A_ALERT_RESET: u32 = 8;
 /// Docs renders: made-up Bluetooth devices, weather, Wi-Fi and sound.
 pub const A_DEMO: u32 = 990;
 /// + index into the catalog: switch an item on or off (Show page).
