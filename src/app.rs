@@ -192,6 +192,18 @@ pub enum Deferred {
     DragOut(Vec<String>),
 }
 
+/// Liquid Glass: what's behind the whole window, a quarter size, blurred.
+struct GlassRaw {
+    w: u32,
+    h: u32,
+    px: Vec<u8>,
+    /// When it was grabbed, where the window was then, and a counter that
+    /// tells the cropped bitmap it needs remaking.
+    at: f64,
+    origin: (i32, i32),
+    serial: u32,
+}
+
 pub struct App {
     pub hwnd: HWND,
     gfx: Gfx,
@@ -298,7 +310,11 @@ pub struct App {
     /// Liquid Glass: the blurred backdrop (bitmap, gfx generation, when),
     /// whether it is bright (light glass), and whether the notch is kept
     /// out of screen captures.
-    backdrop: Option<(windows::Win32::Graphics::Direct2D::ID2D1Bitmap, u32, f64)>,
+    /// (The notch's part of the grab, bent at the edges: bitmap, gfx
+    /// generation, what it was made from, where it's drawn.)
+    backdrop: Option<(windows::Win32::Graphics::Direct2D::ID2D1Bitmap, u32, u64, Rect)>,
+    /// The glass grab of the whole window area (see update_backdrop).
+    glass_raw: Option<GlassRaw>,
     glass_light: bool,
     excluded: bool,
     /// Hit under the mouse with a tooltip: (module, id, since, suppressed by a click).
@@ -522,6 +538,7 @@ impl App {
                 passthrough: false,
                 poll_since: None,
                 backdrop: None,
+                glass_raw: None,
                 glass_light: false,
                 excluded: false,
                 tip: None,
@@ -1210,45 +1227,75 @@ impl App {
             self.excluded = false;
         }
         if !th.glass {
+            // Not glass: let go of the grab too.
             self.backdrop = None;
+            self.glass_raw = None;
         }
     }
 
-    /// Refresh the glass backdrop: up to ten times a second while the notch
-    /// moves, once a second at rest.
+    /// The glass backdrop. One grab covers the whole window area around the
+    /// notch, aligned to the screen, so whatever size or shape the notch has
+    /// (opening, switching panels, a toast) it shows exactly what's behind
+    /// that part, at once. The grab is taken when there is none or the
+    /// window moved, then refreshed only at rest (every 1.5 s while frames
+    /// are drawn), never while the notch moves; a resting closed notch draws
+    /// no frames, so it costs nothing. Each frame just crops the notch's
+    /// part and bends its edges (both tiny: a quarter of the pixels).
     fn update_backdrop(&mut self, notch: Rect, t: f64, dist: f32, rad: f32) {
-        let fresh = match &self.backdrop {
-            // Kept while the notch moves (each grab waits for a frame);
-            // refreshed about once a second when it's still.
-            Some((_, g, at)) => *g == self.gfx.gen && (dist > 0.5 || t - at < 1.0),
-            None => false,
+        let (pw, ph) = (self.gfx.pw, self.gfx.ph);
+        let (gw, gh) = ((pw / 4).max(2) as u32, (ph / 4).max(2) as u32);
+        let stale = match &self.glass_raw {
+            None => true,
+            Some(r) => r.origin != self.origin || (r.w, r.h) != (gw, gh) || (dist <= 0.0 && t - r.at > 1.5),
         };
-        if fresh {
+        if stale {
+            let testing = crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed);
+            let data = if testing {
+                // Renders and tests: a made-up background (light, dark, colour).
+                let kind = std::env::var("NOOKLY_RENDER_BACKDROP").unwrap_or_else(|_| "color".into());
+                Some(crate::glass::sample(&kind, gw, gh))
+            } else {
+                let (ox, oy) = self.origin;
+                crate::glass::capture_behind(self.hwnd, RECT { left: ox, top: oy, right: ox + pw, bottom: oy + ph })
+            };
+            if let Some((w, h, px, _)) = data {
+                let serial = self.glass_raw.as_ref().map_or(0, |r| r.serial.wrapping_add(1));
+                self.glass_raw = Some(GlassRaw { w, h, px, at: t, origin: self.origin, serial });
+            }
+        }
+        let Some(raw) = &self.glass_raw else { return };
+        // The notch's part of the grab, in its pixels.
+        let k = raw.w as f32 / (pw as f32 / self.scale);
+        let clampx = |v: f32| (v.max(0.0) as u32).min(raw.w);
+        let clampy = |v: f32| (v.max(0.0) as u32).min(raw.h);
+        let (x0, y0) = (clampx((notch.x * k).floor()), clampy((notch.y * k).floor()));
+        let (x1, y1) = (clampx((notch.r() * k).ceil()), clampy((notch.b() * k).ceil()));
+        if x1 <= x0 + 1 || y1 <= y0 + 1 {
             return;
         }
-        let testing = crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed);
-        let data = if testing {
-            // Renders and tests: a made-up background (light, dark, colour).
-            let kind = std::env::var("NOOKLY_RENDER_BACKDROP").unwrap_or_else(|_| "color".into());
-            let (w, h) = (((notch.w * self.scale) as u32 / 4).max(2), ((notch.h * self.scale) as u32 / 4).max(2));
-            Some(crate::glass::sample(&kind, w, h))
-        } else {
-            let (ox, oy, k) = (self.origin.0 as f32, self.origin.1 as f32, self.scale);
-            crate::glass::capture_behind(self.hwnd, RECT { left: (ox + notch.x * k) as i32, top: (oy + notch.y * k) as i32, right: (ox + notch.r() * k) as i32, bottom: (oy + notch.b() * k) as i32 })
-        };
-        let Some((w, h, mut px, lum)) = data else { return };
-        // Refraction: the backdrop bends near the edges, like thick glass.
-        // (the backdrop is a quarter of the screen's pixels)
-        crate::glass::lens(&mut px, w, h, rad * self.scale / 4.0);
-        // Light glass over bright backgrounds, dark glass over dark ones (a
-        // little hysteresis so it doesn't flicker).
+        let key = ((x0 as u64) << 48) ^ ((y0 as u64) << 36) ^ ((x1 as u64) << 24) ^ ((y1 as u64) << 12) ^ ((rad * k) as u64) ^ ((raw.serial as u64) << 56);
+        if self.backdrop.as_ref().map_or(false, |b| b.1 == self.gfx.gen && b.2 == key) {
+            return;
+        }
+        let (cw, ch) = (x1 - x0, y1 - y0);
+        let mut px = Vec::with_capacity((cw * ch * 4) as usize);
+        for y in y0..y1 {
+            let s = ((y * raw.w + x0) * 4) as usize;
+            px.extend_from_slice(&raw.px[s..s + (cw * 4) as usize]);
+        }
+        // Light glass over bright backgrounds, dark glass over dark ones,
+        // from what's behind this part (a little hysteresis: no flicker).
+        let lum = px.chunks_exact(4).map(|p| 0.0722 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.2126 * p[2] as f32).sum::<f32>() / (cw * ch) as f32 / 255.0;
         if lum > 0.62 {
             self.glass_light = true;
         } else if lum < 0.5 {
             self.glass_light = false;
         }
-        if let Some(b) = self.gfx.make_bitmap(w, h, &px) {
-            self.backdrop = Some((b, self.gfx.gen, t));
+        // Refraction: the edges bend what's behind, like thick glass.
+        crate::glass::lens(&mut px, cw, ch, rad * k);
+        if let Some(b) = self.gfx.make_bitmap(cw, ch, &px) {
+            let at = Rect::new(x0 as f32 / k, y0 as f32 / k, cw as f32 / k, ch as f32 / k);
+            self.backdrop = Some((b, self.gfx.gen, key, at));
         }
     }
 
@@ -1989,9 +2036,9 @@ impl App {
                     // Liquid Glass: what is behind, blurred and bent near
                     // the edges like a lens (glass.rs), under a light tint.
                     self.update_backdrop(notch, t, dist, rad);
-                    if let Some((b, _, _)) = self.backdrop.clone() {
+                    if let Some((b, _, _, at)) = self.backdrop.clone() {
                         self.gfx.push_layer(Some(&geo), 1.0);
-                        self.gfx.image_rr(&b, notch, 0.0);
+                        self.gfx.image_rr(&b, at, 0.0);
                         self.gfx.pop_layer();
                     }
                 }
@@ -6375,11 +6422,13 @@ pub fn render_docs(dir: &std::path::Path) -> String {
             for kind in ["color", "light"] {
                 std::env::set_var("NOOKLY_RENDER_BACKDROP", kind);
                 a.backdrop = None;
+                a.glass_raw = None;
                 shot(a, dir, &format!("glass_{kind}"));
             }
             std::env::remove_var("NOOKLY_RENDER_BACKDROP");
             (a.settings.theme, a.tab) = (theme, tab);
             a.backdrop = None;
+            a.glass_raw = None;
         }
         // The Settings window, at the same 2x scale.
         for (name, tab, sec) in [("settings_general", 0u8, 0u8), ("settings_privacy", 0, SEC_PRIVACY), ("settings_look", 0, SEC_THEME), ("settings_features", 0, SEC_FEATURES), ("settings_shortcuts", 0, SEC_SHORTCUTS), ("settings_widgets", 0, SEC_WIDGETS), ("settings_panels", 0, SEC_PANELS), ("settings_location", 0, SEC_LOCATION), ("settings_taskbar", 1, 0)] {
@@ -7475,8 +7524,45 @@ fn look_tests(a: &mut App) -> String {
     let glass_drawn = a.backdrop.is_some() || THEMES.iter().all(|t| !t.glass);
     out += &format!("{:<4} every theme draws the notch and panels; Liquid Glass has its backdrop {bad:?} {glass_drawn}
 ", ok(bad.is_empty() && glass_drawn));
+    // Liquid Glass follows the notch at once: while it changes size (a
+    // panel switch) it shows the matching part of one grab, with no new
+    // grab until it rests, and the glass covers exactly the new shape.
+    {
+        a.settings.theme = "glass".into();
+        a.backdrop = None;
+        a.glass_raw = None;
+        a.expanded = true;
+        let tabs = a.tab_list();
+        let small = tabs.iter().copied().min_by(|&x, &y| a.modules[x].size().0.partial_cmp(&a.modules[y].size().0).unwrap());
+        let wide = tabs.iter().copied().max_by(|&x, &y| a.modules[x].size().0.partial_cmp(&a.modules[y].size().0).unwrap());
+        if let (Some(s), Some(w)) = (small, wide) {
+            a.tab = s;
+            let tgt = a.target();
+            a.cur = tgt;
+            a.render(tgt, 0.0);
+            let first = a.glass_raw.as_ref().map(|r| r.serial);
+            // Switch to the widest panel and draw a few in-between frames.
+            a.tab = w;
+            let mut covers = true;
+            for k in 1..=4 {
+                let tgt = a.target();
+                let f = k as f32 / 4.0;
+                a.cur = (lerp(a.cur.0, tgt.0, f), lerp(a.cur.1, tgt.1, f), lerp(a.cur.2, tgt.2, f));
+                a.render(tgt, if k < 4 { 20.0 } else { 0.0 });
+                let notch = a.edge_rect(a.cur.0, a.cur.1);
+                if let Some((_, _, _, at)) = &a.backdrop {
+                    covers &= (at.x - notch.x).abs() <= 4.0 / a.scale + 1.0 && (at.r() - notch.r()).abs() <= 4.0 / a.scale + 1.0 && (at.b() - notch.b()).abs() <= 4.0 / a.scale + 1.0;
+                } else {
+                    covers = false;
+                }
+            }
+            let one_grab = first.is_some() && a.glass_raw.as_ref().map(|r| r.serial) == first;
+            out += &format!("{:<4} Liquid Glass shows what's behind the new shape at once, from one grab, while it changes size {:?}\n", ok(covers && one_grab), (covers, one_grab));
+        }
+    }
     (a.settings.theme, a.settings.style, a.expanded, a.tab, a.more_open) = saved;
     a.backdrop = None;
+    a.glass_raw = None;
     // Seconds: the clock face and the narrow notches grow.
     let o = std::sync::atomic::Ordering::Relaxed;
     let style = a.settings.style;
