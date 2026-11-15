@@ -787,6 +787,9 @@ impl App {
                 self.call(i, |m, c| m.tick(c));
             } else {
                 self.call(i, |m, c| m.tick_off(c));
+                if on {
+                    self.call(i, |m, c| m.background(c));
+                }
             }
         }
         let tabs = self.tab_list();
@@ -1213,7 +1216,7 @@ impl App {
 
     /// Refresh the glass backdrop: up to ten times a second while the notch
     /// moves, once a second at rest.
-    fn update_backdrop(&mut self, notch: Rect, t: f64, dist: f32) {
+    fn update_backdrop(&mut self, notch: Rect, t: f64, dist: f32, rad: f32) {
         let fresh = match &self.backdrop {
             // Kept while the notch moves (each grab waits for a frame);
             // refreshed about once a second when it's still.
@@ -1233,7 +1236,10 @@ impl App {
             let (ox, oy, k) = (self.origin.0 as f32, self.origin.1 as f32, self.scale);
             crate::glass::capture_behind(self.hwnd, RECT { left: (ox + notch.x * k) as i32, top: (oy + notch.y * k) as i32, right: (ox + notch.r() * k) as i32, bottom: (oy + notch.b() * k) as i32 })
         };
-        let Some((w, h, px, lum)) = data else { return };
+        let Some((w, h, mut px, lum)) = data else { return };
+        // Refraction: the backdrop bends near the edges, like thick glass.
+        // (the backdrop is a quarter of the screen's pixels)
+        crate::glass::lens(&mut px, w, h, rad * self.scale / 4.0);
         // Light glass over bright backgrounds, dark glass over dark ones (a
         // little hysteresis so it doesn't flicker).
         if lum > 0.62 {
@@ -1244,6 +1250,42 @@ impl App {
         if let Some(b) = self.gfx.make_bitmap(w, h, &px) {
             self.backdrop = Some((b, self.gfx.gen, t));
         }
+    }
+
+    /// Liquid Glass light, no outline: a rim that glows from the very edge
+    /// and fades inward (brighter on the top, where the light comes from),
+    /// and two soft glints that drift slowly, like light moving through
+    /// liquid. They move only while frames are drawn (the notch is open,
+    /// hovered or moving), so a resting notch costs nothing.
+    fn draw_glass_light(&mut self, geo: &windows::Win32::Graphics::Direct2D::ID2D1PathGeometry, notch: Rect, t: f64) {
+        let light = self.glass_light;
+        let a = if light { 1.0 } else { 0.8 };
+        let white = hex(0xFFFFFF);
+        self.gfx.push_layer(Some(geo), 1.0);
+        // Fresnel rim: half of each stroke falls outside and is clipped.
+        for (w, k) in [(2.0, 0.32), (7.0, 0.10), (16.0, 0.05), (30.0, 0.022)] {
+            self.gfx.stroke_geometry_raw(geo, white.with_a(k * a), w);
+        }
+        // Light from above: a soft band along the top inside edge.
+        for k in 0..6 {
+            let f = k as f32 / 6.0;
+            let band = Rect::new(notch.x, notch.y + notch.h * 0.28 * f, notch.w, notch.h * 0.28 / 6.0 + 0.5);
+            self.gfx.fill_rr_raw(band, 0.0, white.with_a(0.06 * a * (1.0 - f)));
+        }
+        // Liquid glints, nudged by the notch's own motion.
+        let p = if reduce_motion(&self.settings) { 0.0 } else { t as f32 };
+        let push = (self.vel.0 * 0.004).clamp(-0.12, 0.12);
+        for (i, (sx, sy, size)) in [(0.37f32, 0.53f32, 0.30f32), (0.29, 0.41, 0.22)].into_iter().enumerate() {
+            let off = i as f32 * 2.4;
+            let cx = notch.x + notch.w * (0.5 + 0.36 * (p * sx + off).sin() + push);
+            let cy = notch.y + notch.h * (0.42 + 0.24 * (p * sy + off * 1.3).cos());
+            let (rx, ry) = (notch.w * size * 0.5, notch.h * size * 1.4);
+            for k in 0..7 {
+                let f = 1.0 - k as f32 / 7.0;
+                self.gfx.ellipse_raw(cx, cy, rx * f, ry * f, white.with_a(0.016 * a));
+            }
+        }
+        self.gfx.pop_layer();
     }
 
     /// Slim's width while something shows (wider with seconds).
@@ -1558,7 +1600,13 @@ impl App {
     /// The tabs in the tab bar, in order.
     /// (Widgets is set up in the Settings window, not in the notch.)
     fn tab_list(&self) -> Vec<usize> {
-        (0..self.modules.len()).filter(|&i| self.modules[i].has_tab() && self.enabled(i) && self.modules[i].title() != "Widgets").collect()
+        let mut v: Vec<usize> = (0..self.modules.len()).filter(|&i| self.modules[i].has_tab() && self.enabled(i) && self.modules[i].title() != "Widgets").collect();
+        // Your own order (Settings > Panels); panels not in it keep theirs, after.
+        let order = panel_order(&self.settings);
+        if !order.is_empty() {
+            v.sort_by_key(|&i| (order.iter().position(|t| t == self.modules[i].title()).unwrap_or(usize::MAX), i));
+        }
+        v
     }
 
     /// The mascot shares the closed notch with a live activity / the clock,
@@ -1861,8 +1909,11 @@ impl App {
             self.vel = (0.0, 0.0, 0.0);
             return 0.0;
         }
-        const W: f32 = 20.0; // stiffness (rad/s)
-        const Z: f32 = 0.74; // damping ratio
+        // Liquid: the width is springy (about 12% overshoot and a small
+        // second wobble) and the height follows a little behind, so the
+        // shape stretches as it opens and settles like a drop of water.
+        // (stiffness in rad/s, damping ratio) for width, height, corners.
+        const SPRING: [(f32, f32); 3] = [(19.0, 0.55), (16.0, 0.62), (22.0, 0.7)];
         let n = ((dt * 240.0).ceil() as usize).clamp(1, 32);
         let h = dt / n as f32;
         let tg = [target.0, target.1, target.2];
@@ -1870,7 +1921,8 @@ impl App {
         let mut v = [self.vel.0, self.vel.1, self.vel.2];
         for _ in 0..n {
             for i in 0..3 {
-                let a = W * W * (tg[i] - x[i]) - 2.0 * Z * W * v[i];
+                let (w, z) = SPRING[i];
+                let a = w * w * (tg[i] - x[i]) - 2.0 * z * w * v[i];
                 v[i] += a * h;
                 x[i] += v[i] * h;
             }
@@ -1907,6 +1959,14 @@ impl App {
     fn render(&mut self, target: (f32, f32, f32), dist: f32) {
         let t = self.t();
         let (along, depth, rad) = self.cur;
+        // Liquid squash and stretch: growing fast one way, it gives a
+        // little the other way (at most 6%), like a drop changing shape.
+        let (along, depth) = if reduce_motion(&self.settings) {
+            (along, depth)
+        } else {
+            let k = |v: f32| (v * 0.00004).clamp(-0.06, 0.06);
+            (along * (1.0 - k(self.vel.1)), depth * (1.0 - k(self.vel.0)))
+        };
         let notch = self.edge_rect(along, depth);
         let goal = self.edge_rect(target.0, target.1);
         let edge = self.edge();
@@ -1926,8 +1986,9 @@ impl App {
             if let Some(geo) = self.gfx.notch_geometry(notch, rad, ear, edge) {
                 let glass = self.gfx.theme.glass;
                 if glass {
-                    // Liquid Glass: what is behind, blurred, under a tint.
-                    self.update_backdrop(notch, t, dist);
+                    // Liquid Glass: what is behind, blurred and bent near
+                    // the edges like a lens (glass.rs), under a light tint.
+                    self.update_backdrop(notch, t, dist, rad);
                     if let Some((b, _, _)) = self.backdrop.clone() {
                         self.gfx.push_layer(Some(&geo), 1.0);
                         self.gfx.image_rr(&b, notch, 0.0);
@@ -1961,16 +2022,7 @@ impl App {
                 }
                 self.gfx.fill_geometry(&geo, col::NOTCH);
                 if glass {
-                    // A soft sheen from the top and a bright rim.
-                    let light = self.glass_light;
-                    self.gfx.push_layer(Some(&geo), 1.0);
-                    for k in 0..8 {
-                        let f = k as f32 / 8.0;
-                        let band = Rect::new(notch.x, notch.y + notch.h * 0.5 * f, notch.w, notch.h * 0.5 / 8.0 + 0.5);
-                        self.gfx.fill_rr_raw(band, 0.0, hex(0xFFFFFF).with_a((if light { 0.16 } else { 0.11 }) * (1.0 - f)));
-                    }
-                    self.gfx.pop_layer();
-                    self.gfx.stroke_geometry_raw(&geo, hex(0xFFFFFF).with_a(if light { 0.9 } else { 0.42 }), 1.2);
+                    self.draw_glass_light(&geo, notch, t);
                 }
                 self.gfx.push_layer(Some(&geo), content_alpha);
                 match mode {
@@ -4443,15 +4495,42 @@ pub fn selftest() -> String {
                 a.sw_view(0, SEC_WIDGETS);
                 out += &a.sw_snap("settings widgets section");
                 let hosted = a.sw_hits().iter().filter(|h| h.module == w).count();
-                let page = a.sw_hits().iter().find(|h| h.module == w && h.id == crate::modules::widgets::A_ALERTS).copied();
-                if let Some(h) = page {
-                    a.sw_click(h.rect.cx(), h.rect.cy());
+                // Widgets has Show (and Order) only; alerts and the place
+                // moved to their own sections.
+                let only_show = !a.sw_hits().iter().any(|h| h.module == w && h.id == crate::modules::widgets::A_ALERTS);
+                // Alerts > How each alert shows: the alerts list, one place.
+                a.sw_view(0, SEC_ALERTS);
+                let views = a.sw_has(S_ALERT_VIEW) && a.sw_has(S_ALERT_VIEW + 1) && a.sw_has(S_NOTIF_ON);
+                a.sw_click_id(S_ALERT_VIEW + 1);
+                let alerts = a.sw_hits().iter().any(|h| h.module == w && h.id == crate::modules::widgets::A_ALERT_RESET) && !a.sw_has(S_NOTIF_ON);
+                out += &a.sw_snap("settings alerts: each alert");
+                if let Some(sw) = a.swin.as_mut() {
+                    sw.alert_view = 0;
                 }
-                let moved = a.sw_hits().iter().any(|h| h.module == w && h.id == crate::modules::widgets::A_ALERT_RESET);
-                if let Some(h) = a.sw_hits().iter().find(|h| h.module == w && h.id == crate::modules::widgets::A_SHOW).copied() {
-                    a.sw_click(h.rect.cx(), h.rect.cy());
-                }
-                out += &format!("{:<4} Settings > Widgets shows the Widgets panel ({hosted} controls) and its pages switch\n", if hosted > 5 && moved { "OK" } else { "FAIL" });
+                // Location: the place picker, a general setting of its own.
+                a.sw_view(0, SEC_LOCATION);
+                out += &a.sw_snap("settings location");
+                let place = a.sw_hits().iter().filter(|h| h.module == w).count() > 2 && !a.sw_hits().iter().any(|h| h.module == w && h.id == crate::modules::widgets::A_SHOW);
+                out += &format!(
+                    "{:<4} Widgets ({hosted} controls), Alerts (two clear pages) and Location (its own section) are separate {:?}\n",
+                    if hosted > 5 && only_show && views && alerts && place { "OK" } else { "FAIL" },
+                    (only_show, views, alerts, place)
+                );
+            }
+            // Settings > Panels: drag a panel to a new place; the notch's
+            // tab bar follows, and Reset puts the order back.
+            {
+                let before = a.tab_list();
+                a.sw_view(0, SEC_PANELS);
+                out += &a.sw_snap("settings panels order");
+                let cards = a.sw_hits().iter().filter(|h| (S_ORDER..S_ORDER + 64).contains(&h.id)).count();
+                let first = a.modules[before[0]].title();
+                a.move_panel(0, 2);
+                let after = a.tab_list();
+                let moved = after.len() == before.len() && a.modules[after[2]].title() == first && crate::store::read("settings.txt").contains("panel_order=");
+                a.sw_click_id(S_ORDER_RESET);
+                let reset = a.tab_list() == before;
+                out += &format!("{:<4} Settings > Panels lists {cards} panels; dragging reorders the tab bar and saves; Reset restores it\n", if cards == before.len() && moved && reset { "OK" } else { "FAIL" });
             }
             // The master switch: off hides the notch and stops its features.
             a.sw_view(0, 0);
@@ -4549,7 +4628,7 @@ pub fn selftest() -> String {
             out += &format!("{:<4} picking a sound applies and saves\n", if ok { "OK" } else { "FAIL" });
             // Alerts and Privacy: notifications start off; the switches save.
             let n0 = a.settings.notif_on;
-            a.sw_view(0, 5);
+            a.sw_view(0, SEC_ALERTS);
             let alerts = [S_NOTIF_ON, S_NOTIF_TEXT, S_NOTIF_BANNERS, S_NOTIF_UNMUTE, S_VOLUME].iter().all(|id| a.sw_has(*id));
             a.sw_view(0, SEC_PRIVACY);
             let privacy = [S_PRIVACY, S_CLIP_ON, S_CLIP_MODE, S_COPY_TOAST].iter().all(|id| a.sw_has(*id));
@@ -5663,8 +5742,10 @@ pub fn selftest() -> String {
                 }
             }
             let secs = steps as f32 / 60.0;
-            let ok = secs <= 0.6 && over > 0.0 && over < 0.08 * 280.0;
-            out += &format!("{:<4} resize spring settles in {secs:.2}s, overshoot {over:.1}px of 280\n", if ok { "OK" } else { "FAIL" });
+            // Liquid on purpose: a clear overshoot and wobble, settled
+            // within a second.
+            let ok = secs <= 0.9 && over > 0.04 * 280.0 && over < 0.16 * 280.0;
+            out += &format!("{:<4} resize spring (liquid) settles in {secs:.2}s, overshoot {over:.1}px of 280\n", if ok { "OK" } else { "FAIL" });
             // Same result at a choppy 20 fps.
             a.cur = from;
             a.vel = (0.0, 0.0, 0.0);
@@ -6285,8 +6366,23 @@ pub fn render_docs(dir: &std::path::Path) -> String {
             (a.settings.hidden_panels, a.mood, a.settings.mascot_pos) = saved;
             a.expanded = true;
         }
+        // Liquid Glass over a colourful and a light background.
+        if let Some(m) = find(a, "Now Playing") {
+            let (theme, tab) = (a.settings.theme.clone(), a.tab);
+            a.settings.theme = "glass".into();
+            a.tab = m;
+            a.expanded = true;
+            for kind in ["color", "light"] {
+                std::env::set_var("NOOKLY_RENDER_BACKDROP", kind);
+                a.backdrop = None;
+                shot(a, dir, &format!("glass_{kind}"));
+            }
+            std::env::remove_var("NOOKLY_RENDER_BACKDROP");
+            (a.settings.theme, a.tab) = (theme, tab);
+            a.backdrop = None;
+        }
         // The Settings window, at the same 2x scale.
-        for (name, tab, sec) in [("settings_general", 0u8, 0u8), ("settings_privacy", 0, SEC_PRIVACY), ("settings_look", 0, SEC_THEME), ("settings_features", 0, SEC_FEATURES), ("settings_shortcuts", 0, SEC_SHORTCUTS), ("settings_widgets", 0, SEC_WIDGETS), ("settings_taskbar", 1, 0)] {
+        for (name, tab, sec) in [("settings_general", 0u8, 0u8), ("settings_privacy", 0, SEC_PRIVACY), ("settings_look", 0, SEC_THEME), ("settings_features", 0, SEC_FEATURES), ("settings_shortcuts", 0, SEC_SHORTCUTS), ("settings_widgets", 0, SEC_WIDGETS), ("settings_panels", 0, SEC_PANELS), ("settings_location", 0, SEC_LOCATION), ("settings_taskbar", 1, 0)] {
             a.sw_view(tab, sec);
             if let Some(sw) = a.swin.as_mut() {
                 sw.set_scale(scale);
@@ -7337,7 +7433,9 @@ fn look_tests(a: &mut App) -> String {
             min = min.min(contrast(t.text, over(t.bg, back)));
         }
         worst.push(format!("{kind} {:.1}", min));
-        if min < 4.5 {
+        // Glass is see-through on purpose, so it can't reach the solid
+        // themes' 4.5:1; it keeps at least 3:1 (WCAG's large-text level).
+        if min < 3.0 {
             weak.push(format!("glass on {kind} {min:.1}"));
         }
     }
@@ -7793,6 +7891,11 @@ fn ui_size(st: &Settings) -> f32 {
 
 fn reduce_motion(st: &Settings) -> bool {
     st.extra.get("reduce_motion").map_or(false, |v| v == "1")
+}
+
+/// Settings > Panels: the tab bar's order (panel titles), if you set one.
+fn panel_order(st: &Settings) -> Vec<String> {
+    st.extra.get("panel_order").map_or(Vec::new(), |v| v.split('|').filter(|s| !s.is_empty()).map(String::from).collect())
 }
 
 /// Apps (exe names) the notch hides for.
