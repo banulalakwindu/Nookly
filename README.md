@@ -53,13 +53,17 @@ And more: **Downloads finished** (click to open), **Mirror** (a camera check bef
 
 ## Settings, in its own window
 
-Click the gear in the notch, right-click the notch or click the tray icon. Two tabs: **Notch**, with its on / off switch and every setting in nine sections (Appearance, Theme, Mascot, Features, Widgets, Alerts, Privacy, Shortcuts, General), and **Taskbar**, a custom Nookly taskbar that's coming soon.
+Click the gear in the notch, right-click the notch or click the tray icon. Two tabs: **Notch**, with its on / off switch and every setting in eleven sections (Appearance, Theme, Mascot, Panels, Features, Widgets, Alerts, Location, Privacy, Shortcuts, General), and **Taskbar**, a custom Nookly taskbar that's coming soon. Drag your panels into the order you like in **Panels**, and set your place once in **Location**.
 
 <img src="docs/images/settings.png" alt="Settings window">
+
+<img src="docs/images/settings-panels.png" alt="Settings: drag panels into your order">
 
 <img src="docs/images/settings-features.png" alt="Settings: Features">
 
 <img src="docs/images/themes.png" alt="Themes">
+
+<img src="docs/images/glass.png" alt="Liquid Glass">
 
 | | |
 |---|---|
@@ -98,6 +102,12 @@ Each feature is one file in `src/modules/` implementing the `Module` trait: copy
 
 **Releases and the website** are automatic. The site in `docs/` goes live after every push to `main`. To release, raise `version` in `Cargo.toml`, add a `## <version>` section to `CHANGELOG.md` and push: GitHub Actions builds the installer from the source, tags it and publishes the release.
 
-## License
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and send a change, and [SECURITY.md](SECURITY.md) to report a security problem privately.
+
+## License and credits
 
 [MIT](LICENSE) · Made by [Banula Lakwindu](https://github.com/banulalakwindu)
+
+Nookly began from [WindyLand](https://github.com/shabab239/WindyLand) by Shabab (MIT License), which gave it its starting code and documentation layout; the copyright notice in [LICENSE](LICENSE) is kept as that license requires. Lyrics by [LRCLIB](https://lrclib.net), weather by [Open-Meteo](https://open-meteo.com).

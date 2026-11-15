@@ -249,7 +249,9 @@ The **Calendar** tab shows the month. Today has a red circle; days with to-do ta
 
 **Settings > Theme** has the themes, the clock and the seconds switch.
 - **Themes**: **Black** (the default), **Graphite**, **Midnight**, **Rose**, **Forest**, **Ocean**, **Light**, **Blossom** (light pink), **Paper** (old paper) and **Liquid Glass**. A theme changes the notch and every panel. On the light themes, coloured labels are a little darker so they stay readable.
-- **Liquid Glass** shows a blurred view of what's behind the notch under a clear tint, with a bright edge. Over a bright window it turns into light glass with dark text, over a dark one into dark glass with white text. The notch still shows in screenshots and screen recordings (it hides only for the instant it looks behind itself).
+<img src="images/glass.png" alt="Liquid Glass">
+
+- **Liquid Glass** is real-looking glass with no outline: a blurred, slightly more colourful view of what's behind the notch, bent near the edges like the rim of a lens, a soft light along the edge, and glints that drift like light through water while you use it (they stay still when the notch rests, so it costs nothing). Being see-through, it has a little less contrast than the solid themes. Over a bright window it turns into light glass with dark text, over a dark one into dark glass with white text. The notch still shows in screenshots and screen recordings (it hides only for the instant it looks behind itself).
 - **Show seconds** puts seconds on the clock (4:20:15). The Slim and Compact notches get a little wider so nothing gets squeezed.
 
 ## Tools
@@ -408,6 +410,10 @@ At the bottom of **Settings > Features**, **Home**, **Work** and **Focus** each 
 
 <img src="images/settings-privacy.png" alt="Settings > Privacy">
 
+<img src="images/settings-panels.png" alt="Settings > Panels">
+
+<img src="images/settings-location.png" alt="Settings > Location">
+
 <img src="images/settings-taskbar.png" alt="Settings > Taskbar: coming soon">
 
 Open Settings with the **gear** at the end of the tab bar, a plain **right-click** on the notch (or on the taskbar mascot), or a **left-click** on the tray icon. Settings opens in a small window of its own, in your notch's theme; drag it by its header, close it with the **x** or Esc. It exists only while it's open, so it costs nothing the rest of the time.
@@ -417,16 +423,18 @@ The window has two tabs, each with a **master switch** at the top of its sidebar
 - **Notch**: the switch turns the whole notch on or off. Off, the notch hides and none of its features run (no reminders, no shortcuts); the tray icon stays so you can come back and turn it on.
 - **Taskbar**: a custom Nookly taskbar, coming soon. Its switch stays off for now.
 
-Under the Notch tab's switch are its sections. At the bottom of each, a line explains whatever control the mouse is on.
+Under the Notch tab's switch are its eleven sections. At the bottom of each, a line explains whatever control the mouse is on.
 
 | Section | What's in it |
 |---|---|
 | **Appearance** | Style (Full, Slim, Compact, Pill or Hidden); position (Top, Bottom, Left, Right, Center); **Size** (smaller, normal or larger notch and panels); **Step aside for windows** (smart hide, on by default); **Reduce motion** |
 | **Theme** | Ten themes including Liquid Glass, and **Yours** (pick a background and a text colour; it shows the contrast and **Fix it** picks a readable text colour); **12-hour clock** (4:20 PM, the default, or 16:20); **Seconds on the clock**; **Song colour around the notch** |
 | **Mascot** | Which companion shows, or Clock for none; where it sits (Left / Center / Right); **Always out**; **On the taskbar** |
+| **Panels** | The order of the panels in the notch's tab bar: drag a panel to its new place (the number shows its position). **Reset order** puts them back |
 | **Features** | Switch each feature on or off, **Start from** a preset, and **Profile** (Home, Work, Focus, or Auto by work hours). See [Features](#features-switch-on-only-what-you-use) |
-| **Widgets** | The Widgets panel, moved here from the notch's tab bar: Show, Order, Alerts and Place (see [Widgets](#widgets-what-the-closed-notch-shows)) |
-| **Alerts** | Reminder sound (Chime, Bell, Pop, Marimba, Windows or Off; picking one plays it); **Volume overlay**; Windows notifications: show them in the notch, include message text, Windows banners, unmute apps |
+| **Widgets** | What the closed notch shows: **Show** and, with Custom order on, **Order** (see [Widgets](#widgets-what-the-closed-notch-shows)) |
+| **Alerts** | Two pages. **Sounds & notifications**: reminder sound (Chime, Bell, Pop, Marimba, Windows or Off; picking one plays it), **Volume overlay**, Windows notifications (show them in the notch, include message text, Windows banners, unmute apps). **How each alert shows**: off, small inside the closed notch, or a pop-up, for each kind of alert |
+| **Location** | Your place, used by the weather and, if you like, prayer times: **Auto** (your Windows time zone's main city, offline), **Windows location**, or a city you search for; °C or °F |
 | **Privacy** | **Mic & camera dots**; clipboard history: record on/off, Text, Text + files or Everything; **Show what I copy** (off by default); **Hide the notch while these apps are in front** |
 | **Shortcuts** | Keyboard shortcuts that work anywhere in Windows, and what the scroll wheel, middle click and double-click do on the closed notch |
 | **General** | **Start with Windows**; **Check for updates** automatically (about twice a day, on by default) or now; **Open data folder** (`%APPDATA%\Nookly`); **Welcome tour**; **Export settings / Import settings** (one `.nookly` file for another PC; import shows what's in the file and asks before replacing anything, then Nookly starts again); About: GitHub page, Privacy policy ([PRIVACY.md](../PRIVACY.md)), Quit Nookly |

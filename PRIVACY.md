@@ -1,6 +1,6 @@
 # Privacy policy
 
-_Last updated: 11 November 2026. Applies to Nookly 0.1.21 and later; the Widgets tab (weather, Bluetooth, Wi-Fi and sound widgets) comes in the next version._
+_Last updated: 15 November 2026. Applies to Nookly 0.5.0 and later._
 
 Nookly is a free, open-source app that runs on your PC. It has no
 accounts, no ads, no analytics and no telemetry. The developer receives no
@@ -58,10 +58,10 @@ to delete this folder too.
 
 ## Bluetooth, Wi-Fi and sound widgets
 
-The Widgets tab can show the battery of connected Bluetooth devices, your
+Settings > Widgets can show the battery of connected Bluetooth devices, your
 Wi-Fi network and signal, and the speaker volume and microphone mute. They
-are read from Windows on your PC, only while those widgets are on or the
-Widgets tab is open. AirPods don't tell Windows their battery, so for them
+are read from Windows on your PC, only while those widgets are on or
+Settings > Widgets is open. AirPods don't tell Windows their battery, so for them
 Nookly listens for about 3 seconds once a minute to the battery
 broadcast AirPods send nearby. Nothing from any of this is saved or sent.
 
@@ -82,10 +82,10 @@ information to them:
    still works when you click it.
 3. **[Open-Meteo](https://open-meteo.com)** (weather), only while you have
    the **Weather** widget switched on in Settings > Widgets: about every 30
-   minutes it asks for the current weather at your place (Widgets > Place),
+   minutes it asks for the current weather at your place (Settings > Location),
    with the latitude and longitude rounded to one decimal (about 10 km).
-   It's off until you switch it on. When you search for a city on the Place
-   page, the text you type goes to Open-Meteo's place search. Open-Meteo's
+   It's off until you switch it on. When you search for a city in
+   Settings > Location, the text you type goes to Open-Meteo's place search. Open-Meteo's
    own terms apply to those requests.
 
 4. **Your calendar** (Google, Outlook or any iCal link), only if you
@@ -99,7 +99,7 @@ information to them:
    only after you click **Get today's rates** in Tools > Converter > Money,
    then at most once a day while you use it. Nothing about you is sent.
 
-If you pick **Windows location** on the Place page, Nookly asks Windows'
+If you pick **Windows location** in Settings > Location, Nookly asks Windows'
 location service for your position (on your PC; Windows itself may use
 your network to work it out). It's only used for the weather and, if you
 choose, prayer times, and is saved in your settings file on your PC.
