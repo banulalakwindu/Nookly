@@ -1,5 +1,5 @@
 //! Weather: now, the hours around it (earlier today greyed) and the days
-//! from yesterday to six ahead, for your place (Widgets > Place). From
+//! from yesterday to six ahead, for your place (Settings > Location). From
 //! Open-Meteo, only while this panel is on: when you open it, then at most
 //! every 30 minutes. Icons are drawn, one per kind of weather.
 
@@ -175,10 +175,9 @@ impl Weather {
         w
     }
     fn fetch(&mut self, f: bool) {
-        let place = crate::modules::widgets::PLACE.lock().unwrap().clone().or_else(|| {
-            let (lat, lon, name) = crate::modules::prayer::location();
-            Some((lat, lon, name))
-        });
+        // Your place (Settings > Location); until that's worked out, the
+        // main city of your Windows time zone.
+        let place = crate::modules::widgets::PLACE.lock().unwrap().clone().or_else(crate::modules::widgets::tz_place).or_else(|| Some(crate::modules::prayer::location()));
         let Some((lat, lon, name)) = place else { return };
         {
             let mut d = self.data.lock().unwrap();
@@ -228,10 +227,10 @@ impl Module for Weather {
         C_SKY
     }
     fn size(&self) -> (f32, f32) {
-        (580.0, 186.0)
+        (580.0, 160.0)
     }
     fn slim_min(&self) -> (f32, f32) {
-        (580.0, 186.0)
+        (580.0, 160.0)
     }
     fn tick(&mut self, ctx: &mut Ctx) {
         if crate::time::demo() {
@@ -249,23 +248,24 @@ impl Module for Weather {
         self.seen_at = unix_now();
         let (data, busy, err) = self.data.lock().unwrap().clone();
         let Some(w) = data else {
-            let msg = err.unwrap_or_else(|| if busy { "Getting the weather...".into() } else { "Opening: getting the weather for your place (Widgets > Place)".into() });
+            let msg = err.unwrap_or_else(|| if busy { "Getting the weather...".into() } else { "Getting the weather for your place (Settings > Location)".into() });
             ui.text(&msg, r, 12.0, col::DIM, Weight::Regular, Align::Center);
             return;
         };
         let unit = if w.fahrenheit { "°F" } else { "°C" };
         let mut r = r;
-        let mut top = r.cut_top(96.0, 12.0);
-        // Now.
-        let mut now_r = top.cut_left(196.0, 14.0);
-        let ic = now_r.cut_left(64.0, 8.0);
-        draw_icon(ui, ic.centered(64.0, 64.0), w.code, w.day);
-        ui.text(&format!("{:.0}{unit}", w.temp), now_r.cut_top(34.0, 0.0), 28.0, col::TEXT, Weight::Semi, Align::Left);
-        ui.text(describe(w.code), now_r.cut_top(16.0, 0.0), 12.0, col::TEXT, Weight::Semi, Align::Left);
-        ui.text(&format!("Feels {:.0}° · {:.0}% · {:.0} {}", w.feels, w.humidity, w.wind, if w.fahrenheit { "mph" } else { "km/h" }), now_r.cut_top(15.0, 0.0), 10.5, col::DIM, Weight::Regular, Align::Left);
+        // Now (and where), then the hours beside it; the week below. No
+        // empty space: each row is as tall as what's in it.
+        let mut top = r.cut_top(72.0, 8.0);
+        let mut now_r = top.cut_left(200.0, 12.0).centered(200.0, 64.0);
+        let ic = now_r.cut_left(56.0, 8.0);
+        draw_icon(ui, ic.centered(56.0, 56.0), w.code, w.day);
         // A place picked by coordinates has no name worth showing.
         let named = w.place.chars().any(|c| c.is_alphabetic());
-        ui.text(if named { &w.place } else { "Your location" }, now_r, 10.0, col::FAINT, Weight::Regular, Align::Left);
+        let place = if named { w.place.as_str() } else { "Your location" };
+        ui.text(&format!("{:.0}{unit}", w.temp), now_r.cut_top(31.0, 0.0), 26.0, col::TEXT, Weight::Semi, Align::Left);
+        ui.text(&format!("{}  \u{00B7}  {place}", describe(w.code)), now_r.cut_top(17.0, 0.0), 11.5, col::TEXT, Weight::Semi, Align::Left);
+        ui.text(&format!("Feels {:.0}° · {:.0}% · {:.0} {}", w.feels, w.humidity, w.wind, if w.fahrenheit { "mph" } else { "km/h" }), now_r.cut_top(15.0, 0.0), 10.5, col::DIM, Weight::Regular, Align::Left);
         // The hours: 3 before now, 8 after.
         let now = unix_now();
         let cur = w.hours.iter().rposition(|h| h.0 <= now).unwrap_or(0);
@@ -277,7 +277,7 @@ impl Module for Weather {
             if is_now {
                 ui.fill_rr(cell, 10.0, C_SKY.with_a(0.16));
             }
-            let mut c = cell.inset_xy(0.0, 4.0);
+            let mut c = cell.inset_xy(0.0, 3.0);
             let (_, _, _, m) = crate::time::local_time(h.0);
             let label = if is_now {
                 "Now".to_string()
@@ -287,15 +287,18 @@ impl Module for Weather {
             } else {
                 format!("{:02}", m / 60)
             };
-            ui.text(&label, c.cut_top(14.0, 2.0), 9.5, if past { col::FAINT } else { col::DIM }, Weight::Semi, Align::Center);
-            let icr = c.cut_top(28.0, 2.0);
+            ui.text(&label, c.cut_top(13.0, 1.0), 9.5, if past { col::FAINT } else { col::DIM }, Weight::Semi, Align::Center);
+            let icr = c.cut_top(26.0, 1.0);
             ui.g.alpha = if past { 0.45 } else { 1.0 };
             let hour = (m / 60) as i32;
-            draw_icon(ui, icr.centered(26.0, 26.0), h.2, (6..18).contains(&hour));
+            draw_icon(ui, icr.centered(24.0, 24.0), h.2, (6..18).contains(&hour));
             ui.g.alpha = 1.0;
-            ui.text(&format!("{:.0}°", h.1), c.cut_top(15.0, 0.0), 11.5, if past { col::FAINT } else { col::TEXT }, Weight::Semi, Align::Center);
+            let temp = c.cut_top(14.0, 0.0);
+            ui.text(&format!("{:.0}°", h.1), temp, 11.5, if past { col::FAINT } else { col::TEXT }, Weight::Semi, Align::Center);
             if h.3 >= 30.0 && !past {
-                ui.text(&format!("{:.0}%", h.3), c, 8.5, RAIN, Weight::Semi, Align::Center);
+                // Rain chance: a small tag tucked under the icon's right side
+                // (no extra row, nothing crowding the temperature).
+                ui.text(&format!("{:.0}%", h.3), Rect::new(icr.cx() + 6.0, icr.b() - 9.0, 26.0, 10.0), 8.0, RAIN, Weight::Semi, Align::Left);
             }
         }
         // The days: yesterday, today and five more.
@@ -311,11 +314,11 @@ impl Module for Weather {
             };
             ui.fill_rr(cell, 10.0, if rel == 0 { C_SKY.with_a(0.16) } else { col::BTN });
             // The day, its icon, then high / low, stacked so nothing is cut.
-            let mut c = cell.inset_xy(4.0, 6.0);
-            ui.text(&name, c.cut_top(14.0, 2.0), 10.0, if past { col::FAINT } else { col::DIM }, Weight::Semi, Align::Center);
+            let mut c = cell.inset_xy(4.0, 5.0);
+            ui.text(&name, c.cut_top(13.0, 1.0), 10.0, if past { col::FAINT } else { col::DIM }, Weight::Semi, Align::Center);
             let temps = c.cut_bottom(16.0, 2.0);
             ui.g.alpha = if past { 0.5 } else { 1.0 };
-            draw_icon(ui, c.centered(32.0, 32.0), d.3, true);
+            draw_icon(ui, c.centered(30.0, 30.0), d.3, true);
             ui.g.alpha = 1.0;
             let hi = format!("{:.0}°", d.1);
             let lo = format!(" {:.0}°", d.2);
