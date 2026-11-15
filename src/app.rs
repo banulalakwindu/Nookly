@@ -112,6 +112,9 @@ const TIMER_FRAME: usize = 2;
 const TIMER_POLL: usize = 3;
 /// Re-checks the windows under the notch while one is being dragged.
 const TIMER_MOVE: usize = 7;
+/// Liquid Glass: grab the background again once a window that changed
+/// under the notch has finished animating.
+const TIMER_GLASS: usize = 8;
 /// Smart hide: after a window comes under the notch (or you switch to it),
 /// the notch stays out of the way this long; it also stays away until this
 /// long after the mouse leaves the area around it.
@@ -315,6 +318,11 @@ pub struct App {
     backdrop: Option<(windows::Win32::Graphics::Direct2D::ID2D1Bitmap, u32, u64, Rect)>,
     /// The glass grab of the whole window area (see update_backdrop).
     glass_raw: Option<GlassRaw>,
+    /// What's behind the notch changed (a window switched, moved, opened or
+    /// closed, or the notch is opening): grab it again on the next frame.
+    glass_dirty: bool,
+    /// The notch was open (or showing a toast) last frame.
+    glass_was_open: bool,
     glass_light: bool,
     excluded: bool,
     /// Hit under the mouse with a tooltip: (module, id, since, suppressed by a click).
@@ -539,6 +547,8 @@ impl App {
                 poll_since: None,
                 backdrop: None,
                 glass_raw: None,
+                glass_dirty: false,
+                glass_was_open: false,
                 glass_light: false,
                 excluded: false,
                 tip: None,
@@ -1246,14 +1256,20 @@ impl App {
         let (gw, gh) = ((pw / 4).max(2) as u32, (ph / 4).max(2) as u32);
         let stale = match &self.glass_raw {
             None => true,
-            Some(r) => r.origin != self.origin || (r.w, r.h) != (gw, gh) || (dist <= 0.0 && t - r.at > 1.5),
+            Some(r) => self.glass_dirty || r.origin != self.origin || (r.w, r.h) != (gw, gh) || (dist <= 0.0 && t - r.at > 1.0),
         };
+        self.glass_dirty = false;
         if stale {
             let testing = crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed);
             let data = if testing {
                 // Renders and tests: a made-up background (light, dark, colour).
                 let kind = std::env::var("NOOKLY_RENDER_BACKDROP").unwrap_or_else(|_| "color".into());
-                Some(crate::glass::sample(&kind, gw, gh))
+                // (or a scene image, for the docs: a path to a .raw file)
+                if kind.ends_with(".raw") {
+                    crate::glass::from_raw_file(&kind, gw, gh)
+                } else {
+                    Some(crate::glass::sample(&kind, gw, gh))
+                }
             } else {
                 let (ox, oy) = self.origin;
                 crate::glass::capture_behind(self.hwnd, RECT { left: ox, top: oy, right: ox + pw, bottom: oy + ph })
@@ -1297,6 +1313,21 @@ impl App {
             let at = Rect::new(x0 as f32 / k, y0 as f32 / k, cw as f32 / k, ch as f32 / k);
             self.backdrop = Some((b, self.gfx.gen, key, at));
         }
+    }
+
+    /// Something changed behind the notch (a window came to the front,
+    /// moved, opened or closed): with Liquid Glass, grab the background
+    /// again now, and once more when the window has finished animating.
+    /// Nothing runs between such events.
+    fn glass_changed(&mut self) {
+        if self.settings.theme != "glass" || self.hidden {
+            return;
+        }
+        self.glass_dirty = true;
+        unsafe {
+            SetTimer(self.hwnd, TIMER_GLASS, 350, None);
+        }
+        self.request_frame();
     }
 
     /// Liquid Glass light, no outline: a rim that glows from the very edge
@@ -1904,6 +1935,13 @@ impl App {
             }
             self.shown = shown;
         }
+        // Liquid Glass: opening (or a toast dropping down) grabs what's
+        // behind right now, not what was there when it last looked.
+        let open = self.mode() != Mode::Collapsed;
+        if open && !self.glass_was_open {
+            self.glass_dirty = true;
+        }
+        self.glass_was_open = open;
 
         let target = self.target();
         let dist = self.step_anim(target, dt);
@@ -3467,6 +3505,15 @@ impl App {
                     TIMER_TICK => self.tick(),
                     TIMER_FRAME => self.timer_frame(),
                     TIMER_POLL => self.poll_cursor(),
+                    TIMER_GLASS => {
+                        unsafe {
+                            let _ = KillTimer(self.hwnd, TIMER_GLASS);
+                        }
+                        if self.settings.theme == "glass" {
+                            self.glass_dirty = true;
+                            self.request_frame();
+                        }
+                    }
                     TIMER_MOVE => self.drag_tick(),
                     _ => {}
                 }
@@ -6419,11 +6466,22 @@ pub fn render_docs(dir: &std::path::Path) -> String {
             a.settings.theme = "glass".into();
             a.tab = m;
             a.expanded = true;
-            for kind in ["color", "light"] {
-                std::env::set_var("NOOKLY_RENDER_BACKDROP", kind);
+            // Over a detailed scene (NOOKLY_GLASS_SCENE: a photo and an app
+            // window, from make_images.py) the whole canvas is written, so
+            // the picture can be laid on that same scene, lined up.
+            let scene = std::env::var("NOOKLY_GLASS_SCENE").ok().filter(|p| std::path::Path::new(p).exists());
+            let kinds: Vec<(String, &str)> = scene.into_iter().map(|p| (p, "glass_scene")).chain([("color".to_string(), "glass_color"), ("light".to_string(), "glass_light")]).collect();
+            for (kind, name) in kinds {
+                std::env::set_var("NOOKLY_RENDER_BACKDROP", &kind);
                 a.backdrop = None;
                 a.glass_raw = None;
-                shot(a, dir, &format!("glass_{kind}"));
+                let tgt = a.target();
+                a.cur = tgt;
+                for _ in 0..30 {
+                    a.render(tgt, 0.0);
+                }
+                let full = kind.ends_with(".raw").then(|| (0, 0, a.gfx.pw - 1, a.gfx.ph - 1));
+                write_raw(&a.gfx, &dir.join(format!("{name}.raw")), full);
             }
             std::env::remove_var("NOOKLY_RENDER_BACKDROP");
             (a.settings.theme, a.tab) = (theme, tab);
@@ -7558,6 +7616,22 @@ fn look_tests(a: &mut App) -> String {
             }
             let one_grab = first.is_some() && a.glass_raw.as_ref().map(|r| r.serial) == first;
             out += &format!("{:<4} Liquid Glass shows what's behind the new shape at once, from one grab, while it changes size {:?}\n", ok(covers && one_grab), (covers, one_grab));
+            // A window changing behind it (switch, move, open, close) is
+            // picked up on the very next frame, even mid-animation; so is
+            // the notch starting to open.
+            let s0 = a.glass_raw.as_ref().map(|r| r.serial);
+            a.glass_changed();
+            let tgt = a.target();
+            a.render(tgt, 20.0);
+            let after_change = a.glass_raw.as_ref().map(|r| r.serial) != s0;
+            a.expanded = false;
+            a.toast = None;
+            a.frame();
+            let s1 = a.glass_raw.as_ref().map(|r| r.serial);
+            a.expanded = true;
+            a.frame();
+            let on_open = a.glass_raw.as_ref().map(|r| r.serial) != s1;
+            out += &format!("{:<4} Liquid Glass grabs again when a window changes behind it and when the notch opens {:?}\n", ok(after_change && on_open), (after_change, on_open));
         }
     }
     (a.settings.theme, a.settings.style, a.expanded, a.tab, a.more_open) = saved;
@@ -8048,6 +8122,7 @@ fn is_fullscreen(win: RECT, mon: RECT, zoomed: bool, class: &str) -> bool {
 extern "system" fn on_foreground(_h: windows::Win32::UI::Accessibility::HWINEVENTHOOK, e: u32, w: HWND, _o: i32, _c: i32, _t: u32, _ms: u32) {
     with_app(|a| {
         a.check_fullscreen();
+        a.glass_changed();
         if e == EVENT_SYSTEM_FOREGROUND {
             a.window_switched(w);
         } else {
@@ -8057,7 +8132,12 @@ extern "system" fn on_foreground(_h: windows::Win32::UI::Accessibility::HWINEVEN
 }
 
 extern "system" fn on_movesize(_h: windows::Win32::UI::Accessibility::HWINEVENTHOOK, e: u32, w: HWND, _o: i32, _c: i32, _t: u32, _ms: u32) {
-    with_app(|a| a.window_moving(e == EVENT_SYSTEM_MOVESIZESTART, w));
+    with_app(|a| {
+        a.window_moving(e == EVENT_SYSTEM_MOVESIZESTART, w);
+        if e == EVENT_SYSTEM_MOVESIZEEND {
+            a.glass_changed();
+        }
+    });
 }
 
 /// Looking for a window under the notch (EnumWindows).
