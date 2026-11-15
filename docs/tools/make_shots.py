@@ -242,6 +242,9 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
     window("settings-privacy", "settings_privacy", "Privacy", "Mic and camera dots, clipboard history, and apps to hide the notch for: all opt-in.", ["Mic & camera dots", "Clipboard history", "Hide for apps"])
     single("calendar", "panel_calendar", "Calendar", "The month at a glance, with the days your tasks are due.", ["Today in red", "Due-task dots", "Wheel for months"])
     window("themes", "settings_look", "Themes", "Ten themes, Liquid Glass included, and your own colours, checked for readable contrast.", ["Black", "Rose", "Forest", "Paper", "Liquid Glass", "Yours"])
+    single("glass", "glass_color", "Liquid Glass", "Real glass: what's behind, blurred and bent at the edges, with light that moves like water. No outline.", ["Lens edges", "Rim light", "Drifting glints", "Adapts to light and dark"])
+    window("settings-panels", "settings_panels", "Your panel order", "Settings > Panels: drag the panels into the order the notch shows them.", ["Drag to reorder", "Numbered", "Reset order"])
+    window("settings-location", "settings_location", "Location", "Settings > Location: your place, once, for the weather and prayer times.", ["Time zone (offline)", "Windows location", "Search a city"])
     window("settings-features", "settings_features", "Features", "Switch on only what you use; what's off doesn't run at all.", ["Minimal", "Student", "Work", "Everything", "Profiles"])
 
     # Nookly's own windows: install, uninstall, About and the tray menu.
