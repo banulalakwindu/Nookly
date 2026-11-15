@@ -2,6 +2,11 @@
 
 Versions 0.1.x below were released before the Nookly name.
 
+## 0.5.1: Liquid Glass keeps up
+
+- **Liquid Glass shows the right background at once**: switching panels, opening the notch or a toast no longer shows the old, stretched background for a moment. One grab covers the whole area around the notch, aligned to the screen, so any size or shape shows exactly what's behind it.
+- **Lighter on your PC**: the glass no longer grabs the screen while the notch moves (it used to, up to ten times a second); it refreshes every 1.5 seconds only while the notch is open and resting, and not at all while it's closed and idle.
+
 ## 0.5.0: Liquid Glass, livelier motion, and your own panel order
 
 - **Liquid Glass, redesigned**: no outline any more. What's behind the notch is blurred, a little more colourful, and bent near the edges like the rim of a lens; a soft light runs along the edge (brightest on top), and glints drift slowly like light through water while you use the notch. They stay still when it rests, so it costs nothing. Being see-through, it trades a little contrast for the look.
