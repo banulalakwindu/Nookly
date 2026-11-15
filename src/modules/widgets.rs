@@ -789,6 +789,10 @@ pub struct Widgets {
     showing: Vec<String>,
     /// 0 Show, 1 Order, 2 Alerts, 3 Place.
     page: u8,
+    /// What Settings shows of this panel: 0 Show / Order (Settings >
+    /// Widgets), 1 the alerts (Settings > Alerts), 2 the place (Settings >
+    /// Location).
+    view: u8,
     scroll: [f32; 2],
     max_scroll: [f32; 2],
     drag: Option<Drag>,
@@ -916,6 +920,7 @@ impl Widgets {
             place_set: st.place,
             showing: Vec::new(),
             page: 0,
+            view: 0,
             scroll: [0.0; 2],
             max_scroll: [0.0; 2],
             drag: None,
@@ -1471,9 +1476,41 @@ impl Module for Widgets {
         spawn_bt(self.bt.clone());
     }
 
+    fn set_view(&mut self, view: u8) {
+        self.view = view;
+        match view {
+            1 => self.page = 2,
+            2 => self.page = 3,
+            _ if self.page >= 2 => self.page = 0,
+            _ => {}
+        }
+    }
+
+    fn background(&mut self, ctx: &mut Ctx) {
+        // Your location, for Weather and the rest, even with Widgets off.
+        if !self.demo {
+            self.resolve_place(ctx);
+        }
+    }
+
     fn draw(&mut self, ui: &mut Ui, mut r: Rect) {
+        // Settings > Location: just the place.
+        if self.view == 2 {
+            self.page = 3;
+            ui.push_clip(r.inset(-2.0));
+            self.draw_place(ui, r);
+            ui.pop_clip();
+            return;
+        }
         let mut top = r.cut_top(24.0, 8.0);
-        let pages: Vec<(&str, u32)> = PAGES.iter().copied().filter(|(_, id)| *id != A_ORDER || self.layout.custom).collect();
+        // Settings > Widgets has Show and Order; Settings > Alerts has the
+        // alerts list on its own.
+        let pages: Vec<(&str, u32)> = PAGES
+            .iter()
+            .copied()
+            .filter(|(_, id)| *id != A_ORDER || self.layout.custom)
+            .filter(|(_, id)| if self.view == 1 { false } else { *id == A_SHOW || *id == A_ORDER })
+            .collect();
         let tabs = top.cut_left(pages.len() as f32 * 76.0, 12.0).columns(pages.len(), 6.0);
         let cur = [A_SHOW, A_ORDER, A_ALERTS, A_PLACE][self.page as usize];
         for (cell, (word, id)) in tabs.into_iter().zip(pages) {
@@ -1622,10 +1659,10 @@ impl Module for Widgets {
                     audio: true,
                 }]);
                 self.demo = true;
-                *self.weather.lock().unwrap() = Some(WeatherNow { temp: 29.0, code: 2, day: true, fahrenheit: false, place: "Dhaka".into(), at: unix_now() });
+                *self.weather.lock().unwrap() = Some(WeatherNow { temp: 29.0, code: 2, day: true, fahrenheit: false, place: "Colombo".into(), at: unix_now() });
                 self.wifi = Some(Wifi::Connected("Home".into(), 78));
                 self.sound = SoundNow { volume: Some((0.6, false)), mic_muted: Some(true) };
-                *PLACE.lock().unwrap() = Some((23.81, 90.41, "Dhaka".into()));
+                *PLACE.lock().unwrap() = Some((6.93, 79.85, "Colombo".into()));
             }
             i if (A_ITEM..A_ITEM + 500).contains(&i) => {
                 let Some(it) = self.items.get((i - A_ITEM) as usize) else { return };

@@ -317,6 +317,12 @@ pub trait Module {
     /// Called instead of `tick` while the panel is switched off in Settings >
     /// Features: stop anything that would keep working in the background.
     fn tick_off(&mut self, ctx: &mut Ctx) {}
+    /// Work that runs every tick whether the panel is on or off (the
+    /// Widgets module works out your location for Weather and others).
+    fn background(&mut self, ctx: &mut Ctx) {}
+    /// Which part of the panel Settings shows (Widgets: 0 Show / Order,
+    /// 1 how each alert shows, 2 your location).
+    fn set_view(&mut self, view: u8) {}
     /// Draw the expanded panel into `r`.
     fn draw(&mut self, ui: &mut Ui, r: Rect) {}
     /// A registered hit was clicked.
