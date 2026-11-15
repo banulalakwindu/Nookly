@@ -262,7 +262,7 @@ impl Module for Countdowns {
         };
         ui.text(&when, row, 11.0, col::DIM, Weight::Regular, Align::Left);
         if self.items.is_empty() {
-            ui.text_wrap("Add a date to count down to. Turn on the Countdown widget (Widgets tab) to see \"12 days\" on the closed notch.", r.inset_xy(4.0, 6.0), 12.0, col::DIM, Weight::Regular, Align::Left);
+            ui.text_wrap("Add a date to count down to. Turn on the Countdown widget (Settings > Widgets) to see \"12 days\" on the closed notch.", r.inset_xy(4.0, 6.0), 12.0, col::DIM, Weight::Regular, Align::Left);
             return;
         }
         let list = self.upcoming();

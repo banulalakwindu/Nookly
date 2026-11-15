@@ -190,7 +190,7 @@ impl Module for Commands {
         ui.field(row, &self.field, if full { "That's 5: remove one to add another" } else { "A command, e.g. curl -s wttr.in/Colombo?format=3" }, A_FIELD, C_CMD);
         if self.list.is_empty() {
             ui.text_wrap(
-                "Run your own commands on a schedule and see what they print, here and as widgets on the closed notch (switch them on in the Widgets tab). They run on this PC with cmd.exe, only while this panel is on.",
+                "Run your own commands on a schedule and see what they print, here and as widgets on the closed notch (switch them on in Settings > Widgets). They run on this PC with cmd.exe, only while this panel is on.",
                 r.inset_xy(4.0, 4.0),
                 11.5,
                 col::DIM,

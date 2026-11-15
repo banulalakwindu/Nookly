@@ -241,7 +241,7 @@ pub struct Prayer {
     fired: Vec<(String, String)>,
     /// Today's times (cached per day + settings).
     cache: Option<(String, [f64; 6])>,
-    /// "Use it for prayer times too" (Widgets > Place): that place instead
+    /// "Use it for prayer times too" (Settings > Location): that place instead
     /// of the city above, without changing what's saved.
     ovr: Option<(f64, f64, String)>,
     /// Ramadan mode: 0 by the Hijri calendar, 1 on, 2 off.
