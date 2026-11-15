@@ -81,24 +81,34 @@ pub(super) const CUSTOM_BG: [u32; 8] = [0x000000, 0x1B1B2F, 0x0F3D3E, 0x3B1F2B, 
 pub(super) const CUSTOM_TEXT: [u32; 8] = [0xFFFFFF, 0xF5F5F7, 0xFFE7B3, 0xCFFAF0, 0x111111, 0x2B2B2B, 0x3A2E1C, 0x0B2545];
 
 /// The Notch tab's sections: (icon, name, what's in it).
-pub(super) const SECTIONS: [(&str, &str, &str); 9] = [
+pub(super) const SECTIONS: [(&str, &str, &str); 11] = [
     ("\u{E771}", "Appearance", "Style, place and size of the notch"),
     ("\u{E790}", "Theme", "Colours, the clock, and the song's glow while music plays"),
     ("\u{E76E}", "Mascot", "A little friend for the idle notch, or your taskbar"),
+    ("\u{E8FD}", "Panels", "The order of the panels in the notch: drag them where you like"),
     ("\u{E8A9}", "Features", "Switch on what you use. What's off doesn't run at all."),
-    ("\u{ECA5}", "Widgets", "What the closed notch shows, in what order, and how alerts look"),
-    (glyph::BELL, "Alerts", "Reminder sound, volume bar and Windows notifications"),
+    ("\u{ECA5}", "Widgets", "What the closed notch shows, and in what order"),
+    (glyph::BELL, "Alerts", "Sounds, notifications, and how each alert shows"),
+    ("\u{E707}", "Location", "Your place, for the weather and (if you like) prayer times"),
     ("\u{E72E}", "Privacy", "Mic & camera dots, clipboard history, apps to hide for"),
     ("\u{E765}", "Shortcuts", "Keyboard shortcuts anywhere in Windows, and the mouse on the notch"),
     (glyph::SETTINGS, "General", "Startup, updates, moving to another PC, and about"),
 ];
 pub(super) const SEC_THEME: u8 = 1;
 pub(super) const SEC_MASCOT: u8 = 2;
-pub(super) const SEC_FEATURES: u8 = 3;
-pub(super) const SEC_WIDGETS: u8 = 4;
-pub(super) const SEC_PRIVACY: u8 = 6;
-pub(super) const SEC_SHORTCUTS: u8 = 7;
-pub(super) const SEC_GENERAL: u8 = 8;
+pub(super) const SEC_PANELS: u8 = 3;
+pub(super) const SEC_FEATURES: u8 = 4;
+pub(super) const SEC_WIDGETS: u8 = 5;
+pub(super) const SEC_ALERTS: u8 = 6;
+pub(super) const SEC_LOCATION: u8 = 7;
+pub(super) const SEC_PRIVACY: u8 = 8;
+pub(super) const SEC_SHORTCUTS: u8 = 9;
+pub(super) const SEC_GENERAL: u8 = 10;
+/// Settings > Panels: a panel card (+ its place in the order), and reset.
+pub(super) const S_ORDER: u32 = 500;
+pub(super) const S_ORDER_RESET: u32 = 470;
+/// Settings > Alerts: its two pages (+ 0 sounds & notifications, 1 each alert).
+pub(super) const S_ALERT_VIEW: u32 = 480;
 
 const TIMER_ANIM: usize = 1;
 /// One-shot redraw (the "Checking..." label goes back after a few seconds).
@@ -114,6 +124,12 @@ pub struct SettingsWin {
     press: Option<(Hit, (f32, f32))>,
     /// A drag inside the Widgets panel (its Order list) is running.
     dragging: bool,
+    /// Settings > Panels: the card being dragged, and where each card was
+    /// drawn (to find where it's dropped).
+    order_drag: Option<usize>,
+    order_cells: Vec<Rect>,
+    /// Settings > Alerts: 0 sounds & notifications, 1 how each alert shows.
+    pub alert_view: u8,
     /// Control under the mouse when last drawn (redraw only when it changes).
     hover_id: Option<(usize, u32)>,
     /// Window position on screen (px).
@@ -190,6 +206,9 @@ impl SettingsWin {
                 tracking: false,
                 press: None,
                 dragging: false,
+                order_drag: None,
+                order_cells: Vec::new(),
+                alert_view: 0,
                 hover_id: None,
                 pos: (x, y),
                 scale,
@@ -300,7 +319,26 @@ impl App {
 
     /// Settings is showing module `i` (the Widgets panel) right now.
     pub(super) fn sw_hosts(&self, i: usize) -> bool {
-        self.swin.as_ref().map_or(false, |sw| sw.tab == 0 && sw.section == SEC_WIDGETS) && self.widgets_index() == Some(i)
+        self.swin.as_ref().and_then(sw_widgets_view).is_some() && self.widgets_index() == Some(i)
+    }
+
+    /// Move a panel in the tab bar's order (Settings > Panels).
+    pub(super) fn move_panel(&mut self, from: usize, to: usize) {
+        let mut v: Vec<String> = self.tab_list().iter().map(|&i| self.modules[i].title().to_string()).collect();
+        if from >= v.len() {
+            return;
+        }
+        let t = v.remove(from);
+        v.insert(to.min(v.len()), t);
+        // Panels that are off keep their place after the ones that are on.
+        for t in panel_order(&self.settings) {
+            if !v.contains(&t) {
+                v.push(t);
+            }
+        }
+        self.settings.extra.insert("panel_order".into(), v.join("|"));
+        self.settings.save();
+        self.request_frame();
     }
 
     /// The hosted panel loses the keyboard (section change, close).
@@ -321,7 +359,8 @@ impl App {
         // (20 fps for the mascots; once a second is plenty for widget values.)
         let anim = match (visible && sw.tab == 0, sw.section) {
             (true, SEC_MASCOT) => 50,
-            (true, SEC_WIDGETS) if !sw.dragging => 1000,
+            (true, SEC_WIDGETS | SEC_LOCATION) if !sw.dragging => 1000,
+            (true, SEC_ALERTS) if sw.alert_view == 1 => 1000,
             _ => 0,
         };
         if anim != sw.animating {
@@ -444,6 +483,12 @@ impl App {
                 sw.tab = 0;
                 sw.section = SEC_MASCOT;
             }
+            i if (S_ALERT_VIEW..S_ALERT_VIEW + 2).contains(&i) => {
+                sw.alert_view = (i - S_ALERT_VIEW) as u8;
+                self.sw_blur();
+            }
+            // A card clicked without dragging: nothing to do.
+            i if (S_ORDER..S_ORDER + 64).contains(&i) => {}
             S_TURN_ON_WIDGETS => {
                 crate::features::set_on(&mut self.settings, "Widgets", true);
                 self.settings.save();
@@ -491,6 +536,22 @@ impl App {
                     self.sw_render();
                     return Some(LRESULT(0));
                 }
+                if sw.order_drag.is_some() {
+                    self.sw_render();
+                    return Some(LRESULT(0));
+                }
+                // A panel card in Settings > Panels that moves: drag it.
+                if let Some((h, p0)) = sw.press {
+                    if h.module == SETTINGS && (S_ORDER..S_ORDER + 64).contains(&h.id) && (xy.0 - p0.0).abs() + (xy.1 - p0.1).abs() > 5.0 {
+                        sw.press = None;
+                        sw.order_drag = Some((h.id - S_ORDER) as usize);
+                        unsafe {
+                            SetCapture(hwnd);
+                        }
+                        self.sw_render();
+                        return Some(LRESULT(0));
+                    }
+                }
                 // A press on the Widgets panel's order list that moves: drag it.
                 if let Some((h, p0)) = sw.press {
                     if h.module < self.modules.len() && (xy.0 - p0.0).abs() + (xy.1 - p0.1).abs() > 5.0 && self.modules[h.module].drag_begin(h.id, p0.0, p0.1) {
@@ -530,6 +591,26 @@ impl App {
                 Some(LRESULT(0))
             }
             WM_LBUTTONUP => {
+                if let Some(from) = sw.order_drag.take() {
+                    unsafe {
+                        let _ = ReleaseCapture();
+                    }
+                    // Dropped on (nearest to) another card's place.
+                    let to = sw
+                        .order_cells
+                        .iter()
+                        .enumerate()
+                        .min_by(|a, b| {
+                            let d = |r: &Rect| (r.cx() - xy.0).powi(2) + (r.cy() - xy.1).powi(2);
+                            d(a.1).partial_cmp(&d(b.1)).unwrap_or(std::cmp::Ordering::Equal)
+                        })
+                        .map(|(k, _)| k);
+                    if let Some(to) = to.filter(|t| *t != from) {
+                        self.move_panel(from, to);
+                    }
+                    self.sw_render();
+                    return Some(LRESULT(0));
+                }
                 if sw.dragging {
                     sw.dragging = false;
                     unsafe {
@@ -548,7 +629,7 @@ impl App {
             }
             WM_MOUSEWHEEL => {
                 let d = ((wp.0 >> 16) & 0xffff) as i16 as f32 / 120.0;
-                if sw.tab == 0 && sw.section == SEC_WIDGETS {
+                if sw_widgets_view(sw).is_some() {
                     if let Some(w) = self.widgets_index() {
                         if self.modules[w].scroll(d) {
                             self.sw_render();
@@ -652,14 +733,21 @@ impl App {
         let (recording, fail) = (self.recording, self.hotkey_fail);
         let widgets = self.widgets_index().filter(|&w| self.enabled(w));
         let (tab, section) = (sw.tab, sw.section);
-        if tab == 0 && section == SEC_WIDGETS {
-            if let Some(w) = widgets {
-                self.refresh_shown();
-                let cat = self.notch_catalog();
-                let showing = self.showing_ids();
-                self.modules[w].set_widget_catalog(cat, &st, showing);
-            }
+        let alert_view = sw.alert_view;
+        // The Widgets panel shows in Widgets (on only), Alerts and Location.
+        let view = sw_widgets_view(sw);
+        let host = self.widgets_index().filter(|&w| view.is_some() && (view != Some(0) || self.enabled(w)));
+        if let (Some(w), Some(v)) = (host, view) {
+            self.modules[w].set_view(v);
+            self.refresh_shown();
+            let cat = self.notch_catalog();
+            let showing = self.showing_ids();
+            self.modules[w].set_widget_catalog(cat, &st, showing);
         }
+        // Settings > Panels: the panels that are on, in the tab bar's order.
+        let order: Vec<(&'static str, &'static str, Color)> = self.tab_list().iter().map(|&i| (panel_name(self.modules[i].title()), self.modules[i].icon(), self.modules[i].accent())).collect();
+        let order_drag = sw.order_drag;
+        let mut order_cells = Vec::new();
         let mut tight: Tight = crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed).then(Vec::new);
         let accent = col::ACCENT;
         let mouse = sw.mouse;
@@ -724,7 +812,7 @@ impl App {
                 draw_taskbar_soon(&mut ui, body);
             } else {
                 for (k, (g, name, _)) in SECTIONS.iter().enumerate() {
-                    let r = list.cut_top(34.0, 3.0);
+                    let r = list.cut_top(31.0, 2.0);
                     let sel = section == k as u8;
                     if sel {
                         ui.fill_rr(r, 11.0, col::TEXT.with_a(0.10));
@@ -838,7 +926,47 @@ impl App {
                         switch_row(&mut ui, &mut tight, c.cut_top(ROW_H, 8.0), "Always out", "Show it all the time, even while something plays", st.mascot_always, S_MASCOT_ALWAYS);
                         switch_row(&mut ui, &mut tight, c.cut_top(ROW_H, 0.0), "On the taskbar", "It moves to the taskbar corner; the panel opens above it", on_taskbar, S_TASKBAR_PET);
                     }
-                    3 => {
+                    SEC_PANELS => {
+                        let mut foot = c.cut_bottom(30.0, 12.0);
+                        ui.button(foot.cut_right(130.0, 0.0), "Reset order", S_ORDER_RESET);
+                        ui.text("Drag a panel to its new place. Switch panels on or off in Features.", foot, 11.0, col::DIM, Weight::Regular, Align::Left);
+                        let n = order.len();
+                        let cols = if n > 21 { 4 } else { 3 };
+                        let rows = ((n + cols - 1) / cols).max(1);
+                        let pitch = ((c.h + 8.0) / rows as f32).min(50.0);
+                        let cw = (c.w - 8.0 * (cols as f32 - 1.0)) / cols as f32;
+                        for k in 0..n {
+                            order_cells.push(Rect::new(c.x + (k % cols) as f32 * (cw + 8.0), c.y + (k / cols) as f32 * pitch, cw, pitch - 8.0));
+                        }
+                        // While dragging: where it would land.
+                        let target = order_drag.and_then(|_| {
+                            order_cells.iter().enumerate().min_by(|a, b| {
+                                let d = |r: &Rect| (r.cx() - mouse.0).powi(2) + (r.cy() - mouse.1).powi(2);
+                                d(a.1).partial_cmp(&d(b.1)).unwrap_or(std::cmp::Ordering::Equal)
+                            }).map(|(k, _)| k)
+                        });
+                        for (k, &(name, icon, acc)) in order.iter().enumerate() {
+                            let cell = order_cells[k];
+                            if order_drag == Some(k) {
+                                ui.stroke_rr(cell.inset(0.5), 12.0, col::TEXT.with_a(0.18), 1.0);
+                            } else {
+                                order_card(&mut ui, &mut tight, cell, k + 1, name, icon, acc, 1.0);
+                            }
+                            if target == Some(k) && order_drag != Some(k) {
+                                ui.stroke_rr(cell.inset(-1.0), 13.0, accent, 2.0);
+                            }
+                            ui.hit_tip(cell, S_ORDER + k as u32, "");
+                        }
+                        // The dragged card follows the mouse.
+                        if let Some(k) = order_drag.filter(|k| *k < n) {
+                            let (name, icon, acc) = order[k];
+                            let cell = order_cells[k];
+                            let r = Rect::new(mouse.0 - cell.w / 2.0, mouse.1 - cell.h / 2.0, cell.w, cell.h);
+                            order_card(&mut ui, &mut tight, r, target.map_or(k, |t| t) + 1, name, icon, acc, 0.92);
+                        }
+                        c.y = c.y.max(c.y + rows as f32 * pitch - 8.0);
+                    }
+                    SEC_FEATURES => {
                         let preset = current_preset(&st);
                         let mut row = c.cut_top(30.0, 12.0);
                         ui.text("Start from", row.cut_left(70.0, 6.0), 11.5, col::DIM, Weight::Semi, Align::Left);
@@ -864,7 +992,7 @@ impl App {
                         }
                         c.y = c.y.max(grid.y);
                     }
-                    4 => match (widgets, self.widgets_index()) {
+                    SEC_WIDGETS => match (widgets, self.widgets_index()) {
                         (Some(w), _) => {
                             ui.module = w;
                             self.modules[w].draw(&mut ui, c);
@@ -878,7 +1006,21 @@ impl App {
                         }
                         _ => {}
                     },
-                    5 => {
+                    SEC_ALERTS => {
+                        let tabs = c.cut_top(30.0, 14.0);
+                        let mut tabs = tabs;
+                        for (k, label) in ["Sounds & notifications", "How each alert shows"].iter().enumerate() {
+                            let w = ui.measure(label, 11.5, Weight::Semi) + 32.0;
+                            ui.chip(tabs.cut_left(w, 8.0), label, S_ALERT_VIEW + k as u32, alert_view == k as u8, accent);
+                        }
+                        if alert_view == 1 {
+                            if let Some(w) = host {
+                                ui.module = w;
+                                self.modules[w].draw(&mut ui, c);
+                                ui.module = SETTINGS;
+                            }
+                            c.y = c.b();
+                        } else {
                         group(&mut ui, &mut c, "Reminder sound  \u{00B7}  click one to hear it");
                         let row = c.cut_top(30.0, 14.0);
                         for (i, (cell, s)) in row.columns(Sound::ALL.len(), 6.0).into_iter().zip(Sound::ALL).enumerate() {
@@ -893,8 +1035,17 @@ impl App {
                         let unmute = if muted == 0 { "No muted apps".to_string() } else { format!("Unmute {muted} app{}", if muted == 1 { "" } else { "s" }) };
                         ui.button(b[0], "Windows banners", S_NOTIF_BANNERS);
                         ui.button(b[1], &unmute, S_NOTIF_UNMUTE);
+                        }
                     }
-                    6 => {
+                    SEC_LOCATION => {
+                        if let Some(w) = host {
+                            ui.module = w;
+                            self.modules[w].draw(&mut ui, c);
+                            ui.module = SETTINGS;
+                        }
+                        c.y = c.b();
+                    }
+                    SEC_PRIVACY => {
                         switch_row(&mut ui, &mut tight, c.cut_top(ROW_H, 14.0), "Mic & camera dots", "A dot beside the notch while an app uses them", st.privacy_dots, S_PRIVACY);
                         group(&mut ui, &mut c, "Clipboard history");
                         switch_row(&mut ui, &mut tight, c.cut_top(ROW_H, 8.0), "Record what I copy", "Search it and paste it again from the Clipboard panel", st.clip_on, S_CLIP_ON);
@@ -923,7 +1074,7 @@ impl App {
                             ui.text("None yet. Switch to an app, then come back and add it.", row, 11.0, col::FAINT, Weight::Regular, Align::Left);
                         }
                     }
-                    7 => {
+                    SEC_SHORTCUTS => {
                         group(&mut ui, &mut c, "Keyboard  \u{00B7}  works anywhere in Windows");
                         for k in 0..HOTKEYS.len() {
                             let mut row = c.cut_top(30.0, 6.0);
@@ -1021,6 +1172,7 @@ impl App {
         if let Some(r) = room {
             sw.room[section as usize] = r;
         }
+        sw.order_cells = order_cells;
         for s in tight.unwrap_or_default() {
             if !sw.tight.contains(&s) {
                 sw.tight.push(s);
@@ -1031,6 +1183,9 @@ impl App {
     /// Apply a settings click.
     pub(super) fn settings_action(&mut self, id: u32) {
         match id {
+            S_ORDER_RESET => {
+                self.settings.extra.remove("panel_order");
+            }
             S_MASTER => {
                 let on = self.notch_on();
                 self.settings.extra.insert("notch_on".into(), if on { "0" } else { "1" }.into());
@@ -1350,6 +1505,38 @@ fn theme_tile(ui: &mut Ui, tight: &mut Tight, cell: Rect, i: usize, st: &Setting
     ui.hit_tip(cell, if custom { S_CUSTOM } else { S_THEME + i as u32 }, "");
 }
 
+/// What Settings shows of the Widgets panel now (its view), if anything.
+fn sw_widgets_view(sw: &SettingsWin) -> Option<u8> {
+    match (sw.tab, sw.section) {
+        (0, SEC_WIDGETS) => Some(0),
+        (0, SEC_ALERTS) if sw.alert_view == 1 => Some(1),
+        (0, SEC_LOCATION) => Some(2),
+        _ => None,
+    }
+}
+
+/// Settings > Panels: a panel's card, with its place in the order.
+fn order_card(ui: &mut Ui, tight: &mut Tight, r: Rect, n: usize, name: &str, icon: &str, acc: Color, alpha: f32) {
+    let saved = ui.g.alpha;
+    ui.g.alpha = saved * alpha;
+    let hov = ui.hovered(r);
+    ui.fill_rr(r, 12.0, col::TEXT.with_a(if hov { 0.085 } else { 0.05 }));
+    if alpha < 1.0 {
+        ui.fill_rr(r, 12.0, col::NOTCH.with_a(0.7));
+        ui.stroke_rr(r, 12.0, col::ACCENT, 1.5);
+    }
+    let mut c = r.inset_xy(10.0, 0.0);
+    let num = c.cut_left(14.0, 4.0);
+    ui.text(&n.to_string(), num, 11.0, col::FAINT, Weight::Semi, Align::Center);
+    let ic = c.cut_left(26.0, 8.0).centered(26.0, 26.0);
+    ui.circle(ic.cx(), ic.cy(), 13.0, acc.with_a(0.2));
+    ui.icon(icon, ic, 12.0, acc);
+    ui.icon("\u{E76F}", c.cut_right(14.0, 4.0), 11.0, col::FAINT);
+    ui.text(name, c, 12.5, col::TEXT, Weight::Semi, Align::Left);
+    fit(ui, tight, name, 12.5, Weight::Semi, c.w);
+    ui.g.alpha = saved;
+}
+
 /// Settings > Mascot: tile `k` (0 = Clock, then each mascot).
 fn mascot_tile(ui: &mut Ui, tight: &mut Tight, cell: Rect, k: usize, st: &Settings, t: f64, mouse: (f32, f32)) {
     let accent = col::ACCENT;
@@ -1471,6 +1658,10 @@ pub(super) fn settings_tip(id: u32) -> &'static str {
     match id {
         S_CLOSE => "Close Settings (Esc)",
         S_MINIMIZE => "Minimize to the taskbar",
+        i if (S_ORDER..S_ORDER + 64).contains(&i) => "Drag to change where this panel sits in the notch",
+        S_ORDER_RESET => "Back to the original order",
+        S_ALERT_VIEW => "Reminder sound, volume bar and Windows notifications",
+        481 => "Off, small inside the closed notch, or a pop-up, for each kind of alert",
         S_TAB => "Everything about the notch",
         3 => "A custom taskbar: coming soon",
         S_MASTER => "Turn the whole notch on or off. Off: it hides and none of its features run",
