@@ -2,6 +2,17 @@
 
 Versions 0.1.x below were released before the Nookly name.
 
+## 0.5.0: Liquid Glass, livelier motion, and your own panel order
+
+- **Liquid Glass, redesigned**: no outline any more. What's behind the notch is blurred, a little more colourful, and bent near the edges like the rim of a lens; a soft light runs along the edge (brightest on top), and glints drift slowly like light through water while you use the notch. They stay still when it rests, so it costs nothing. Being see-through, it trades a little contrast for the look.
+- **Livelier, more liquid motion**: the notch now opens with a springier bounce and a small second wobble, the height follows the width a moment behind, and the shape squashes and stretches slightly while it moves. **Reduce motion** (Settings > Appearance) still turns it all off.
+- **Settings > Panels**: drag your panels into the order the notch shows them (numbered cards); **Reset order** puts them back. The ⋯ overflow follows your order too.
+- **Settings > Location**: your place is now a general setting of its own (it used to be Widgets > Place): your time zone's city (offline), Windows location, or a city you search for, and °C / °F.
+- **Settings > Alerts** has two clear pages, **Sounds & notifications** and **How each alert shows**; Widgets keeps just Show and Order. No more two "Alerts".
+- **Weather**: a tighter panel with no empty band, the place next to the sky ("Mostly clear · Colombo"), and rain chance beside each hour. It now always uses your place, never another default city, even when Widgets is off.
+- Demo data and screenshots use Colombo; new screenshots of Liquid Glass, Panels and Location.
+- For contributors: CONTRIBUTING.md, SECURITY.md and a pull request template; README credits.
+
 ## 0.4.0: Settings in its own window, and Nookly's own installer
 
 - **Settings has its own window**: a small rounded window in the notch's style and theme, instead of a big panel inside the notch. Drag it by the header, close it with the x or Esc. The gear in the tab bar, a right-click on the notch or the taskbar mascot, and the tray icon all open it.
