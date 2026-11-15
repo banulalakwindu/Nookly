@@ -87,6 +87,7 @@ def seed(data: Path):
     (data / "shelf.txt").write_text("".join(f"{p}\n" for p in sorted(files.iterdir())), encoding="utf-8")
     (data / "clipboard.txt").write_text(f"t\t{now - 3600:.0f}\tMeeting room 4B, 3rd floor\n", encoding="utf-8")
     album_art(data / "art.png")
+    glass_scene(data)
 
 
 def album_art(path: Path, n=480):
@@ -138,8 +139,52 @@ def album_art(path: Path, n=480):
     Image.fromarray((img * 255).clip(0, 255).astype(np.uint8)).save(path)
 
 
+def glass_scene(data: Path, w=1560, h=720):
+    """A detailed desktop behind the notch for the Liquid Glass pictures:
+    a sunset photo on the right, and a light app window on the left with a
+    tab strip, text, buttons and a bar chart, so the glass has sharp things
+    to blur and bend. The size of the whole canvas at 2x. Saved as PNG (for
+    the picture) and raw BGRA (for the app's render)."""
+    album_art(data / "scene_photo.png", n=720)
+    img = Image.new("RGB", (w, h), (232, 236, 242))
+    photo = Image.open(data / "scene_photo.png").convert("RGB")
+    img.paste(photo, (w - 720, 0))
+    d = ImageDraw.Draw(img)
+    # The app window (a browser / dashboard), left of the photo.
+    win = (40, 0, w - 560, h - 40)
+    d.rounded_rectangle(win, 18, fill=(250, 250, 252), outline=(205, 210, 220), width=2)
+    # Tab strip and address bar along the top, under the notch.
+    d.rectangle((win[0], 0, win[2], 64), fill=(226, 231, 240))
+    for k, (title, c) in enumerate([("Quarterly report", (66, 133, 244)), ("Inbox (3)", (234, 67, 53)), ("Roadmap", (52, 168, 83)), ("Design review", (251, 188, 5))]):
+        x = win[0] + 20 + k * 230
+        d.rounded_rectangle((x, 14, x + 218, 60), 10, fill=(255, 255, 255) if k == 0 else (236, 240, 247))
+        d.ellipse((x + 14, 28, x + 32, 46), fill=c)
+        d.text((x + 42, 37), title, font=font(20, "semibold"), fill=(40, 44, 52), anchor="lm")
+    d.rounded_rectangle((win[0] + 20, 76, win[2] - 20, 114), 19, fill=(238, 241, 246))
+    d.text((win[0] + 44, 95), "nookly.app/dashboard/q3", font=font(19), fill=(90, 96, 110), anchor="lm")
+    # Heading, text lines and buttons.
+    d.text((win[0] + 40, 160), "Q3 overview", font=font(44, "bold"), fill=(24, 28, 36), anchor="lm")
+    for k, wd in enumerate([620, 560, 640, 500]):
+        y = 210 + k * 34
+        d.rounded_rectangle((win[0] + 40, y, win[0] + 40 + wd, y + 14), 7, fill=(196, 202, 214))
+    for k, (label, c) in enumerate([("Export", (66, 133, 244)), ("Share", (52, 168, 83)), ("Archive", (255, 149, 0))]):
+        x = win[0] + 40 + k * 170
+        d.rounded_rectangle((x, 360, x + 150, 410), 25, fill=c)
+        d.text((x + 75, 385), label, font=font(22, "semibold"), fill=(255, 255, 255), anchor="mm")
+    # A bar chart.
+    base = h - 90
+    for k, (v, c) in enumerate(zip([0.45, 0.7, 0.55, 0.9, 0.65, 0.8, 0.5], [(66, 133, 244), (52, 168, 83), (251, 188, 5), (234, 67, 53), (142, 68, 173), (0, 172, 193), (255, 112, 67)])):
+        x = win[0] + 720 + k * 62
+        d.rounded_rectangle((x, base - int(v * 230), x + 40, base), 8, fill=c)
+    d.line((win[0] + 700, base, win[0] + 720 + 7 * 62, base), fill=(180, 186, 198), width=3)
+    img.save(data / "scene.png")
+    a = np.array(img.convert("RGBA"))
+    bgra = a[..., [2, 1, 0, 3]].copy()
+    (data / "scene.raw").write_bytes(struct.pack("<II", w, h) + bgra.tobytes())
+
+
 def run(args, data: Path):
-    env = dict(os.environ, NOOKLY_DATA_DIR=str(data), NOOKLY_DEMO_ART=str(data / "art.png"))
+    env = dict(os.environ, NOOKLY_DATA_DIR=str(data), NOOKLY_DEMO_ART=str(data / "art.png"), NOOKLY_GLASS_SCENE=str(data / "scene.raw"))
     subprocess.run([str(EXE), *args], env=env, check=True, timeout=1800)
 
 

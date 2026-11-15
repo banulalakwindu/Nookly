@@ -178,6 +178,40 @@ fn box_blur(px: &mut [u8], w: usize, h: usize, r: usize) {
     }
 }
 
+/// Docs renders: a scene image as the backdrop (raw file: width and height
+/// as little-endian u32, then BGRA pixels, the size of the whole canvas),
+/// shrunk to `w` x `h` and blurred like a screen grab.
+pub fn from_raw_file(path: &str, w: u32, h: u32) -> Option<Backdrop> {
+    let b = std::fs::read(path).ok()?;
+    let sw = u32::from_le_bytes(b.get(0..4)?.try_into().ok()?);
+    let sh = u32::from_le_bytes(b.get(4..8)?.try_into().ok()?);
+    let src = b.get(8..8 + (sw * sh * 4) as usize)?;
+    let mut px = vec![0u8; (w * h * 4) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            // The average of the source pixels this one covers.
+            let (x0, x1) = (x * sw / w, ((x + 1) * sw / w).max(x * sw / w + 1));
+            let (y0, y1) = (y * sh / h, ((y + 1) * sh / h).max(y * sh / h + 1));
+            let mut acc = [0u32; 3];
+            let mut n = 0;
+            for sy in y0..y1.min(sh) {
+                for sx in x0..x1.min(sw) {
+                    let i = ((sy * sw + sx) * 4) as usize;
+                    for c in 0..3 {
+                        acc[c] += src[i + c] as u32;
+                    }
+                    n += 1;
+                }
+            }
+            let o = ((y * w + x) * 4) as usize;
+            for c in 0..3 {
+                px[o + c] = (acc[c] / n.max(1)) as u8;
+            }
+        }
+    }
+    Some(finish(w, h, px))
+}
+
 /// A made-up backdrop for renders and tests: "light", "dark" or a colourful
 /// one (anything else), like wallpapers and windows behind the notch.
 pub fn sample(kind: &str, w: u32, h: u32) -> Backdrop {

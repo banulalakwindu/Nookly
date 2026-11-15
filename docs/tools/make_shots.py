@@ -242,7 +242,21 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
     window("settings-privacy", "settings_privacy", "Privacy", "Mic and camera dots, clipboard history, and apps to hide the notch for: all opt-in.", ["Mic & camera dots", "Clipboard history", "Hide for apps"])
     single("calendar", "panel_calendar", "Calendar", "The month at a glance, with the days your tasks are due.", ["Today in red", "Due-task dots", "Wheel for months"])
     window("themes", "settings_look", "Themes", "Ten themes, Liquid Glass included, and your own colours, checked for readable contrast.", ["Black", "Rose", "Forest", "Paper", "Liquid Glass", "Yours"])
-    single("glass", "glass_color", "Liquid Glass", "Real glass: what's behind, blurred and bent at the edges, with light that moves like water. No outline.", ["Lens edges", "Rim light", "Drifting glints", "Adapts to light and dark"])
+    # Liquid Glass on the very scene it was rendered over, lined up, so the
+    # blur and the bent edges show against what's around it.
+    scene_png = Path(data) / "scene.png"
+    if scene_png.exists() and (out / "glass_scene.raw").exists():
+        bg = Image.open(scene_png).convert("RGBA")
+        glass = shot("glass_scene")
+        cw = W - 2 * PAD
+        k = cw / bg.width
+        bg = bg.resize((cw, round(bg.height * k)), Image.LANCZOS)
+        glass = glass.resize((cw, round(glass.height * k)), Image.LANCZOS)
+        bg.alpha_composite(glass)
+        page(bg, rounded_mask(cw, bg.height, 26), "Liquid Glass", "Real glass: what's behind is blurred and bent at the edges, with light that moves like water. No outline.", ["Lens edges", "Rim light", "Drifting glints", "Adapts to light and dark"]).save(IMAGES / "glass.png")
+        print("   glass")
+    else:
+        single("glass", "glass_color", "Liquid Glass", "Real glass: what's behind, blurred and bent at the edges, with light that moves like water. No outline.", ["Lens edges", "Rim light", "Drifting glints", "Adapts to light and dark"])
     window("settings-panels", "settings_panels", "Your panel order", "Settings > Panels: drag the panels into the order the notch shows them.", ["Drag to reorder", "Numbered", "Reset order"])
     window("settings-location", "settings_location", "Location", "Settings > Location: your place, once, for the weather and prayer times.", ["Time zone (offline)", "Windows location", "Search a city"])
     window("settings-features", "settings_features", "Features", "Switch on only what you use; what's off doesn't run at all.", ["Minimal", "Student", "Work", "Everything", "Profiles"])
