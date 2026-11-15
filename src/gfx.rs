@@ -219,11 +219,11 @@ pub const THEMES: [Theme; 10] = [
     theme("light", "Light", hex(0xF5F5F7), 0x1C1C1E, 0x6E6E73, 0x9C9CA1, 0x000000, hex(0xFFFFFF), 0.6, false),
     theme("blossom", "Blossom", hex(0xFBE6EE), 0x3A1424, 0x87556A, 0xB4899B, 0x3A1424, hex(0xFFF5F9), 0.6, false),
     theme("paper", "Paper", hex(0xF0E6CF), 0x3A2E1C, 0x75664E, 0xA39276, 0x4A3A22, hex(0xFBF5E6), 0.6, false),
-    theme("glass", "Liquid Glass", hex(0x000000).with_a(0.34), 0xFFFFFF, 0xDCDCE2, 0xA8A8B0, 0xFFFFFF, hex(0x2A2A2E).with_a(0.92), 1.0, true),
+    theme("glass", "Liquid Glass", hex(0x000000).with_a(0.26), 0xFFFFFF, 0xDCDCE2, 0xA8A8B0, 0xFFFFFF, hex(0x2A2A2E).with_a(0.92), 1.0, true),
 ];
 
 /// Liquid Glass over a bright backdrop: light glass with dark text.
-pub const GLASS_LIGHT: Theme = theme("glass", "Liquid Glass", hex(0xFFFFFF).with_a(0.46), 0x111114, 0x3A3A40, 0x6E6E73, 0x000000, hex(0xF2F2F7).with_a(0.95), 0.8, true);
+pub const GLASS_LIGHT: Theme = theme("glass", "Liquid Glass", hex(0xFFFFFF).with_a(0.38), 0x111114, 0x3A3A40, 0x6E6E73, 0x000000, hex(0xF2F2F7).with_a(0.95), 0.8, true);
 
 /// Segoe MDL2 / Fluent icon glyphs used across the app.
 pub mod glyph {
@@ -609,6 +609,13 @@ impl Gfx {
         self.set(c);
         let rr = D2D1_ROUNDED_RECT { rect: r.d2d(), radiusX: rad, radiusY: rad };
         unsafe { self.rt.DrawRoundedRectangle(&rr, &self.brush, w, None) }
+    }
+
+    /// An ellipse in exactly this colour (themes don't touch it).
+    pub fn ellipse_raw(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, c: Color) {
+        self.set_raw(c);
+        let e = D2D1_ELLIPSE { point: pt(cx, cy), radiusX: rx, radiusY: ry };
+        unsafe { self.rt.FillEllipse(&e, &self.brush) }
     }
 
     pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, c: Color) {

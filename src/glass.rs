@@ -87,7 +87,8 @@ pub fn capture(r: RECT) -> Option<Backdrop> {
     }
 }
 
-/// Opaque, blurred, with its average luminance.
+/// Opaque, blurred and a little more colourful (glass makes what's
+/// behind it look vivid), with its average luminance.
 pub fn finish(w: u32, h: u32, mut px: Vec<u8>) -> Backdrop {
     for p in px.chunks_exact_mut(4) {
         p[3] = 255;
@@ -95,9 +96,58 @@ pub fn finish(w: u32, h: u32, mut px: Vec<u8>) -> Backdrop {
     for _ in 0..3 {
         box_blur(&mut px, w as usize, h as usize, 2);
     }
+    for p in px.chunks_exact_mut(4) {
+        let l = 0.0722 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.2126 * p[2] as f32;
+        for c in &mut p[..3] {
+            *c = (l + (*c as f32 - l) * 1.35).clamp(0.0, 255.0) as u8;
+        }
+    }
     let n = (w * h) as f32;
     let lum = px.chunks_exact(4).map(|p| 0.0722 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.2126 * p[2] as f32).sum::<f32>() / n / 255.0;
     (w, h, px, lum)
+}
+
+/// Refraction, cheaply: near the edges of the glass, each pixel shows what
+/// is a little further in (the edge magnifies and bends what's behind it,
+/// like the rim of a lens), with a touch of light caught in the bend. Only
+/// the edge band is touched, on the small backdrop, so it costs next to
+/// nothing. `rad` is the corner radius in backdrop pixels.
+pub fn lens(px: &mut [u8], w: u32, h: u32, rad: f32) {
+    let (w, h) = (w as i32, h as i32);
+    if w < 6 || h < 6 {
+        return;
+    }
+    let src = px.to_vec();
+    let band = (w.min(h) as f32 * 0.42).max(3.0);
+    let rad = rad.clamp(0.0, w.min(h) as f32 / 2.0);
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            // Distance in from the rounded rectangle's edge, and the way in.
+            let (cx, cy) = (fx.clamp(rad, w as f32 - rad), fy.clamp(rad, h as f32 - rad));
+            let (d, nx, ny) = if (fx - cx).abs() > 0.0 && (fy - cy).abs() > 0.0 {
+                let (dx, dy) = (cx - fx, cy - fy);
+                let len = (dx * dx + dy * dy).sqrt().max(1e-3);
+                (rad - len, dx / len, dy / len)
+            } else {
+                let e = [(fx, 1.0, 0.0), (w as f32 - fx, -1.0, 0.0), (fy, 0.0, 1.0), (h as f32 - fy, 0.0, -1.0)];
+                let m = e.iter().fold(e[0], |a, b| if b.0 < a.0 { *b } else { a });
+                (m.0, m.1, m.2)
+            };
+            if d >= band || d < 0.0 {
+                continue;
+            }
+            let k = 1.0 - d / band;
+            let shift = k * k * band * 0.6;
+            let sx = ((fx + nx * shift) as i32).clamp(0, w - 1);
+            let sy = ((fy + ny * shift) as i32).clamp(0, h - 1);
+            let (i, j) = (((y * w + x) * 4) as usize, ((sy * w + sx) * 4) as usize);
+            let lift = k * k * 18.0;
+            for c in 0..3 {
+                px[i + c] = (src[j + c] as f32 + lift).min(255.0) as u8;
+            }
+        }
+    }
 }
 
 /// One horizontal and one vertical box blur pass of radius `r`.
