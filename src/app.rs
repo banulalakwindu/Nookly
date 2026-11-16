@@ -1296,7 +1296,12 @@ impl App {
     /// Refreshes at rest grab only the notch's own part (and a margin) and
     /// patch it into the whole grab: a fraction of the work, so it can keep
     /// up with a page scrolling behind.
-    fn update_backdrop(&mut self, notch: Rect, t: f64, dist: f32, rad: f32) {
+    /// The glass covers the whole shape, the flares where it meets the
+    /// screen edge included: they carry on the body's edge, so the glass
+    /// flows into them.
+    fn update_backdrop(&mut self, notch: Rect, t: f64, dist: f32, rad: f32, ear: f32, edge: Edge) {
+        let inner = notch;
+        let notch = if edge.vertical() { Rect::new(notch.x, notch.y - ear, notch.w, notch.h + ear * 2.0) } else { Rect::new(notch.x - ear, notch.y, notch.w + ear * 2.0, notch.h) };
         let (pw, ph) = (self.gfx.pw, self.gfx.ph);
         let (gw, gh) = ((pw / 4).max(2) as u32, (ph / 4).max(2) as u32);
         // The notch starts changing size (a panel switch) after only its own
@@ -1389,10 +1394,42 @@ impl App {
             self.glass_light = false;
         }
         // Refraction: the edges bend what's behind, like thick glass.
-        // (not along the screen edge: the glass runs on past it).
-        let e = self.edge();
-        let open = [e == Edge::Left, e == Edge::Top, e == Edge::Right, e == Edge::Bottom];
-        crate::glass::lens(&mut px, cw, ch, rad * k, open);
+        // (not along the screen edge: the glass runs on past it), on the
+        // body; the flares then carry on the body's edge, row by row (or
+        // column by column on a side edge), so there is no seam.
+        let open = [edge == Edge::Left, edge == Edge::Top, edge == Edge::Right, edge == Edge::Bottom];
+        let ix0 = (((inner.x * k).floor().max(0.0) as u32).saturating_sub(x0)).min(cw);
+        let iy0 = (((inner.y * k).floor().max(0.0) as u32).saturating_sub(y0)).min(ch);
+        let ix1 = (((inner.r() * k).ceil().max(0.0) as u32).saturating_sub(x0)).min(cw);
+        let iy1 = (((inner.b() * k).ceil().max(0.0) as u32).saturating_sub(y0)).min(ch);
+        if (ix0, iy0, ix1, iy1) == (0, 0, cw, ch) {
+            crate::glass::lens(&mut px, cw, ch, rad * k, open);
+        } else if ix1 > ix0 + 1 && iy1 > iy0 + 1 {
+            let (iw, ih) = (ix1 - ix0, iy1 - iy0);
+            let mut body = Vec::with_capacity((iw * ih * 4) as usize);
+            for y in iy0..iy1 {
+                let s = ((y * cw + ix0) * 4) as usize;
+                body.extend_from_slice(&px[s..s + (iw * 4) as usize]);
+            }
+            crate::glass::lens(&mut body, iw, ih, rad * k, open);
+            for y in 0..ih {
+                let d = (((iy0 + y) * cw + ix0) * 4) as usize;
+                let s = (y * iw * 4) as usize;
+                px[d..d + (iw * 4) as usize].copy_from_slice(&body[s..s + (iw * 4) as usize]);
+            }
+            let at = |x: u32, y: u32| ((y * cw + x) * 4) as usize;
+            for y in 0..ch {
+                for x in 0..cw {
+                    if x >= ix0 && x < ix1 && y >= iy0 && y < iy1 {
+                        continue;
+                    }
+                    let (sx, sy) = (x.clamp(ix0, ix1 - 1), y.clamp(iy0, iy1 - 1));
+                    let (d, s) = (at(x, y), at(sx, sy));
+                    let c: [u8; 4] = px[s..s + 4].try_into().unwrap();
+                    px[d..d + 4].copy_from_slice(&c);
+                }
+            }
+        }
         let at = Rect::new(x0 as f32 / k, y0 as f32 / k, cw as f32 / k, ch as f32 / k);
         // Same size as last time: refill the bitmap rather than make a new one.
         if let Some(b) = self.backdrop.as_mut().filter(|b| b.1 == self.gfx.generation) {
@@ -1504,25 +1541,18 @@ impl App {
     /// and two soft glints that drift slowly, like light moving through
     /// liquid. They move only while frames are drawn (the notch is open,
     /// hovered or moving), so a resting notch costs nothing.
-    fn draw_glass_light(&mut self, geo: &windows::Win32::Graphics::Direct2D::ID2D1PathGeometry, notch: Rect, t: f64) {
+    fn draw_glass_light(&mut self, geo: &windows::Win32::Graphics::Direct2D::ID2D1PathGeometry, notch: Rect, rad: f32, ear: f32, t: f64) {
         let light = self.glass_light;
         let a = if light { 1.0 } else { 0.8 };
         let white = hex(0xFFFFFF);
         self.gfx.push_layer(Some(geo), 1.0);
         // Fresnel rim: half of each stroke falls outside and is clipped. It
-        // runs round the body only, as if the glass went on past the screen
-        // edge: no rim along that edge or the flared corners beside it, so
-        // the corners read as glass, not as a rounded cut-out.
-        let (len, dep) = if self.edge().vertical() { (notch.h, notch.w) } else { (notch.w, notch.h) };
-        let rad = self.cur.2.min(dep / 2.0).min(len / 2.0).max(0.0);
-        let body = match self.edge() {
-            Edge::Top => Rect::new(notch.x, notch.y - 60.0, notch.w, notch.h + 60.0),
-            Edge::Bottom => Rect::new(notch.x, notch.y, notch.w, notch.h + 60.0),
-            Edge::Left => Rect::new(notch.x - 60.0, notch.y, notch.w + 60.0, notch.h),
-            Edge::Right => Rect::new(notch.x, notch.y, notch.w + 60.0, notch.h),
-        };
-        for (w, k) in [(2.0, 0.32), (7.0, 0.10), (16.0, 0.05), (30.0, 0.022)] {
-            self.gfx.stroke_rr_raw(body, rad, white.with_a(k * a), w);
+        // follows the outline, flares included, but not the side along the
+        // screen edge, where the glass runs on past the edge.
+        if let Some(outline) = self.gfx.notch_outline(notch, rad, ear, self.edge()) {
+            for (w, k) in [(2.0, 0.32), (7.0, 0.10), (16.0, 0.05), (30.0, 0.022)] {
+                self.gfx.stroke_geometry_raw(&outline, white.with_a(k * a), w);
+            }
         }
         // Light from above: a soft band along the top inside edge.
         for k in 0..6 {
@@ -2247,9 +2277,7 @@ impl App {
         crate::ui::clear_text_areas();
         self.apply_theme();
         self.gfx.begin(self.scale);
-        // The flares where the notch meets the screen edge; Liquid Glass has
-        // none: its sides run straight into the edge, like a sheet of glass.
-        let ear = if self.gfx.theme.glass { 0.0 } else { (depth / 4.0).min(9.0) };
+        let ear = (depth / 4.0).min(9.0);
         let barless = matches!(self.look(), NotchStyle::Pill | NotchStyle::Hidden);
         if depth >= 0.5 {
             if let Some(geo) = self.gfx.notch_geometry(notch, rad, ear, edge) {
@@ -2257,7 +2285,7 @@ impl App {
                 if glass {
                     // Liquid Glass: what is behind, blurred and bent near
                     // the edges like a lens (glass.rs), under a light tint.
-                    self.update_backdrop(notch, t, dist, rad);
+                    self.update_backdrop(notch, t, dist, rad, ear, edge);
                     self.glass_shape = if dist <= 0.0 { Some(notch) } else { None };
                     if let Some((b, _, _, at)) = self.backdrop.clone() {
                         self.gfx.push_layer(Some(&geo), 1.0);
@@ -2292,7 +2320,7 @@ impl App {
                 }
                 self.gfx.fill_geometry(&geo, col::NOTCH);
                 if glass {
-                    self.draw_glass_light(&geo, notch, t);
+                    self.draw_glass_light(&geo, notch, rad, ear, t);
                 }
                 self.gfx.push_layer(Some(&geo), content_alpha);
                 match mode {
@@ -7800,7 +7828,10 @@ fn look_tests(a: &mut App) -> String {
                 let f = k as f32 / 4.0;
                 a.cur = (lerp(a.cur.0, tgt.0, f), lerp(a.cur.1, tgt.1, f), lerp(a.cur.2, tgt.2, f));
                 a.render(tgt, if k < 4 { 20.0 } else { 0.0 });
-                let notch = a.edge_rect(a.cur.0, a.cur.1);
+                // The glass also fills the flares beside it at the screen edge.
+                let n = a.edge_rect(a.cur.0, a.cur.1);
+                let ear = (a.cur.1 / 4.0).min(9.0);
+                let notch = Rect::new(n.x - ear, n.y, n.w + ear * 2.0, n.h);
                 if let Some((_, _, _, at)) = &a.backdrop {
                     covers &= (at.x - notch.x).abs() <= 4.0 / a.scale + 1.0 && (at.r() - notch.r()).abs() <= 4.0 / a.scale + 1.0 && (at.b() - notch.b()).abs() <= 4.0 / a.scale + 1.0;
                 } else {

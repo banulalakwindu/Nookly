@@ -709,6 +709,16 @@ impl Gfx {
     /// corners on the inner side, and small concave "ears" flaring into the edge.
     /// Built in edge-local coordinates (u along the edge, v away from it).
     pub fn notch_geometry(&self, r: Rect, rad: f32, ear: f32, edge: Edge) -> Option<ID2D1PathGeometry> {
+        self.notch_path(r, rad, ear, edge, true)
+    }
+
+    /// The same silhouette's outline without the side along the screen
+    /// edge (from one ear's tip round to the other's), for strokes.
+    pub fn notch_outline(&self, r: Rect, rad: f32, ear: f32, edge: Edge) -> Option<ID2D1PathGeometry> {
+        self.notch_path(r, rad, ear, edge, false)
+    }
+
+    fn notch_path(&self, r: Rect, rad: f32, ear: f32, edge: Edge, closed: bool) -> Option<ID2D1PathGeometry> {
         let (len, dep) = if edge.vertical() { (r.h, r.w) } else { (r.w, r.h) };
         let rad = rad.min(dep / 2.0).min(len / 2.0).max(0.0);
         let map = |u: f32, v: f32| match edge {
@@ -731,7 +741,7 @@ impl Gfx {
             arcSize: D2D1_ARC_SIZE_SMALL,
         };
         self.path(|s| unsafe {
-            s.BeginFigure(map(-ear, 0.0), D2D1_FIGURE_BEGIN_FILLED);
+            s.BeginFigure(map(-ear, 0.0), if closed { D2D1_FIGURE_BEGIN_FILLED } else { D2D1_FIGURE_BEGIN_HOLLOW });
             s.AddQuadraticBezier(&D2D1_QUADRATIC_BEZIER_SEGMENT { point1: map(0.0, 0.0), point2: map(0.0, ear) });
             s.AddLine(map(0.0, dep - rad));
             s.AddArc(&arc(map(rad, dep)));
@@ -739,7 +749,7 @@ impl Gfx {
             s.AddArc(&arc(map(len, dep - rad)));
             s.AddLine(map(len, ear));
             s.AddQuadraticBezier(&D2D1_QUADRATIC_BEZIER_SEGMENT { point1: map(len, 0.0), point2: map(len + ear, 0.0) });
-            s.EndFigure(D2D1_FIGURE_END_CLOSED);
+            s.EndFigure(if closed { D2D1_FIGURE_END_CLOSED } else { D2D1_FIGURE_END_OPEN });
         })
     }
 
