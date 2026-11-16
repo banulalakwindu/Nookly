@@ -349,7 +349,11 @@ pub struct App {
     glass_full: bool,
     /// Only the notch's own part was grabbed since the last whole grab (the
     /// rest may be old), and whether the notch was at rest last frame.
-    glass_patched: bool,
+    glass_patched: Option<Rect>,
+    /// The glass glints' own clock: it runs only while the notch is in use
+    /// (open, hovered or moving), so background refreshes never move them.
+    glint_t: f64,
+    glint_last: f64,
     glass_was_rest: bool,
     excluded: bool,
     /// Hit under the mouse with a tooltip: (module, id, since, suppressed by a click).
@@ -583,7 +587,9 @@ impl App {
                 glass_live_until: 0.0,
                 glass_fast: false,
                 glass_full: false,
-                glass_patched: false,
+                glass_patched: None,
+                glint_t: 0.0,
+                glint_last: 0.0,
                 glass_was_rest: false,
                 excluded: false,
                 tip: None,
@@ -1299,15 +1305,20 @@ impl App {
     /// The glass covers the whole shape, the flares where it meets the
     /// screen edge included: they carry on the body's edge, so the glass
     /// flows into them.
-    fn update_backdrop(&mut self, notch: Rect, t: f64, dist: f32, rad: f32, ear: f32, edge: Edge) {
+    fn update_backdrop(&mut self, notch: Rect, goal: Rect, t: f64, dist: f32, rad: f32, ear: f32, edge: Edge) {
         let inner = notch;
-        let notch = if edge.vertical() { Rect::new(notch.x, notch.y - ear, notch.w, notch.h + ear * 2.0) } else { Rect::new(notch.x - ear, notch.y, notch.w + ear * 2.0, notch.h) };
+        let flared = |n: Rect| if edge.vertical() { Rect::new(n.x, n.y - ear, n.w, n.h + ear * 2.0) } else { Rect::new(n.x - ear, n.y, n.w + ear * 2.0, n.h) };
+        let notch = flared(inner);
+        let goal = flared(goal);
         let (pw, ph) = (self.gfx.pw, self.gfx.ph);
         let (gw, gh) = ((pw / 4).max(2) as u32, (ph / 4).max(2) as u32);
         // The notch starts changing size (a panel switch) after only its own
-        // part was refreshed: the rest of the grab may be old, so grab the
-        // whole area once, or the new shape's sides would show old colours.
-        let resized = dist > 0.0 && self.glass_was_rest && self.glass_patched;
+        // part was refreshed, and the new shape reaches past that part: the
+        // rest of the grab may be old, so grab the whole area once, or the
+        // new shape's sides would show old colours. (Shrinking, as when it
+        // closes, stays inside the fresh part: no grab, no stall.)
+        let inside = |a: Rect, b: Rect| b.x >= a.x - 1.0 && b.y >= a.y - 1.0 && b.r() <= a.r() + 1.0 && b.b() <= a.b() + 1.0;
+        let resized = dist > 0.0 && self.glass_was_rest && self.glass_patched.map_or(false, |p| !inside(p, goal));
         self.glass_was_rest = dist <= 0.0;
         let whole = match &self.glass_raw {
             None => true,
@@ -1339,13 +1350,13 @@ impl App {
                     }
                     raw.at = t;
                     raw.serial = raw.serial.wrapping_add(1);
-                    self.glass_patched = true;
+                    self.glass_patched = Some(notch);
                 }
             }
         } else if stale {
             self.glass_dirty = false;
             self.glass_full = false;
-            self.glass_patched = false;
+            self.glass_patched = None;
             let testing = crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed);
             let data = if testing {
                 // Renders and tests: a made-up background (light, dark, colour).
@@ -1358,7 +1369,10 @@ impl App {
                 }
             } else {
                 let (ox, oy) = self.origin;
-                crate::glass::capture_behind(self.hwnd, RECT { left: ox, top: oy, right: ox + pw, bottom: oy + ph })
+                let t0 = std::time::Instant::now();
+                let g = crate::glass::capture_behind(self.hwnd, RECT { left: ox, top: oy, right: ox + pw, bottom: oy + ph });
+                dlog(format!("glass grab: whole {pw}x{ph} px, {:.1} ms (dist {dist:.1})", t0.elapsed().as_secs_f32() * 1000.0));
+                g
             };
             if let Some((w, h, px, _)) = data {
                 let serial = self.glass_raw.as_ref().map_or(0, |r| r.serial.wrapping_add(1));
@@ -1561,7 +1575,12 @@ impl App {
             self.gfx.fill_rr_raw(band, 0.0, white.with_a(0.06 * a * (1.0 - f)));
         }
         // Liquid glints, nudged by the notch's own motion.
-        let p = if reduce_motion(&self.settings) { 0.0 } else { t as f32 };
+        let active = self.mode() != Mode::Collapsed || self.hover || self.glass_shape.is_none();
+        if active {
+            self.glint_t += (t - self.glint_last).clamp(0.0, 0.1);
+        }
+        self.glint_last = t;
+        let p = if reduce_motion(&self.settings) { 0.0 } else { self.glint_t as f32 };
         let push = (self.vel.0 * 0.004).clamp(-0.12, 0.12);
         for (i, (sx, sy, size)) in [(0.37f32, 0.53f32, 0.30f32), (0.29, 0.41, 0.22)].into_iter().enumerate() {
             let off = i as f32 * 2.4;
@@ -2285,7 +2304,8 @@ impl App {
                 if glass {
                     // Liquid Glass: what is behind, blurred and bent near
                     // the edges like a lens (glass.rs), under a light tint.
-                    self.update_backdrop(notch, t, dist, rad, ear, edge);
+                    let goal = self.edge_rect(target.0, target.1);
+                    self.update_backdrop(notch, goal, t, dist, rad, ear, edge);
                     self.glass_shape = if dist <= 0.0 { Some(notch) } else { None };
                     if let Some((b, _, _, at)) = self.backdrop.clone() {
                         self.gfx.push_layer(Some(&geo), 1.0);
