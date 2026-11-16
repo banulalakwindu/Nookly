@@ -110,7 +110,7 @@ pub fn start(app: HWND) -> bool {
         });
         // A darkened copy of the screenshot for outside the selection.
         let screen = GetDC(None);
-        let dim = CreateCompatibleDC(screen);
+        let dim = CreateCompatibleDC(Some(screen));
         let dim_bmp = CreateCompatibleBitmap(screen, snap.w, snap.h);
         ReleaseDC(None, screen);
         let mut px = snap.px.clone();
@@ -121,24 +121,24 @@ pub fn start(app: HWND) -> bool {
         }
         let mut bi = BITMAPINFO::default();
         bi.bmiHeader = BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: snap.w, biHeight: -snap.h, biPlanes: 1, biBitCount: 32, ..Default::default() };
-        SetDIBits(dim, dim_bmp, 0, snap.h as u32, px.as_ptr() as *const _, &bi, DIB_RGB_COLORS);
-        let dim_old = SelectObject(dim, dim_bmp);
-        let Ok(hwnd) = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, w!("NooklyScreenshot"), w!("Nookly screenshot"), WS_POPUP, snap.x, snap.y, snap.w, snap.h, None, None, hinst, None) else {
+        SetDIBits(Some(dim), dim_bmp, 0, snap.h as u32, px.as_ptr() as *const _, &bi, DIB_RGB_COLORS);
+        let dim_old = SelectObject(dim, dim_bmp.into());
+        let Ok(hwnd) = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, w!("NooklyScreenshot"), w!("Nookly screenshot"), WS_POPUP, snap.x, snap.y, snap.w, snap.h, None, None, Some(hinst.into()), None) else {
             SelectObject(dim, dim_old);
-            let _ = DeleteObject(dim_bmp);
+            let _ = DeleteObject(dim_bmp.into());
             let _ = DeleteDC(dim);
             show_app(app);
             return false;
         };
         let scale = GetDpiForWindow(hwnd) as f32 / 96.0;
-        let font = CreateFontW(-(13.0 * scale) as i32, 0, 0, 0, 600, 0, 0, 0, DEFAULT_CHARSET.0 as u32, OUT_DEFAULT_PRECIS.0 as u32, CLIP_DEFAULT_PRECIS.0 as u32, CLEARTYPE_QUALITY.0 as u32, 0, w!("Segoe UI"));
+        let font = CreateFontW(-(13.0 * scale) as i32, 0, 0, 0, 600, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 0, w!("Segoe UI"));
         let mut p = POINT::default();
         let _ = GetCursorPos(&mut p);
         let ov = Overlay { hwnd, app: app.0 as isize, cur: (p.x - snap.x, p.y - snap.y), snap, dim, dim_bmp, dim_old, start: None, font };
         OV.with(|o| *o.borrow_mut() = Some(ov));
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = SetForegroundWindow(hwnd);
-        let _ = SetFocus(hwnd);
+        let _ = SetFocus(Some(hwnd));
     }
     true
 }
@@ -149,12 +149,12 @@ fn finish(shot: Option<Shot>) {
         let _ = ReleaseCapture();
         let _ = DestroyWindow(ov.hwnd);
         SelectObject(ov.dim, ov.dim_old);
-        let _ = DeleteObject(ov.dim_bmp);
+        let _ = DeleteObject(ov.dim_bmp.into());
         let _ = DeleteDC(ov.dim);
-        let _ = DeleteObject(ov.font);
+        let _ = DeleteObject(ov.font.into());
         show_app(HWND(ov.app as *mut _));
         *RESULT.lock().unwrap() = Some(shot);
-        let _ = PostMessageW(HWND(ov.app as *mut _), crate::app::WM_APP_WAKE, WPARAM(0), LPARAM(0));
+        let _ = PostMessageW(Some(HWND(ov.app as *mut _)), crate::app::WM_APP_WAKE, WPARAM(0), LPARAM(0));
     }
 }
 
@@ -163,10 +163,10 @@ pub fn test_drag(x0: i32, y0: i32, x1: i32, y1: i32) -> bool {
     let Some(hwnd) = OV.with(|o| o.borrow().as_ref().map(|v| v.hwnd)) else { return false };
     let lp = |x: i32, y: i32| LPARAM(((y as u16 as isize) << 16) | (x as u16 as isize));
     unsafe {
-        SendMessageW(hwnd, WM_MOUSEMOVE, WPARAM(0), lp(x0, y0));
-        SendMessageW(hwnd, WM_LBUTTONDOWN, WPARAM(1), lp(x0, y0));
-        SendMessageW(hwnd, WM_MOUSEMOVE, WPARAM(1), lp(x1, y1));
-        SendMessageW(hwnd, WM_LBUTTONUP, WPARAM(0), lp(x1, y1));
+        SendMessageW(hwnd, WM_MOUSEMOVE, Some(WPARAM(0)), Some(lp(x0, y0)));
+        SendMessageW(hwnd, WM_LBUTTONDOWN, Some(WPARAM(1)), Some(lp(x0, y0)));
+        SendMessageW(hwnd, WM_MOUSEMOVE, Some(WPARAM(1)), Some(lp(x1, y1)));
+        SendMessageW(hwnd, WM_LBUTTONUP, Some(WPARAM(0)), Some(lp(x1, y1)));
     }
     true
 }
@@ -181,17 +181,17 @@ unsafe fn paint(ov: &Overlay) { unsafe {
     let rc = ps.rcPaint;
     let (rw, rh) = (rc.right - rc.left, rc.bottom - rc.top);
     if rw > 0 && rh > 0 {
-        let bb = CreateCompatibleDC(hdc);
+        let bb = CreateCompatibleDC(Some(hdc));
         let bmp = CreateCompatibleBitmap(hdc, rw, rh);
-        let old = SelectObject(bb, bmp);
+        let old = SelectObject(bb, bmp.into());
         let _ = SetViewportOrgEx(bb, -rc.left, -rc.top, None);
-        let _ = BitBlt(bb, rc.left, rc.top, rw, rh, ov.dim, rc.left, rc.top, SRCCOPY);
+        let _ = BitBlt(bb, rc.left, rc.top, rw, rh, Some(ov.dim), rc.left, rc.top, SRCCOPY);
         let scale = GetDpiForWindow(ov.hwnd) as f32 / 96.0;
         let white = CreateSolidBrush(COLORREF(0x00FFFFFF));
         let dark = CreateSolidBrush(COLORREF(0x00241E1C));
         SetBkMode(bb, TRANSPARENT);
         SetTextColor(bb, COLORREF(0x00F7F5F5));
-        let oldf = SelectObject(bb, ov.font);
+        let oldf = SelectObject(bb, ov.font.into());
         let pad = (8.0 * scale) as i32;
         let label = |text: &str, x: i32, y: i32| {
             let mut t = wide(text);
@@ -208,7 +208,7 @@ unsafe fn paint(ov: &Overlay) { unsafe {
         match ov.start {
             Some(a) => {
                 let s = norm(a, ov.cur);
-                let _ = BitBlt(bb, s.left, s.top, s.right - s.left, s.bottom - s.top, ov.snap.mem(), s.left, s.top, SRCCOPY);
+                let _ = BitBlt(bb, s.left, s.top, s.right - s.left, s.bottom - s.top, Some(ov.snap.mem()), s.left, s.top, SRCCOPY);
                 FrameRect(bb, &RECT { left: s.left - 1, top: s.top - 1, right: s.right + 1, bottom: s.bottom + 1 }, white);
                 let gap = (28.0 * scale) as i32;
                 let y = if s.top > gap + 4 { s.top - gap } else { s.bottom + 6 };
@@ -220,12 +220,12 @@ unsafe fn paint(ov: &Overlay) { unsafe {
             }
         }
         SelectObject(bb, oldf);
-        let _ = DeleteObject(white);
-        let _ = DeleteObject(dark);
+        let _ = DeleteObject(white.into());
+        let _ = DeleteObject(dark.into());
         let _ = SetViewportOrgEx(bb, 0, 0, None);
-        let _ = BitBlt(hdc, rc.left, rc.top, rw, rh, bb, 0, 0, SRCCOPY);
+        let _ = BitBlt(hdc, rc.left, rc.top, rw, rh, Some(bb), 0, 0, SRCCOPY);
         SelectObject(bb, old);
-        let _ = DeleteObject(bmp);
+        let _ = DeleteObject(bmp.into());
         let _ = DeleteDC(bb);
     }
     let _ = EndPaint(ov.hwnd, &ps);
@@ -255,7 +255,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             OV.with(|o| {
                 if let Some(ov) = o.borrow_mut().as_mut() {
                     ov.cur = xy();
-                    let _ = InvalidateRect(ov.hwnd, None, false);
+                    let _ = InvalidateRect(Some(ov.hwnd), None, false);
                 }
             });
             LRESULT(0)

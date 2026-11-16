@@ -27,7 +27,7 @@ static HOOK_HWND: AtomicIsize = AtomicIsize::new(0);
 
 fn wake(h: isize) {
     unsafe {
-        let _ = PostMessageW(HWND(h as *mut _), WM_APP_WAKE, WPARAM(0), LPARAM(0));
+        let _ = PostMessageW(Some(HWND(h as *mut _)), WM_APP_WAKE, WPARAM(0), LPARAM(0));
     }
 }
 
@@ -307,7 +307,7 @@ fn spawn_bt_watcher(shared: Arc<Mutex<BtShared>>, hwnd: isize) {
         loop {
             let mut now = BTreeSet::new();
             if let Ok(op) = DeviceInformation::FindAllAsyncAqsFilter(&selector) {
-                if let Ok(list) = op.get() {
+                if let Ok(list) = op.join() {
                     if let Ok(n) = list.Size() {
                         for i in 0..n {
                             if let Ok(d) = list.GetAt(i) {

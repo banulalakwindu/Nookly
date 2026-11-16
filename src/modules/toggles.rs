@@ -101,12 +101,12 @@ fn radios(state: Arc<Mutex<State>>, busy: Arc<Mutex<bool>>, want: Option<(window
         use windows::Devices::Radios::*;
         let _ = unsafe { windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED) };
         let mut st = State::default();
-        if let Ok(list) = Radio::GetRadiosAsync().and_then(|op| op.get()) {
+        if let Ok(list) = Radio::GetRadiosAsync().and_then(|op| op.join()) {
             for r in list {
                 let Ok(kind) = r.Kind() else { continue };
                 if let Some((k, on)) = want {
                     if kind == k {
-                        let _ = r.SetStateAsync(if on { RadioState::On } else { RadioState::Off }).and_then(|op| op.get());
+                        let _ = r.SetStateAsync(if on { RadioState::On } else { RadioState::Off }).and_then(|op| op.join());
                     }
                 }
                 let on = r.State().map_or(false, |s| s == RadioState::On);

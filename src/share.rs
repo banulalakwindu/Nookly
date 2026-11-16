@@ -5,8 +5,8 @@ use std::sync::Mutex;
 
 use windows::core::*;
 use windows::ApplicationModel::DataTransfer::*;
-use windows::Foundation::Collections::IIterable;
-use windows::Foundation::{EventRegistrationToken, TypedEventHandler};
+use windows::Foundation::TypedEventHandler;
+use windows_collections::IIterable;
 use windows::Storage::{IStorageItem, StorageFile, StorageFolder};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Shell::IDataTransferManagerInterop;
@@ -18,9 +18,9 @@ static TOKEN: Mutex<Option<(isize, i64)>> = Mutex::new(None);
 fn item(path: &str) -> Option<IStorageItem> {
     let p = HSTRING::from(path);
     if std::path::Path::new(path).is_dir() {
-        StorageFolder::GetFolderFromPathAsync(&p).ok()?.get().ok()?.cast().ok()
+        StorageFolder::GetFolderFromPathAsync(&p).ok()?.join().ok()?.cast().ok()
     } else {
-        StorageFile::GetFileFromPathAsync(&p).ok()?.get().ok()?.cast().ok()
+        StorageFile::GetFileFromPathAsync(&p).ok()?.join().ok()?.cast().ok()
     }
 }
 
@@ -37,10 +37,10 @@ pub fn share(hwnd: HWND, paths: Vec<String>) -> bool {
         let mut tok = TOKEN.lock().unwrap();
         if tok.map_or(true, |(h, _)| h != hwnd.0 as isize) {
             if let Some((_, t)) = tok.take() {
-                let _ = dtm.RemoveDataRequested(EventRegistrationToken { Value: t });
+                let _ = dtm.RemoveDataRequested(t);
             }
-            let t = dtm.DataRequested(&TypedEventHandler::new(|_m: &Option<DataTransferManager>, args: &Option<DataRequestedEventArgs>| {
-                let Some(args) = args else { return Ok(()) };
+            let t = dtm.DataRequested(&TypedEventHandler::new(|_m: Ref<DataTransferManager>, args: Ref<DataRequestedEventArgs>| {
+                let Some(args) = args.as_ref() else { return Ok(()) };
                 let req = args.Request()?;
                 let data = req.Data()?;
                 let paths = PENDING.lock().unwrap().clone();
@@ -51,11 +51,11 @@ pub fn share(hwnd: HWND, paths: Vec<String>) -> bool {
                 let names: Vec<String> = paths.iter().filter_map(|p| std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned())).collect();
                 let title = if names.len() == 1 { names[0].clone() } else { format!("{} files", names.len()) };
                 data.Properties()?.SetTitle(&HSTRING::from(title))?;
-                let list = IIterable::<IStorageItem>::try_from(items)?;
+                let list = IIterable::<IStorageItem>::from(items);
                 data.SetStorageItemsReadOnly(&list)?;
                 Ok(())
             }))?;
-            *tok = Some((hwnd.0 as isize, t.Value));
+            *tok = Some((hwnd.0 as isize, t));
         }
         drop(tok);
         unsafe { interop.ShowShareUIForWindow(hwnd)? };

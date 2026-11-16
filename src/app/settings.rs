@@ -154,7 +154,7 @@ impl SettingsWin {
             REG.call_once(|| {
                 let hi: HINSTANCE = hinst.into();
                 // The exe's own icon (stamped by build.ps1), else the tray icon.
-                let icon = LoadIconW(hi, PCWSTR(1 as *const u16)).unwrap_or_else(|_| make_tray_icon());
+                let icon = LoadIconW(Some(hi), PCWSTR(1 as *const u16)).unwrap_or_else(|_| make_tray_icon());
                 let wc = WNDCLASSEXW {
                     cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
                     lpfnWndProc: Some(settings_proc),
@@ -190,7 +190,7 @@ impl SettingsWin {
                 ph,
                 None,
                 None,
-                hinst,
+                Some(hinst.into()),
                 None,
             )
             .ok()?;
@@ -305,8 +305,8 @@ impl App {
         self.stop_recording();
         if let Some(sw) = self.swin.take() {
             unsafe {
-                let _ = KillTimer(sw.hwnd, TIMER_ANIM);
-                let _ = KillTimer(sw.hwnd, TIMER_REDRAW);
+                let _ = KillTimer(Some(sw.hwnd), TIMER_ANIM);
+                let _ = KillTimer(Some(sw.hwnd), TIMER_REDRAW);
                 let _ = DestroyWindow(sw.hwnd);
             }
         }
@@ -367,9 +367,9 @@ impl App {
             sw.animating = anim;
             unsafe {
                 if anim > 0 {
-                    SetTimer(sw.hwnd, TIMER_ANIM, anim, None);
+                    SetTimer(Some(sw.hwnd), TIMER_ANIM, anim, None);
                 } else {
-                    let _ = KillTimer(sw.hwnd, TIMER_ANIM);
+                    let _ = KillTimer(Some(sw.hwnd), TIMER_ANIM);
                 }
             }
         }
@@ -497,7 +497,7 @@ impl App {
             _ => {
                 if id == S_UPDATES {
                     unsafe {
-                        SetTimer(sw.hwnd, TIMER_REDRAW, 4100, None);
+                        SetTimer(Some(sw.hwnd), TIMER_REDRAW, 4100, None);
                     }
                 }
                 self.settings_action(id);
@@ -673,7 +673,7 @@ impl App {
             WM_TIMER => {
                 if wp.0 == TIMER_REDRAW {
                     unsafe {
-                        let _ = KillTimer(hwnd, TIMER_REDRAW);
+                        let _ = KillTimer(Some(hwnd), TIMER_REDRAW);
                     }
                 }
                 self.sw_render();

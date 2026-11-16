@@ -891,7 +891,7 @@ fn spawn_listener(incoming: Arc<Mutex<Vec<Incoming>>>, on: Arc<AtomicBool>, show
             ..Default::default()
         };
         RegisterClassExW(&wc);
-        let Ok(hwnd) = CreateWindowExW(WINDOW_EX_STYLE(0), class, w!(""), WINDOW_STYLE(0), 0, 0, 0, 0, HWND_MESSAGE, None, hinst, None) else {
+        let Ok(hwnd) = CreateWindowExW(WINDOW_EX_STYLE(0), class, w!(""), WINDOW_STYLE(0), 0, 0, 0, 0, Some(HWND_MESSAGE), None, Some(hinst.into()), None) else {
             return;
         };
         if AddClipboardFormatListener(hwnd).is_err() {
@@ -935,7 +935,7 @@ extern "system" fn listener_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
             if !got.is_empty() {
                 st.incoming.lock().unwrap().extend(got);
                 unsafe {
-                    let _ = PostMessageW(HWND(st.main as *mut _), WM_APP_WAKE, WPARAM(0), LPARAM(0));
+                    let _ = PostMessageW(Some(HWND(st.main as *mut _)), WM_APP_WAKE, WPARAM(0), LPARAM(0));
                 }
             }
         }
@@ -947,7 +947,7 @@ extern "system" fn listener_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
 /// The clipboard is often briefly held by the app that just wrote it.
 fn open_clipboard(owner: HWND) -> bool {
     for _ in 0..8 {
-        if unsafe { OpenClipboard(owner) }.is_ok() {
+        if unsafe { OpenClipboard(Some(owner)) }.is_ok() {
             return true;
         }
         std::thread::sleep(std::time::Duration::from_millis(15));
@@ -1078,7 +1078,7 @@ fn class_of(h: HWND) -> String {
 /// A window we can paste into: a real, visible top-level app window that
 /// isn't Nookly or the taskbar.
 pub fn paste_target_ok(h: HWND, own: HWND) -> bool {
-    if h.0.is_null() || h == own || !unsafe { IsWindow(h) }.as_bool() {
+    if h.0.is_null() || h == own || !unsafe { IsWindow(Some(h)) }.as_bool() {
         return false;
     }
     let mut pid = 0;
@@ -1192,7 +1192,7 @@ pub fn set_clipboard(owner: HWND, c: &Content) -> bool {
                     }
                     std::ptr::copy_nonoverlapping(w.as_ptr(), p, w.len());
                     let _ = GlobalUnlock(hg);
-                    SetClipboardData(CF_UNICODETEXT, HANDLE(hg.0)).ok()?;
+                    SetClipboardData(CF_UNICODETEXT, Some(HANDLE(hg.0))).ok()?;
                 }
                 Content::Files(files) => {
                     let mut list: Vec<u16> = Vec::new();
@@ -1211,7 +1211,7 @@ pub fn set_clipboard(owner: HWND, c: &Content) -> bool {
                     std::ptr::write_unaligned(p as *mut DROPFILES, df);
                     std::ptr::copy_nonoverlapping(list.as_ptr() as *const u8, p.add(head), list.len() * 2);
                     let _ = GlobalUnlock(hg);
-                    SetClipboardData(CF_HDROP, HANDLE(hg.0)).ok()?;
+                    SetClipboardData(CF_HDROP, Some(HANDLE(hg.0))).ok()?;
                 }
                 Content::Image(im) => {
                     let hg = GlobalAlloc(GMEM_MOVEABLE, im.dib.len()).ok()?;
@@ -1221,7 +1221,7 @@ pub fn set_clipboard(owner: HWND, c: &Content) -> bool {
                     }
                     std::ptr::copy_nonoverlapping(im.dib.as_ptr(), p, im.dib.len());
                     let _ = GlobalUnlock(hg);
-                    SetClipboardData(CF_DIB, HANDLE(hg.0)).ok()?;
+                    SetClipboardData(CF_DIB, Some(HANDLE(hg.0))).ok()?;
                 }
             }
             Some(())
@@ -1320,10 +1320,10 @@ pub fn set_private_for_test(owner: HWND, text: &str) -> bool {
             }
             std::ptr::copy_nonoverlapping(w.as_ptr(), p, w.len());
             let _ = GlobalUnlock(hg);
-            SetClipboardData(CF_UNICODETEXT, HANDLE(hg.0)).ok()?;
+            SetClipboardData(CF_UNICODETEXT, Some(HANDLE(hg.0))).ok()?;
             let f = RegisterClipboardFormatW(w!("ExcludeClipboardContentFromMonitorProcessing"));
             let hm = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, 4).ok()?;
-            SetClipboardData(f, HANDLE(hm.0)).ok()?;
+            SetClipboardData(f, Some(HANDLE(hm.0))).ok()?;
             Some(())
         })()
         .is_some()

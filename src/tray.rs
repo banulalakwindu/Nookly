@@ -89,14 +89,14 @@ pub fn startup_points_here() -> bool {
 pub fn set_startup(on: bool) {
     unsafe {
         let mut key = HKEY::default();
-        if RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY, 0, KEY_SET_VALUE, &mut key).is_err() {
+        if RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY, Some(0), KEY_SET_VALUE, &mut key).is_err() {
             return;
         }
         if on {
             let v = format!("\"{}\"", exe_path());
             let w: Vec<u16> = v.encode_utf16().chain(std::iter::once(0)).collect();
             let bytes = std::slice::from_raw_parts(w.as_ptr() as *const u8, w.len() * 2);
-            let _ = RegSetValueExW(key, RUN_NAME, 0, REG_SZ, Some(bytes));
+            let _ = RegSetValueExW(key, RUN_NAME, Some(0), REG_SZ, Some(bytes));
         } else {
             let _ = RegDeleteValueW(key, RUN_NAME);
         }

@@ -201,7 +201,7 @@ fn split_url(url: &str) -> Option<(String, String)> {
 
 fn wake(h: isize) {
     unsafe {
-        let _ = PostMessageW(HWND(h as *mut _), WM_APP_WAKE, WPARAM(0), LPARAM(0));
+        let _ = PostMessageW(Some(HWND(h as *mut _)), WM_APP_WAKE, WPARAM(0), LPARAM(0));
     }
 }
 

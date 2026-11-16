@@ -66,7 +66,7 @@ pub fn on_copydata(hwnd: HWND, lp: LPARAM) -> Option<LRESULT> {
     let b = unsafe { std::slice::from_raw_parts(cds.lpData as *const u8, cds.cbData as usize) };
     push_event(String::from_utf8_lossy(b).to_string());
     unsafe {
-        let _ = PostMessageW(hwnd, crate::app::WM_APP_WAKE, WPARAM(0), LPARAM(0));
+        let _ = PostMessageW(Some(hwnd), crate::app::WM_APP_WAKE, WPARAM(0), LPARAM(0));
     }
     Some(LRESULT(1))
 }
@@ -920,7 +920,7 @@ impl Module for Agents {
                     let res = hermes_connect(on);
                     *HERMES_DONE.lock().unwrap() = Some((on, res));
                     unsafe {
-                        let _ = PostMessageW(HWND(hwnd as *mut _), crate::app::WM_APP_WAKE, WPARAM(0), LPARAM(0));
+                        let _ = PostMessageW(Some(HWND(hwnd as *mut _)), crate::app::WM_APP_WAKE, WPARAM(0), LPARAM(0));
                     }
                 });
             }

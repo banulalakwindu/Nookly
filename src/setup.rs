@@ -67,7 +67,7 @@ fn reg_get(key: &str, name: &str) -> Option<String> {
 fn reg_open(key: &str) -> Option<HKEY> {
     unsafe {
         let mut h = HKEY::default();
-        RegCreateKeyExW(HKEY_CURRENT_USER, &HSTRING::from(key), 0, None, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, None, &mut h, None).ok().ok()?;
+        RegCreateKeyExW(HKEY_CURRENT_USER, &HSTRING::from(key), Some(0), None, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, None, &mut h, None).ok().ok()?;
         Some(h)
     }
 }
@@ -76,13 +76,13 @@ fn reg_sz(h: HKEY, name: &str, value: &str) {
     let w = wide(value);
     unsafe {
         let bytes = std::slice::from_raw_parts(w.as_ptr() as *const u8, w.len() * 2);
-        let _ = RegSetValueExW(h, &HSTRING::from(name), 0, REG_SZ, Some(bytes));
+        let _ = RegSetValueExW(h, &HSTRING::from(name), Some(0), REG_SZ, Some(bytes));
     }
 }
 
 fn reg_dword(h: HKEY, name: &str, value: u32) {
     unsafe {
-        let _ = RegSetValueExW(h, &HSTRING::from(name), 0, REG_DWORD, Some(&value.to_le_bytes()));
+        let _ = RegSetValueExW(h, &HSTRING::from(name), Some(0), REG_DWORD, Some(&value.to_le_bytes()));
     }
 }
 
@@ -137,7 +137,7 @@ fn close_running() -> bool {
             if h.0.is_null() {
                 return true;
             }
-            let _ = PostMessageW(h, WM_CLOSE, WPARAM(0), LPARAM(0));
+            let _ = PostMessageW(Some(h), WM_CLOSE, WPARAM(0), LPARAM(0));
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
         false

@@ -14,12 +14,13 @@ path = "src/main.rs"
 [dependencies]
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 qrcodegen = "1.8"
-windows-core = "0.58"
+windows-core = "0.62"
+windows-collections = "0.3"
+windows-numerics = "0.3"
 
 [dependencies.windows]
-version = "0.58"
+version = "0.62"
 features = [
-    "implement",
     "Foundation",
     "Foundation_Collections",
     "Foundation_Numerics",
@@ -28,6 +29,7 @@ features = [
     "ApplicationModel",
     "ApplicationModel_DataTransfer",
     "Storage",
+    "Storage_Search",
     "Data_Xml_Dom",
     "UI_Notifications",
     "UI_Notifications_Management",

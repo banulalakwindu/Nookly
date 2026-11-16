@@ -165,7 +165,7 @@ pub fn wait_refresh(_hwnd: HWND) {
     unsafe {
         let mut ti = DWM_TIMING_INFO { cbSize: std::mem::size_of::<DWM_TIMING_INFO>() as u32, ..Default::default() };
         let (mut now, mut freq) = (0i64, 0i64);
-        if DwmGetCompositionTimingInfo(None, &mut ti).is_ok() && QueryPerformanceCounter(&mut now).is_ok() && QueryPerformanceFrequency(&mut freq).is_ok() {
+        if DwmGetCompositionTimingInfo(HWND::default(), &mut ti).is_ok() && QueryPerformanceCounter(&mut now).is_ok() && QueryPerformanceFrequency(&mut freq).is_ok() {
             let (period, vblank) = (ti.qpcRefreshPeriod as i64, ti.qpcVBlank as i64);
             // Sane refresh rates only (24..500 Hz).
             if freq > 0 && period > freq / 500 && period < freq / 24 {
@@ -410,7 +410,7 @@ pub fn wake() {
     let h = MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed);
     if h != 0 {
         unsafe {
-            let _ = PostMessageW(HWND(h as *mut _), WM_APP_WAKE, WPARAM(0), LPARAM(0));
+            let _ = PostMessageW(Some(HWND(h as *mut _)), WM_APP_WAKE, WPARAM(0), LPARAM(0));
         }
     }
 }
@@ -481,7 +481,7 @@ impl App {
                 100,
                 None,
                 None,
-                hinst,
+                Some(hinst.into()),
                 None,
             )?;
 
@@ -604,7 +604,7 @@ impl App {
                 // A window starts or stops being dragged or resized.
                 let _ = SetWinEventHook(EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND, None, Some(on_movesize), 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                SetTimer(hwnd, TIMER_TICK, 1000, None);
+                SetTimer(Some(hwnd), TIMER_TICK, 1000, None);
                 tray::add(hwnd);
                 dragdrop::register(hwnd);
             }
@@ -660,7 +660,7 @@ impl App {
             let _ = self.gfx.resize(pw, ph);
             let _ = SetWindowPos(
                 self.hwnd,
-                HWND_TOPMOST,
+                Some(HWND_TOPMOST),
                 self.origin.0,
                 self.origin.1,
                 pw,
@@ -773,7 +773,7 @@ impl App {
             let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
             SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, ex & !(WS_EX_NOACTIVATE.0 as isize));
             let _ = SetForegroundWindow(self.hwnd);
-            let _ = SetFocus(self.hwnd);
+            let _ = SetFocus(Some(self.hwnd));
         }
     }
 
@@ -1341,7 +1341,7 @@ impl App {
         }
         self.glass_dirty = true;
         unsafe {
-            SetTimer(self.hwnd, TIMER_GLASS, 350, None);
+            SetTimer(Some(self.hwnd), TIMER_GLASS, 350, None);
         }
         self.request_frame();
     }
@@ -1358,9 +1358,9 @@ impl App {
         self.glass_probe = 0;
         unsafe {
             if want {
-                SetTimer(self.hwnd, TIMER_GLASS_PROBE, GLASS_PROBE_MS, None);
+                SetTimer(Some(self.hwnd), TIMER_GLASS_PROBE, GLASS_PROBE_MS, None);
             } else {
-                let _ = KillTimer(self.hwnd, TIMER_GLASS_PROBE);
+                let _ = KillTimer(Some(self.hwnd), TIMER_GLASS_PROBE);
             }
         }
     }
@@ -1548,9 +1548,9 @@ impl App {
     pub fn window_moving(&mut self, on: bool, h: HWND) {
         unsafe {
             if on {
-                SetTimer(self.hwnd, TIMER_MOVE, 100, None);
+                SetTimer(Some(self.hwnd), TIMER_MOVE, 100, None);
             } else {
-                let _ = KillTimer(self.hwnd, TIMER_MOVE);
+                let _ = KillTimer(Some(self.hwnd), TIMER_MOVE);
             }
         }
         let over = self.window_covers(h);
@@ -1590,9 +1590,9 @@ impl App {
             let t = WS_EX_TRANSPARENT.0 as isize;
             SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, if want { ex | t } else { ex & !t });
             if want {
-                SetTimer(self.hwnd, TIMER_POLL, 90, None);
+                SetTimer(Some(self.hwnd), TIMER_POLL, 90, None);
             } else {
-                let _ = KillTimer(self.hwnd, TIMER_POLL);
+                let _ = KillTimer(Some(self.hwnd), TIMER_POLL);
             }
         }
         if want {
@@ -1645,7 +1645,7 @@ impl App {
             unsafe {
                 let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
                 SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, ex & !(WS_EX_TRANSPARENT.0 as isize));
-                let _ = KillTimer(self.hwnd, TIMER_POLL);
+                let _ = KillTimer(Some(self.hwnd), TIMER_POLL);
             }
             self.on_mouse_move(x, y);
             self.open_from_hover();
@@ -1713,7 +1713,7 @@ impl App {
     /// Put the notch back on top of other always-on-top windows.
     fn raise(&self) {
         unsafe {
-            let _ = SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            let _ = SetWindowPos(self.hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
     }
 
@@ -1818,9 +1818,9 @@ impl App {
             self.frame_interval = ms;
             unsafe {
                 if ms == 0 {
-                    let _ = KillTimer(self.hwnd, TIMER_FRAME);
+                    let _ = KillTimer(Some(self.hwnd), TIMER_FRAME);
                 } else {
-                    SetTimer(self.hwnd, TIMER_FRAME, if ms == VSYNC { 16 } else { ms }, None);
+                    SetTimer(Some(self.hwnd), TIMER_FRAME, if ms == VSYNC { 16 } else { ms }, None);
                 }
             }
         }
@@ -2537,7 +2537,7 @@ impl App {
         self.recording = Some(k);
         unsafe {
             for i in 0..crate::features::HOTKEYS.len() {
-                let _ = UnregisterHotKey(self.hwnd, 1 + i as i32);
+                let _ = UnregisterHotKey(Some(self.hwnd), 1 + i as i32);
             }
             // The Settings window already has the keyboard.
             if self.swin.is_some() {
@@ -2546,7 +2546,7 @@ impl App {
             let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
             SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, ex & !(WS_EX_NOACTIVATE.0 as isize));
             let _ = SetForegroundWindow(self.hwnd);
-            let _ = SetFocus(self.hwnd);
+            let _ = SetFocus(Some(self.hwnd));
         }
     }
 
@@ -3587,7 +3587,7 @@ impl App {
                     TIMER_POLL => self.poll_cursor(),
                     TIMER_GLASS => {
                         unsafe {
-                            let _ = KillTimer(self.hwnd, TIMER_GLASS);
+                            let _ = KillTimer(Some(self.hwnd), TIMER_GLASS);
                         }
                         if self.settings.theme == "glass" {
                             self.glass_dirty = true;
@@ -3672,7 +3672,7 @@ impl App {
             }
             WM_SETCURSOR if (lp.0 & 0xffff) as u32 == HTCLIENT && crate::ui::over_text(self.mouse.0, self.mouse.1) => unsafe {
                 if let Ok(c) = LoadCursorW(None, IDC_IBEAM) {
-                    SetCursor(c);
+                    SetCursor(Some(c));
                 }
                 Some(LRESULT(1))
             },
@@ -4030,15 +4030,15 @@ pub fn selftest() -> String {
                         cb::PASTE_DRY_RUN.store(false, Relaxed);
                         unsafe {
                             let hinst = GetModuleHandleW(None).unwrap_or_default();
-                            let top = CreateWindowExW(WINDOW_EX_STYLE(0), w!("STATIC"), w!("Nookly paste test"), WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100, 400, 120, None, None, hinst, None).unwrap_or_default();
+                            let top = CreateWindowExW(WINDOW_EX_STYLE(0), w!("STATIC"), w!("Nookly paste test"), WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100, 400, 120, None, None, Some(hinst.into()), None).unwrap_or_default();
                             // An Edit can't be a top-level parent for focus tests; host it.
-                            let edit = CreateWindowExW(WINDOW_EX_STYLE(0), w!("EDIT"), w!(""), WS_CHILD | WS_VISIBLE | WS_BORDER, 10, 10, 360, 30, top, None, hinst, None).unwrap_or_default();
+                            let edit = CreateWindowExW(WINDOW_EX_STYLE(0), w!("EDIT"), w!(""), WS_CHILD | WS_VISIBLE | WS_BORDER, 10, 10, 360, 30, Some(top), None, Some(hinst.into()), None).unwrap_or_default();
                             // Windows only lets the app that got the last input take
                             // the foreground: send it an empty key event first.
                             let nothing = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VIRTUAL_KEY(0), wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 } } };
                             SendInput(&[nothing], std::mem::size_of::<INPUT>() as i32);
                             let _ = SetForegroundWindow(top);
-                            let _ = SetFocus(edit);
+                            let _ = SetFocus(Some(edit));
                             let front = GetForegroundWindow() == top;
                             let want = format!("Nookly paste {}", crate::time::unix_now() as u64);
                             cb::set_clipboard(hwnd, &Content::Text(want.clone()));
@@ -4046,7 +4046,7 @@ pub fn selftest() -> String {
                             cb::TEST_TARGET.store(top.0 as isize, Relaxed);
                             let st = a.modules[i].debug_state();
                             let id: u32 = field(&st, "top_id").parse().unwrap_or(0);
-                            let _ = SetFocus(edit);
+                            let _ = SetFocus(Some(edit));
                             a.call(i, |m, c| m.action((4 << 24) | id, (0.0, 0.0), c));
                             let mut got = String::new();
                             for _ in 0..40 {
@@ -6049,7 +6049,7 @@ pub fn selftest() -> String {
                     let ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1000.0;
                     let list = windows::UI::Notifications::Management::UserNotificationListener::Current()
                         .and_then(|l| l.GetNotificationsAsync(windows::UI::Notifications::NotificationKinds::Toast))
-                        .and_then(|op| op.get());
+                        .and_then(|op| op.join());
                     let Ok(list) = list else {
                         log(format!("list failed: {:?}", list.err()));
                         let _ = tx.send(());

@@ -124,7 +124,7 @@ fn run(w: f32, h: f32, at: Option<POINT>, theme: Theme, spec: Option<Spec>, item
         let Ok(hinst) = GetModuleHandleW(None) else { return (None, checked) };
         REG.call_once(|| {
             let hi: HINSTANCE = hinst.into();
-            let icon = LoadIconW(hi, PCWSTR(1 as *const u16)).unwrap_or_else(|_| make_tray_icon());
+            let icon = LoadIconW(Some(hi), PCWSTR(1 as *const u16)).unwrap_or_else(|_| make_tray_icon());
             let wc = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
                 lpfnWndProc: Some(proc_),
@@ -163,7 +163,7 @@ fn run(w: f32, h: f32, at: Option<POINT>, theme: Theme, spec: Option<Spec>, item
             (WS_EX_LAYERED | WS_EX_APPWINDOW | WS_EX_TOPMOST, WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX)
         };
         let title = spec.as_ref().map_or("Nookly".to_string(), |s| s.title.clone());
-        let Ok(hwnd) = CreateWindowExW(ex, w!("NooklyDialog"), &HSTRING::from(title), style, x, y, pw, ph, None, None, hinst, None) else {
+        let Ok(hwnd) = CreateWindowExW(ex, w!("NooklyDialog"), &HSTRING::from(title), style, x, y, pw, ph, None, None, Some(hinst.into()), None) else {
             return (None, checked);
         };
         let Ok(gfx) = Gfx::new(pw, ph) else {
@@ -195,7 +195,7 @@ fn run(w: f32, h: f32, at: Option<POINT>, theme: Theme, spec: Option<Spec>, item
         let mut msg = MSG::default();
         loop {
             let done = DLG.with(|d| d.borrow().as_ref().map_or(true, |d| d.result.is_some()));
-            if done || !IsWindow(hwnd).as_bool() {
+            if done || !IsWindow(Some(hwnd)).as_bool() {
                 break;
             }
             if !GetMessageW(&mut msg, None, 0, 0).as_bool() {

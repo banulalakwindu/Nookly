@@ -704,13 +704,13 @@ pub mod picker {
         fn drop(&mut self) {
             unsafe {
                 SelectObject(self.mem, self.old);
-                let _ = DeleteObject(self.bmp);
+                let _ = DeleteObject(self.bmp.into());
                 let _ = DeleteDC(self.mem);
             }
         }
     }
 
-    unsafe extern "system" fn add_monitor(_m: HMONITOR, _dc: HDC, r: *mut RECT, lp: LPARAM) -> BOOL { unsafe {
+    unsafe extern "system" fn add_monitor(_m: HMONITOR, _dc: HDC, r: *mut RECT, lp: LPARAM) -> windows::core::BOOL { unsafe {
         let u = &mut *(lp.0 as *mut RECT);
         let r = &*r;
         if u.right <= u.left {
@@ -772,10 +772,10 @@ pub mod picker {
                 return None;
             }
             let screen = GetDC(None);
-            let mem = CreateCompatibleDC(screen);
+            let mem = CreateCompatibleDC(Some(screen));
             let bmp = CreateCompatibleBitmap(screen, w, h);
-            let old = SelectObject(mem, bmp);
-            let ok = BitBlt(mem, 0, 0, w, h, screen, u.left, u.top, SRCCOPY | CAPTUREBLT).is_ok();
+            let old = SelectObject(mem, bmp.into());
+            let ok = BitBlt(mem, 0, 0, w, h, Some(screen), u.left, u.top, SRCCOPY | CAPTUREBLT).is_ok();
             ReleaseDC(None, screen);
             // GetDIBits wants the bitmap out of any DC.
             SelectObject(mem, old);
@@ -783,7 +783,7 @@ pub mod picker {
             let mut bi = BITMAPINFO::default();
             bi.bmiHeader = BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: w, biHeight: -h, biPlanes: 1, biBitCount: 32, ..Default::default() };
             let rows = GetDIBits(mem, bmp, 0, h as u32, Some(px.as_mut_ptr() as *mut _), &mut bi, DIB_RGB_COLORS);
-            let old = SelectObject(mem, bmp);
+            let old = SelectObject(mem, bmp.into());
             let snap = Snap { x: u.left, y: u.top, w, h, px, mem, bmp, old };
             (ok && rows == h).then_some(snap)
         }
@@ -855,7 +855,7 @@ pub mod picker {
                 snap.h,
                 None,
                 None,
-                hinst,
+                Some(hinst.into()),
                 None,
             ) else {
                 show_app(app);
@@ -863,7 +863,7 @@ pub mod picker {
             };
             let scale = GetDpiForWindow(hwnd) as f32 / 96.0;
             let mk = |size: f32, weight: i32| {
-                CreateFontW(-(size * scale) as i32, 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET.0 as u32, OUT_DEFAULT_PRECIS.0 as u32, CLIP_DEFAULT_PRECIS.0 as u32, CLEARTYPE_QUALITY.0 as u32, 0, w!("Segoe UI"))
+                CreateFontW(-(size * scale) as i32, 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 0, w!("Segoe UI"))
             };
             let mut p = POINT::default();
             let _ = GetCursorPos(&mut p);
@@ -871,7 +871,7 @@ pub mod picker {
             OV.with(|o| *o.borrow_mut() = Some(ov));
             let _ = ShowWindow(hwnd, SW_SHOW);
             let _ = SetForegroundWindow(hwnd);
-            let _ = SetFocus(hwnd);
+            let _ = SetFocus(Some(hwnd));
         }
         true
     }
@@ -880,11 +880,11 @@ pub mod picker {
         let Some(ov) = OV.with(|o| o.borrow_mut().take()) else { return };
         unsafe {
             let _ = DestroyWindow(ov.hwnd);
-            let _ = DeleteObject(ov.font);
-            let _ = DeleteObject(ov.small);
+            let _ = DeleteObject(ov.font.into());
+            let _ = DeleteObject(ov.small.into());
             show_app(HWND(ov.app as *mut _));
             *RESULT.lock().unwrap() = Some(pick);
-            let _ = PostMessageW(HWND(ov.app as *mut _), crate::app::WM_APP_WAKE, WPARAM(0), LPARAM(0));
+            let _ = PostMessageW(Some(HWND(ov.app as *mut _)), crate::app::WM_APP_WAKE, WPARAM(0), LPARAM(0));
         }
     }
 
@@ -893,8 +893,8 @@ pub mod picker {
         let Some(hwnd) = OV.with(|o| o.borrow().as_ref().map(|v| v.hwnd)) else { return false };
         unsafe {
             let lp = LPARAM(((y as u16 as isize) << 16) | (x as u16 as isize));
-            SendMessageW(hwnd, WM_MOUSEMOVE, WPARAM(0), lp);
-            SendMessageW(hwnd, WM_LBUTTONDOWN, WPARAM(0), lp);
+            SendMessageW(hwnd, WM_MOUSEMOVE, Some(WPARAM(0)), Some(lp));
+            SendMessageW(hwnd, WM_LBUTTONDOWN, Some(WPARAM(0)), Some(lp));
         }
         true
     }
@@ -909,18 +909,18 @@ pub mod picker {
         let rc = ps.rcPaint;
         let (rw, rh) = (rc.right - rc.left, rc.bottom - rc.top);
         if rw > 0 && rh > 0 {
-            let bb = CreateCompatibleDC(hdc);
+            let bb = CreateCompatibleDC(Some(hdc));
             let bmp = CreateCompatibleBitmap(hdc, rw, rh);
-            let old = SelectObject(bb, bmp);
+            let old = SelectObject(bb, bmp.into());
             let _ = SetViewportOrgEx(bb, -rc.left, -rc.top, None);
-            let _ = BitBlt(bb, rc.left, rc.top, rw, rh, ov.snap.mem, rc.left, rc.top, SRCCOPY);
+            let _ = BitBlt(bb, rc.left, rc.top, rw, rh, Some(ov.snap.mem), rc.left, rc.top, SRCCOPY);
             let scale = GetDpiForWindow(ov.hwnd) as f32 / 96.0;
             let (cx, cy) = ov.cur;
             let r = loupe_rect(cx, cy, ov.snap.w, ov.snap.h, scale);
             let l = r.right - r.left;
             let cell = l / CELLS;
             SetStretchBltMode(bb, COLORONCOLOR);
-            let _ = StretchBlt(bb, r.left, r.top, l, l, ov.snap.mem, cx - CELLS / 2, cy - CELLS / 2, CELLS, CELLS, SRCCOPY);
+            let _ = StretchBlt(bb, r.left, r.top, l, l, Some(ov.snap.mem), cx - CELLS / 2, cy - CELLS / 2, CELLS, CELLS, SRCCOPY);
             let white = CreateSolidBrush(COLORREF(0x00FFFFFF));
             let black = CreateSolidBrush(COLORREF(0x00000000));
             let dark = CreateSolidBrush(COLORREF(0x00241E1C));
@@ -942,26 +942,26 @@ pub mod picker {
             let sb = CreateSolidBrush(COLORREF(c[0] as u32 | (c[1] as u32) << 8 | (c[2] as u32) << 16));
             FillRect(bb, &swr, sb);
             ring(white, swr);
-            let _ = DeleteObject(sb);
+            let _ = DeleteObject(sb.into());
             SetBkMode(bb, TRANSPARENT);
             SetTextColor(bb, COLORREF(0x00F7F5F5));
-            let oldf = SelectObject(bb, ov.font);
+            let oldf = SelectObject(bb, ov.font.into());
             let mut t = wide(&super::hex_of(c));
             let mut tr = RECT { left: swr.right + pad, top: lab.top + pad - (2.0 * scale) as i32, right: lab.right - pad, bottom: lab.top + pad + sw + (4.0 * scale) as i32 };
             DrawTextW(bb, &mut t, &mut tr, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
-            SelectObject(bb, ov.small);
+            SelectObject(bb, ov.small.into());
             SetTextColor(bb, COLORREF(0x00A09A9A));
             let mut t = wide("Click to pick · Esc cancels");
             let mut tr = RECT { left: lab.left + pad, top: swr.bottom + (2.0 * scale) as i32, right: lab.right - pad, bottom: lab.bottom - (2.0 * scale) as i32 };
             DrawTextW(bb, &mut t, &mut tr, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
             SelectObject(bb, oldf);
             for b in [white, black, dark] {
-                let _ = DeleteObject(b);
+                let _ = DeleteObject(b.into());
             }
             let _ = SetViewportOrgEx(bb, 0, 0, None);
-            let _ = BitBlt(hdc, rc.left, rc.top, rw, rh, bb, 0, 0, SRCCOPY);
+            let _ = BitBlt(hdc, rc.left, rc.top, rw, rh, Some(bb), 0, 0, SRCCOPY);
             SelectObject(bb, old);
-            let _ = DeleteObject(bmp);
+            let _ = DeleteObject(bmp.into());
             let _ = DeleteDC(bb);
         }
         let _ = EndPaint(ov.hwnd, &ps);
@@ -976,7 +976,7 @@ pub mod picker {
                 r.top -= 4;
                 r.right += 4;
                 r.bottom += 4;
-                let _ = InvalidateRect(ov.hwnd, Some(&r), false);
+                let _ = InvalidateRect(Some(ov.hwnd), Some(&r), false);
             }
         }
     }
@@ -1734,7 +1734,7 @@ impl Module for Tools {
                     std::thread::sleep(std::time::Duration::from_millis(380));
                     unsafe {
                         let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                            HWND(hwnd as *mut _),
+                            Some(HWND(hwnd as *mut _)),
                             crate::app::WM_APP_WAKE,
                             windows::Win32::Foundation::WPARAM(0),
                             windows::Win32::Foundation::LPARAM(0),

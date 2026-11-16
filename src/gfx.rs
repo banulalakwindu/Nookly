@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::mem::ManuallyDrop;
 
 use windows::core::*;
-use windows::Foundation::Numerics::Matrix3x2;
+use windows_numerics::{Matrix3x2, Vector2};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Direct2D::Common::*;
 use windows::Win32::Graphics::Direct2D::*;
@@ -323,8 +323,8 @@ fn d2c(c: Color, a: f32) -> D2D1_COLOR_F {
     D2D1_COLOR_F { r: c.r, g: c.g, b: c.b, a: c.a * a }
 }
 
-fn pt(x: f32, y: f32) -> D2D_POINT_2F {
-    D2D_POINT_2F { x, y }
+fn pt(x: f32, y: f32) -> Vector2 {
+    Vector2 { X: x, Y: y }
 }
 
 fn ident() -> Matrix3x2 {
@@ -407,7 +407,7 @@ impl Gfx {
         unsafe {
             if !self.dib.is_invalid() {
                 SelectObject(self.mem_dc, self.old_bmp);
-                let _ = DeleteObject(self.dib);
+                let _ = DeleteObject(self.dib.into());
             }
             let bmi = BITMAPINFO {
                 bmiHeader: BITMAPINFOHEADER {
@@ -422,8 +422,8 @@ impl Gfx {
                 ..Default::default()
             };
             let mut bits = std::ptr::null_mut();
-            self.dib = CreateDIBSection(self.mem_dc, &bmi, DIB_RGB_COLORS, &mut bits, None, 0)?;
-            self.old_bmp = SelectObject(self.mem_dc, self.dib);
+            self.dib = CreateDIBSection(Some(self.mem_dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0)?;
+            self.old_bmp = SelectObject(self.mem_dc, self.dib.into());
             self.bits = bits as *mut u8;
             self.pw = pw;
             self.ph = ph;
@@ -477,10 +477,10 @@ impl Gfx {
             };
             let _ = UpdateLayeredWindow(
                 hwnd,
-                screen,
+                Some(screen),
                 Some(&pos),
                 Some(&size),
-                self.mem_dc,
+                Some(self.mem_dc),
                 Some(&src),
                 COLORREF(0),
                 Some(&blend),
@@ -723,7 +723,7 @@ impl Gfx {
         } else {
             D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE
         };
-        let arc = |p: D2D_POINT_2F| D2D1_ARC_SEGMENT {
+        let arc = |p: Vector2| D2D1_ARC_SEGMENT {
             point: p,
             size: D2D_SIZE_F { width: rad, height: rad },
             rotationAngle: 0.0,
@@ -941,7 +941,7 @@ impl Drop for Gfx {
         unsafe {
             if !self.dib.is_invalid() {
                 SelectObject(self.mem_dc, self.old_bmp);
-                let _ = DeleteObject(self.dib);
+                let _ = DeleteObject(self.dib.into());
             }
             let _ = DeleteDC(self.mem_dc);
         }
@@ -1025,7 +1025,7 @@ pub fn make_tray_icon() -> HICON {
         };
         let dc = GetDC(None);
         let mut bits = std::ptr::null_mut();
-        let Ok(color) = CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) else {
+        let Ok(color) = CreateDIBSection(Some(dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0) else {
             ReleaseDC(None, dc);
             return HICON::default();
         };
@@ -1034,8 +1034,8 @@ pub fn make_tray_icon() -> HICON {
         ReleaseDC(None, dc);
         let info = ICONINFO { fIcon: TRUE, xHotspot: 0, yHotspot: 0, hbmMask: mask, hbmColor: color };
         let icon = CreateIconIndirect(&info).unwrap_or_default();
-        let _ = DeleteObject(color);
-        let _ = DeleteObject(mask);
+        let _ = DeleteObject(color.into());
+        let _ = DeleteObject(mask.into());
         icon
     }
 }

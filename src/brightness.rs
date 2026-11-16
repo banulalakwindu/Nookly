@@ -1,7 +1,7 @@
 //! Screen brightness: the laptop panel through Windows (WMI), external
 //! monitors through their own control channel (DDC/CI), when they allow it.
 
-use windows::core::{BSTR, PCWSTR, VARIANT};
+use windows::core::{BSTR, PCWSTR};
 use windows::Win32::Devices::Display::*;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};

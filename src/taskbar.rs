@@ -118,7 +118,7 @@ pub fn locate() -> Option<Place> {
         if !GetMonitorInfoW(mon, &mut mi).as_bool() {
             return None;
         }
-        let child = |class: PCWSTR| FindWindowExW(tb, None, class, None).ok().and_then(rect_of);
+        let child = |class: PCWSTR| FindWindowExW(Some(tb), None, class, None).ok().and_then(rect_of);
         let start = child(w!("Start"));
         let tray = child(w!("TrayNotifyWnd"));
         let widgets = *WIDGETS.lock().unwrap();
@@ -140,7 +140,7 @@ fn start_widgets_watch() {
                 let found = (|| -> Option<RECT> {
                     let tb = FindWindowW(w!("Shell_TrayWnd"), None).ok()?;
                     let root = uia.ElementFromHandle(tb).ok()?;
-                    let cond = uia.CreatePropertyCondition(UIA_AutomationIdPropertyId, &VARIANT::from(BSTR::from("WidgetsButton"))).ok()?;
+                    let cond = uia.CreatePropertyCondition(UIA_AutomationIdPropertyId, &windows::Win32::System::Variant::VARIANT::from(BSTR::from("WidgetsButton"))).ok()?;
                     let el = root.FindFirst(TreeScope_Descendants, &cond).ok()?;
                     let r = el.CurrentBoundingRectangle().ok()?;
                     (r.right > r.left && r.bottom > r.top).then_some(r)
@@ -193,13 +193,13 @@ impl Pet {
                 10,
                 None,
                 None,
-                hinst,
+                Some(hinst.into()),
                 None,
             )
             .ok()?;
             let gfx = Gfx::new(10, 10).ok()?;
             let hook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, Some(on_foreground), 0, 0, WINEVENT_OUTOFCONTEXT);
-            SetTimer(hwnd, TIMER_PLACE, 500, None);
+            SetTimer(Some(hwnd), TIMER_PLACE, 500, None);
             Some(Pet { hwnd, gfx, place: None, hover: false, hover_since: 0.0, shown: false, hook })
         }
     }
@@ -207,8 +207,8 @@ impl Pet {
     pub fn destroy(self) {
         unsafe {
             let _ = UnhookWinEvent(self.hook);
-            let _ = KillTimer(self.hwnd, TIMER_FRAME);
-            let _ = KillTimer(self.hwnd, TIMER_PLACE);
+            let _ = KillTimer(Some(self.hwnd), TIMER_FRAME);
+            let _ = KillTimer(Some(self.hwnd), TIMER_PLACE);
             let _ = DestroyWindow(self.hwnd);
         }
     }
@@ -220,15 +220,15 @@ impl Pet {
                 Some(p) => {
                     if self.place != Some(p) || !self.shown {
                         let _ = self.gfx.resize(p.w, p.h);
-                        let _ = SetWindowPos(self.hwnd, HWND_TOPMOST, p.x, p.y, p.w, p.h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-                        SetTimer(self.hwnd, TIMER_FRAME, 40, None);
+                        let _ = SetWindowPos(self.hwnd, Some(HWND_TOPMOST), p.x, p.y, p.w, p.h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                        SetTimer(Some(self.hwnd), TIMER_FRAME, 40, None);
                     }
                     self.shown = true;
                 }
                 None => {
                     if self.shown {
                         let _ = ShowWindow(self.hwnd, SW_HIDE);
-                        let _ = KillTimer(self.hwnd, TIMER_FRAME);
+                        let _ = KillTimer(Some(self.hwnd), TIMER_FRAME);
                     }
                     self.shown = false;
                     self.hover = false;
@@ -241,7 +241,7 @@ impl Pet {
     pub fn raise(&self) {
         if self.shown {
             unsafe {
-                let _ = SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
+                let _ = SetWindowPos(self.hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
             }
         }
     }

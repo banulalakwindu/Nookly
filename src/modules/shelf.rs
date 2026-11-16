@@ -266,7 +266,7 @@ impl Module for Shelf {
                 std::thread::sleep(std::time::Duration::from_millis(380));
                 unsafe {
                     let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                        windows::Win32::Foundation::HWND(hwnd as *mut _),
+                        Some(windows::Win32::Foundation::HWND(hwnd as *mut _)),
                         crate::app::WM_APP_WAKE,
                         windows::Win32::Foundation::WPARAM(0),
                         windows::Win32::Foundation::LPARAM(0),

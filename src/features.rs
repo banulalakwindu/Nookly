@@ -234,10 +234,10 @@ pub fn register(hwnd: HWND, st: &Settings) -> [bool; 4] {
     let mut fail = [false; 4];
     for k in 0..HOTKEYS.len() {
         unsafe {
-            let _ = UnregisterHotKey(hwnd, 1 + k as i32);
+            let _ = UnregisterHotKey(Some(hwnd), 1 + k as i32);
         }
         if let Some((m, v)) = hotkey(st, k) {
-            let ok = unsafe { RegisterHotKey(hwnd, 1 + k as i32, HOT_KEY_MODIFIERS(m) | MOD_NOREPEAT, v) }.is_ok();
+            let ok = unsafe { RegisterHotKey(Some(hwnd), 1 + k as i32, HOT_KEY_MODIFIERS(m) | MOD_NOREPEAT, v) }.is_ok();
             fail[k] = !ok;
         }
     }
@@ -325,7 +325,7 @@ pub fn save_dialog(owner: HWND) -> Option<String> {
         if let Some(docs) = known_documents() {
             let _ = d.SetFolder(&docs);
         }
-        d.Show(owner).ok()?;
+        d.Show(Some(owner)).ok()?;
         dialog_path(d.GetResult())
     }
 }
@@ -341,7 +341,7 @@ pub fn open_dialog(owner: HWND) -> Option<String> {
         if let Some(docs) = known_documents() {
             let _ = d.SetFolder(&docs);
         }
-        d.Show(owner).ok()?;
+        d.Show(Some(owner)).ok()?;
         dialog_path(d.GetResult())
     }
 }
@@ -445,7 +445,7 @@ pub fn pick_paths(owner: HWND, folder: bool) -> Vec<String> {
         if let Ok(o) = d.GetOptions() {
             let _ = d.SetOptions(o | FOS_ALLOWMULTISELECT | if folder { FOS_PICKFOLDERS } else { FOS_FORCEFILESYSTEM });
         }
-        if d.Show(owner).is_err() {
+        if d.Show(Some(owner)).is_err() {
             return Vec::new();
         }
         let Ok(arr): windows::core::Result<IShellItemArray> = d.GetResults() else { return Vec::new() };
@@ -470,7 +470,7 @@ pub fn pick_ics(owner: HWND) -> Option<String> {
         if let Some(docs) = known_documents() {
             let _ = d.SetFolder(&docs);
         }
-        d.Show(owner).ok()?;
+        d.Show(Some(owner)).ok()?;
         dialog_path(d.GetResult())
     }
 }

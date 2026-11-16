@@ -68,13 +68,13 @@ fn subkeys(path: &str) -> Vec<String> {
     let mut out = Vec::new();
     unsafe {
         let mut key = HKEY::default();
-        if RegOpenKeyExW(HKEY_CURRENT_USER, &HSTRING::from(path), 0, KEY_READ, &mut key) != ERROR_SUCCESS {
+        if RegOpenKeyExW(HKEY_CURRENT_USER, &HSTRING::from(path), Some(0), KEY_READ, &mut key) != ERROR_SUCCESS {
             return out;
         }
         let mut buf = [0u16; 512];
         for i in 0..1024 {
             let mut len = buf.len() as u32;
-            if RegEnumKeyExW(key, i, PWSTR(buf.as_mut_ptr()), &mut len, None, PWSTR::null(), None, None) != ERROR_SUCCESS {
+            if RegEnumKeyExW(key, i, Some(PWSTR(buf.as_mut_ptr())), &mut len, None, Some(PWSTR::null()), None, None) != ERROR_SUCCESS {
                 break;
             }
             out.push(String::from_utf16_lossy(&buf[..len as usize]));

@@ -209,7 +209,7 @@ pub fn icon_color(px: &[u8]) -> Option<Color> {
 
 fn wake(h: isize) {
     unsafe {
-        let _ = PostMessageW(HWND(h as *mut _), WM_APP_WAKE, WPARAM(0), LPARAM(0));
+        let _ = PostMessageW(Some(HWND(h as *mut _)), WM_APP_WAKE, WPARAM(0), LPARAM(0));
     }
 }
 
@@ -275,7 +275,7 @@ unsafe fn shell_icon(aumid: &str, side: i32) -> Option<(u32, u32, Vec<u8>)> { un
     let f: IShellItemImageFactory = SHCreateItemFromParsingName(&name, None).ok()?;
     let hbm = f.GetImage(SIZE { cx: side, cy: side }, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK).ok()?;
     let mut bmp = BITMAP::default();
-    GetObjectW(hbm, std::mem::size_of::<BITMAP>() as i32, Some(&mut bmp as *mut _ as *mut _));
+    GetObjectW(hbm.into(), std::mem::size_of::<BITMAP>() as i32, Some(&mut bmp as *mut _ as *mut _));
     let (w, h) = (bmp.bmWidth, bmp.bmHeight);
     let mut px = vec![0u8; (w * h * 4).max(0) as usize];
     let mut bi = BITMAPINFO::default();
@@ -283,7 +283,7 @@ unsafe fn shell_icon(aumid: &str, side: i32) -> Option<(u32, u32, Vec<u8>)> { un
     let dc = GetDC(None);
     let rows = GetDIBits(dc, hbm, 0, h as u32, Some(px.as_mut_ptr() as *mut _), &mut bi, DIB_RGB_COLORS);
     ReleaseDC(None, dc);
-    let _ = DeleteObject(hbm);
+    let _ = DeleteObject(hbm.into());
     if rows == 0 || w <= 0 || h <= 0 || !px.chunks_exact(4).any(|p| p[3] > 0) {
         return None;
     }
@@ -351,7 +351,7 @@ fn watch(inbox: Arc<Mutex<Vec<Note>>>, hwnd: isize, generation: u32) {
         }
         last_sig = sig;
         last_read = Instant::now();
-        let Ok(list) = l.GetNotificationsAsync(NotificationKinds::Toast).and_then(|op| op.get()) else { continue };
+        let Ok(list) = l.GetNotificationsAsync(NotificationKinds::Toast).and_then(|op| op.join()) else { continue };
         let items: Vec<UserNotification> = list.into_iter().collect();
         let ids: HashSet<u32> = items.iter().filter_map(|n| n.Id().ok()).collect();
         let Some(old) = seen.replace(ids.clone()) else { continue };

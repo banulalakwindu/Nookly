@@ -118,7 +118,7 @@ enum Lyrics {
 
 fn wake(h: isize) {
     unsafe {
-        let _ = PostMessageW(HWND(h as *mut _), WM_APP_WAKE, WPARAM(0), LPARAM(0));
+        let _ = PostMessageW(Some(HWND(h as *mut _)), WM_APP_WAKE, WPARAM(0), LPARAM(0));
     }
 }
 
@@ -126,7 +126,7 @@ fn spawn_media(shared: Arc<Mutex<MediaInfo>>, rx: Receiver<Cmd>, hwnd: isize) {
     std::thread::spawn(move || unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let mgr = loop {
-            match GlobalSystemMediaTransportControlsSessionManager::RequestAsync().and_then(|op| op.get()) {
+            match GlobalSystemMediaTransportControlsSessionManager::RequestAsync().and_then(|op| op.join()) {
                 Ok(m) => break m,
                 Err(_) => std::thread::sleep(Duration::from_secs(5)),
             }
@@ -139,10 +139,10 @@ fn spawn_media(shared: Arc<Mutex<MediaInfo>>, rx: Receiver<Cmd>, hwnd: isize) {
                     // not answer; fall back to the media key then.
                     let accepted = match mgr.GetCurrentSession() {
                         Ok(s) => match cmd {
-                            Cmd::Toggle => s.TryTogglePlayPauseAsync().and_then(|o| o.get()),
-                            Cmd::Next => s.TrySkipNextAsync().and_then(|o| o.get()),
-                            Cmd::Prev => s.TrySkipPreviousAsync().and_then(|o| o.get()),
-                            Cmd::Seek(t) => s.TryChangePlaybackPositionAsync((t * 1e7) as i64).and_then(|o| o.get()),
+                            Cmd::Toggle => s.TryTogglePlayPauseAsync().and_then(|o| o.join()),
+                            Cmd::Next => s.TrySkipNextAsync().and_then(|o| o.join()),
+                            Cmd::Prev => s.TrySkipPreviousAsync().and_then(|o| o.join()),
+                            Cmd::Seek(t) => s.TryChangePlaybackPositionAsync((t * 1e7) as i64).and_then(|o| o.join()),
                         }
                         .unwrap_or(false),
                         Err(_) => false,
@@ -195,7 +195,7 @@ unsafe fn poll(mgr: &GlobalSystemMediaTransportControlsSessionManager, shared: &
     };
     let mut info = MediaInfo { has: true, ..Default::default() };
     info.app = s.SourceAppUserModelId().map(|h| pretty_app(&h.to_string())).unwrap_or_default();
-    let props = s.TryGetMediaPropertiesAsync().and_then(|o| o.get());
+    let props = s.TryGetMediaPropertiesAsync().and_then(|o| o.join());
     if let Ok(p) = &props {
         info.title = p.Title().map(|h| h.to_string()).unwrap_or_default();
         info.artist = p.Artist().map(|h| h.to_string()).unwrap_or_default();
@@ -289,14 +289,14 @@ fn pretty_app(aumid: &str) -> String {
 }
 
 pub(crate) unsafe fn read_stream_bytes(r: &windows::Storage::Streams::IRandomAccessStreamReference) -> Option<Vec<u8>> {
-    let stream = r.OpenReadAsync().ok()?.get().ok()?;
+    let stream = r.OpenReadAsync().ok()?.join().ok()?;
     let size = stream.Size().ok()? as u32;
     if size == 0 || size > 20_000_000 {
         return None;
     }
     let input = stream.GetInputStreamAt(0).ok()?;
     let reader = DataReader::CreateDataReader(&input).ok()?;
-    reader.LoadAsync(size).ok()?.get().ok()?;
+    reader.LoadAsync(size).ok()?.join().ok()?;
     let mut buf = vec![0u8; size as usize];
     reader.ReadBytes(&mut buf).ok()?;
     Some(buf)

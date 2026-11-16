@@ -17,7 +17,7 @@ use crate::app::with_app;
 struct Target;
 
 impl IDropTarget_Impl for Target_Impl {
-    fn DragEnter(&self, _d: Option<&IDataObject>, _k: MODIFIERKEYS_FLAGS, _pt: &POINTL, eff: *mut DROPEFFECT) -> Result<()> {
+    fn DragEnter(&self, _d: Ref<IDataObject>, _k: MODIFIERKEYS_FLAGS, _pt: &POINTL, eff: *mut DROPEFFECT) -> Result<()> {
         let ok = with_app(|a| {
             a.drag_enter();
             !a.dragging_out
@@ -43,8 +43,8 @@ impl IDropTarget_Impl for Target_Impl {
         Ok(())
     }
 
-    fn Drop(&self, d: Option<&IDataObject>, _k: MODIFIERKEYS_FLAGS, pt: &POINTL, eff: *mut DROPEFFECT) -> Result<()> {
-        let paths = d.map(|d| unsafe { extract(d) }).unwrap_or_default();
+    fn Drop(&self, d: Ref<IDataObject>, _k: MODIFIERKEYS_FLAGS, pt: &POINTL, eff: *mut DROPEFFECT) -> Result<()> {
+        let paths = d.as_ref().map(|d| unsafe { extract(d) }).unwrap_or_default();
         let (x, y) = (pt.x, pt.y);
         with_app(|a| a.drag_over(x, y));
         with_app(|a| a.drop_paths(paths));

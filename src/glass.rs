@@ -47,7 +47,7 @@ pub fn probe(rects: &[RECT]) -> Option<u64> {
         if screen.is_invalid() {
             return None;
         }
-        let mem = CreateCompatibleDC(screen);
+        let mem = CreateCompatibleDC(Some(screen));
         for r in rects {
             let (w, h) = (r.right - r.left, r.bottom - r.top);
             if w < 1 || h < 1 {
@@ -67,10 +67,10 @@ pub fn probe(rects: &[RECT]) -> Option<u64> {
                 ..Default::default()
             };
             let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
-            let Ok(dib) = CreateDIBSection(mem, &bi, DIB_RGB_COLORS, &mut bits, None, 0) else { continue };
-            let old = SelectObject(mem, dib);
+            let Ok(dib) = CreateDIBSection(Some(mem), &bi, DIB_RGB_COLORS, &mut bits, None, 0) else { continue };
+            let old = SelectObject(mem, dib.into());
             SetStretchBltMode(mem, HALFTONE);
-            if StretchBlt(mem, 0, 0, sw, sh, screen, r.left, r.top, w, h, SRCCOPY).as_bool() && !bits.is_null() {
+            if StretchBlt(mem, 0, 0, sw, sh, Some(screen), r.left, r.top, w, h, SRCCOPY).as_bool() && !bits.is_null() {
                 let px = std::slice::from_raw_parts(bits as *const u8, (sw * sh * 4) as usize);
                 for p in px.chunks_exact(4) {
                     for c in &p[..3] {
@@ -79,7 +79,7 @@ pub fn probe(rects: &[RECT]) -> Option<u64> {
                 }
             }
             SelectObject(mem, old);
-            let _ = DeleteObject(dib);
+            let _ = DeleteObject(dib.into());
         }
         let _ = DeleteDC(mem);
         ReleaseDC(None, screen);
@@ -99,7 +99,7 @@ pub fn capture(r: RECT) -> Option<Backdrop> {
         if screen.is_invalid() {
             return None;
         }
-        let mem = CreateCompatibleDC(screen);
+        let mem = CreateCompatibleDC(Some(screen));
         let bi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -113,20 +113,20 @@ pub fn capture(r: RECT) -> Option<Backdrop> {
             ..Default::default()
         };
         let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
-        let Ok(dib) = CreateDIBSection(mem, &bi, DIB_RGB_COLORS, &mut bits, None, 0) else {
+        let Ok(dib) = CreateDIBSection(Some(mem), &bi, DIB_RGB_COLORS, &mut bits, None, 0) else {
             let _ = DeleteDC(mem);
             ReleaseDC(None, screen);
             return None;
         };
-        let old = SelectObject(mem, dib);
+        let old = SelectObject(mem, dib.into());
         SetStretchBltMode(mem, HALFTONE);
-        let ok = StretchBlt(mem, 0, 0, sw, sh, screen, r.left, r.top, w, h, SRCCOPY | CAPTUREBLT).as_bool();
+        let ok = StretchBlt(mem, 0, 0, sw, sh, Some(screen), r.left, r.top, w, h, SRCCOPY | CAPTUREBLT).as_bool();
         let mut px = vec![0u8; (sw * sh * 4) as usize];
         if ok && !bits.is_null() {
             std::ptr::copy_nonoverlapping(bits as *const u8, px.as_mut_ptr(), px.len());
         }
         SelectObject(mem, old);
-        let _ = DeleteObject(dib);
+        let _ = DeleteObject(dib.into());
         let _ = DeleteDC(mem);
         ReleaseDC(None, screen);
         if !ok {

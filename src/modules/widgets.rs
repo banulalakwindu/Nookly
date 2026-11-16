@@ -24,6 +24,7 @@ use windows::Devices::Bluetooth::Advertisement::*;
 use windows::Storage::Streams::DataReader;
 use windows::Win32::Devices::DeviceAndDriverInstallation::*;
 use windows::Win32::Devices::Properties::*;
+use windows::Win32::Foundation::DEVPROPKEY;
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows::Win32::System::SystemInformation::GetTickCount64;
@@ -631,12 +632,12 @@ static WINLOC_STARTED: AtomicBool = AtomicBool::new(false);
 fn windows_position() -> std::result::Result<(f64, f64), String> {
     use windows::Devices::Geolocation::*;
     let off = || "Windows location is off for desktop apps".to_string();
-    let st = Geolocator::RequestAccessAsync().and_then(|op| op.get()).map_err(|_| off())?;
+    let st = Geolocator::RequestAccessAsync().and_then(|op| op.join()).map_err(|_| off())?;
     if st != GeolocationAccessStatus::Allowed {
         return Err(off());
     }
     let g = Geolocator::new().map_err(|_| off())?;
-    let pos = g.GetGeopositionAsync().and_then(|op| op.get()).map_err(|_| "Windows couldn't find your location".to_string())?;
+    let pos = g.GetGeopositionAsync().and_then(|op| op.join()).map_err(|_| "Windows couldn't find your location".to_string())?;
     let p = pos.Coordinate().and_then(|c| c.Point()).and_then(|pt| pt.Position()).map_err(|_| "Windows couldn't find your location".to_string())?;
     Ok((p.Latitude, p.Longitude))
 }

@@ -52,10 +52,10 @@ fn close_running() -> bool {
         if !window_exe(h).map_or(false, |p| same_file(&p, &exe())) {
             return true;
         }
-        let _ = PostMessageW(h, WM_CLOSE, WPARAM(0), LPARAM(0));
+        let _ = PostMessageW(Some(h), WM_CLOSE, WPARAM(0), LPARAM(0));
         for _ in 0..50 {
             std::thread::sleep(std::time::Duration::from_millis(100));
-            if !IsWindow(h).as_bool() {
+            if !IsWindow(Some(h)).as_bool() {
                 return true;
             }
         }
