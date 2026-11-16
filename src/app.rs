@@ -347,6 +347,10 @@ pub struct App {
     glass_fast: bool,
     /// The next grab must cover the whole window (the notch is opening).
     glass_full: bool,
+    /// Only the notch's own part was grabbed since the last whole grab (the
+    /// rest may be old), and whether the notch was at rest last frame.
+    glass_patched: bool,
+    glass_was_rest: bool,
     excluded: bool,
     /// Hit under the mouse with a tooltip: (module, id, since, suppressed by a click).
     tip: Option<(usize, u32, f64, bool)>,
@@ -579,6 +583,8 @@ impl App {
                 glass_live_until: 0.0,
                 glass_fast: false,
                 glass_full: false,
+                glass_patched: false,
+                glass_was_rest: false,
                 excluded: false,
                 tip: None,
                 deferred: Vec::new(),
@@ -1290,16 +1296,17 @@ impl App {
     /// Refreshes at rest grab only the notch's own part (and a margin) and
     /// patch it into the whole grab: a fraction of the work, so it can keep
     /// up with a page scrolling behind.
-    /// The glass covers the whole shape, the flared corners ("ears") where
-    /// it meets the screen edge included; the lens bends the main body.
-    fn update_backdrop(&mut self, notch: Rect, t: f64, dist: f32, rad: f32, ear: f32, edge: Edge) {
-        let inner = notch;
-        let notch = if edge.vertical() { Rect::new(notch.x, notch.y - ear, notch.w, notch.h + ear * 2.0) } else { Rect::new(notch.x - ear, notch.y, notch.w + ear * 2.0, notch.h) };
+    fn update_backdrop(&mut self, notch: Rect, t: f64, dist: f32, rad: f32) {
         let (pw, ph) = (self.gfx.pw, self.gfx.ph);
         let (gw, gh) = ((pw / 4).max(2) as u32, (ph / 4).max(2) as u32);
+        // The notch starts changing size (a panel switch) after only its own
+        // part was refreshed: the rest of the grab may be old, so grab the
+        // whole area once, or the new shape's sides would show old colours.
+        let resized = dist > 0.0 && self.glass_was_rest && self.glass_patched;
+        self.glass_was_rest = dist <= 0.0;
         let whole = match &self.glass_raw {
             None => true,
-            Some(r) => self.glass_full || r.origin != self.origin || (r.w, r.h) != (gw, gh),
+            Some(r) => self.glass_full || resized || r.origin != self.origin || (r.w, r.h) != (gw, gh),
         };
         let stale = whole || self.glass_dirty || self.glass_raw.as_ref().map_or(false, |r| dist <= 0.0 && t - r.at > 1.0);
         let testing = crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed);
@@ -1327,11 +1334,13 @@ impl App {
                     }
                     raw.at = t;
                     raw.serial = raw.serial.wrapping_add(1);
+                    self.glass_patched = true;
                 }
             }
         } else if stale {
             self.glass_dirty = false;
             self.glass_full = false;
+            self.glass_patched = false;
             let testing = crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed);
             let data = if testing {
                 // Renders and tests: a made-up background (light, dark, colour).
@@ -1380,27 +1389,7 @@ impl App {
             self.glass_light = false;
         }
         // Refraction: the edges bend what's behind, like thick glass.
-        // (on the main body only: the ears just show what's behind).
-        let ix0 = (((inner.x * k).floor().max(0.0) as u32).saturating_sub(x0)).min(cw);
-        let iy0 = (((inner.y * k).floor().max(0.0) as u32).saturating_sub(y0)).min(ch);
-        let ix1 = (((inner.r() * k).ceil().max(0.0) as u32).saturating_sub(x0)).min(cw);
-        let iy1 = (((inner.b() * k).ceil().max(0.0) as u32).saturating_sub(y0)).min(ch);
-        if (ix0, iy0, ix1, iy1) == (0, 0, cw, ch) {
-            crate::glass::lens(&mut px, cw, ch, rad * k);
-        } else if ix1 > ix0 + 1 && iy1 > iy0 + 1 {
-            let (iw, ih) = (ix1 - ix0, iy1 - iy0);
-            let mut body = Vec::with_capacity((iw * ih * 4) as usize);
-            for y in iy0..iy1 {
-                let s = ((y * cw + ix0) * 4) as usize;
-                body.extend_from_slice(&px[s..s + (iw * 4) as usize]);
-            }
-            crate::glass::lens(&mut body, iw, ih, rad * k);
-            for y in 0..ih {
-                let d = (((iy0 + y) * cw + ix0) * 4) as usize;
-                let s = (y * iw * 4) as usize;
-                px[d..d + (iw * 4) as usize].copy_from_slice(&body[s..s + (iw * 4) as usize]);
-            }
-        }
+        crate::glass::lens(&mut px, cw, ch, rad * k);
         let at = Rect::new(x0 as f32 / k, y0 as f32 / k, cw as f32 / k, ch as f32 / k);
         // Same size as last time: refill the bitmap rather than make a new one.
         if let Some(b) = self.backdrop.as_mut().filter(|b| b.1 == self.gfx.generation) {
@@ -2255,7 +2244,9 @@ impl App {
         crate::ui::clear_text_areas();
         self.apply_theme();
         self.gfx.begin(self.scale);
-        let ear = (depth / 4.0).min(9.0);
+        // The flares where the notch meets the screen edge; Liquid Glass has
+        // none: its sides run straight into the edge, like a sheet of glass.
+        let ear = if self.gfx.theme.glass { 0.0 } else { (depth / 4.0).min(9.0) };
         let barless = matches!(self.look(), NotchStyle::Pill | NotchStyle::Hidden);
         if depth >= 0.5 {
             if let Some(geo) = self.gfx.notch_geometry(notch, rad, ear, edge) {
@@ -2263,7 +2254,7 @@ impl App {
                 if glass {
                     // Liquid Glass: what is behind, blurred and bent near
                     // the edges like a lens (glass.rs), under a light tint.
-                    self.update_backdrop(notch, t, dist, rad, ear, edge);
+                    self.update_backdrop(notch, t, dist, rad);
                     self.glass_shape = if dist <= 0.0 { Some(notch) } else { None };
                     if let Some((b, _, _, at)) = self.backdrop.clone() {
                         self.gfx.push_layer(Some(&geo), 1.0);
@@ -7806,10 +7797,7 @@ fn look_tests(a: &mut App) -> String {
                 let f = k as f32 / 4.0;
                 a.cur = (lerp(a.cur.0, tgt.0, f), lerp(a.cur.1, tgt.1, f), lerp(a.cur.2, tgt.2, f));
                 a.render(tgt, if k < 4 { 20.0 } else { 0.0 });
-                // The glass also fills the flares beside it at the screen edge.
-                let n = a.edge_rect(a.cur.0, a.cur.1);
-                let ear = (a.cur.1 / 4.0).min(9.0);
-                let notch = Rect::new(n.x - ear, n.y, n.w + ear * 2.0, n.h);
+                let notch = a.edge_rect(a.cur.0, a.cur.1);
                 if let Some((_, _, _, at)) = &a.backdrop {
                     covers &= (at.x - notch.x).abs() <= 4.0 / a.scale + 1.0 && (at.r() - notch.r()).abs() <= 4.0 / a.scale + 1.0 && (at.b() - notch.b()).abs() <= 4.0 / a.scale + 1.0;
                 } else {
