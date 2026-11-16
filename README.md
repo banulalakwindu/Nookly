@@ -19,10 +19,19 @@ Free, open source, private, and light enough that you'll forget it's running.</p
 
 - **Everything one hover away.** Rest the mouse on the notch and it opens; move away and it tucks itself back. Or press **Win+Alt+N** from anywhere.
 - **Only what you want.** Start from a preset (Minimal, Student, Work, Everything) and switch every feature on or off. What's off doesn't run at all.
-- **Light and smooth.** Written in Rust, drawn on the GPU, and it reacts to events instead of polling. It idles near zero CPU.
+- **Tiny and light.** A ~3 MB download that uses about 30 MB of memory and next to no CPU while it rests. Written in Rust, drawn on the GPU, and it reacts to events instead of polling.
 - **Yours alone.** No account, no ads, no tracking. Your data is plain text on your PC.
 - **Made to look good.** Five notch styles, ten themes plus Liquid Glass and your own, on any edge of any screen.
 - **Settings in its own window.** Every setting in one place, grouped, with a master switch to turn the notch on or off. The installer, uninstaller, About and tray menu wear the same style.
+
+## Light on your PC
+
+| | |
+|---|---|
+| **~3 MB** | The whole download: one small program, with no runtime, framework or browser engine to install alongside it |
+| **~30 MB of memory** | In everyday use, opening it and switching panels; much less than a browser tab |
+| **~0% CPU at rest** | It wakes for what happens (a song changes, you hover, a window moves) and sleeps the rest of the time |
+| **Only what you switch on** | A feature that's off doesn't run at all |
 
 ## What's inside
 
@@ -88,7 +97,7 @@ Everything Nookly keeps is plain text in `%APPDATA%\Nookly`. It goes online only
 
 ## Build it yourself
 
-Needs Rust (stable).
+Needs Rust (stable) with the MSVC toolchain and Visual Studio's C++ build tools; `rust-toolchain.toml` picks the toolchain for you.
 
 ```powershell
 cargo build --release                       # target\release\nookly.exe

@@ -2,6 +2,15 @@
 
 Versions 0.1.x below were released before the Nookly name.
 
+## 0.5.2: Liquid Glass follows what moves, lighter and always on top
+
+- **Liquid Glass keeps up with what's behind it**: scrolling a page, a video or anything else moving under the notch now shows in the glass within a moment, without waiting for a window to change. It looks around the notch a few times a second and refreshes only its own part, about 30 times a second while something moves, and costs nothing while nothing does.
+- **Cleaner glass**: the glass now fills the flared corners where the notch meets the screen edge, with its light following their curve; no more curve along the screen edge, no diagonal lines at the bottom corners, and no old colours at the sides when you switch to a wider panel.
+- **Smoother**: closing no longer stalls for a moment at the start, and the glints in the glass stay still while the notch rests.
+- **Stays on top**: if another window covers the notch, or Windows drops its always-on-top setting, it puts itself back on top within a second, or as soon as you switch apps. Menus, tooltips and the taskbar's own pop-ups are left alone.
+- **Lighter on memory**: memory a burst of activity used is handed back to Windows afterwards. Nookly is a ~3 MB download and uses about 30 MB of memory in everyday use.
+- Built with the latest Rust (1.100, 2024 edition) and the latest Windows bindings for Rust (`windows` 0.62).
+
 ## 0.5.1: Liquid Glass keeps up
 
 - **Liquid Glass shows the right background at once**: switching panels, opening the notch or a toast no longer shows the old, stretched background for a moment. One grab covers the whole area around the notch, aligned to the screen, so any size or shape shows exactly what's behind it.

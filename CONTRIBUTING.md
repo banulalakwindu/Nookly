@@ -17,7 +17,10 @@ code are all welcome.
 ## Build and test
 
 Nookly is a single Rust program for Windows 10 and 11. You need Rust
-(stable) and nothing else.
+(stable) with the MSVC toolchain and Visual Studio's C++ build tools
+(the "Desktop development with C++" workload, or Build Tools for Visual
+Studio). `rust-toolchain.toml` picks the MSVC toolchain for you, even
+when your default is GNU.
 
 ```powershell
 cargo build --release                       # target\release\nookly.exe

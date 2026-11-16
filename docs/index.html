@@ -135,6 +135,12 @@
   .mini b { display: block; margin-bottom: 4px; }
   .mini span { color: var(--dim); font-size: 14px; }
 
+  /* Performance */
+  .perf { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .perf div { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px 20px; }
+  .perf b { display: block; font-size: clamp(28px, 3.6vw, 38px); letter-spacing: -0.03em; line-height: 1.05; margin-bottom: 8px; background: linear-gradient(90deg, var(--amber), var(--amber2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .perf span { color: var(--dim); font-size: 14.5px; }
+
   /* Install */
   .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; counter-reset: s; }
   .steps div { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; counter-increment: s; }
@@ -158,14 +164,14 @@
 
   @media (max-width: 900px) {
     .grid { grid-template-columns: repeat(2, 1fr); }
-    .mini { grid-template-columns: repeat(2, 1fr); }
+    .mini, .perf { grid-template-columns: repeat(2, 1fr); }
     .split, .split.rev { grid-template-columns: 1fr; gap: 26px; }
     .split.rev .text { order: 0; }
     .steps { grid-template-columns: 1fr; }
     nav .links a.hide-sm { display: none; }
   }
   @media (max-width: 560px) {
-    .grid, .mini { grid-template-columns: 1fr; }
+    .grid, .mini, .perf { grid-template-columns: 1fr; }
     section { padding: 64px 0; }
     .hero { padding-top: 56px; }
   }
@@ -266,6 +272,22 @@
       <div><b>Mascots</b><span>Eight little companions that follow your mouse, on the notch or the taskbar.</span></div>
       <div><b>Its own windows</b><span>Settings, the installer, uninstaller, About and tray menu, all in the notch's style and your theme.</span></div>
       <div><b>Mic and camera dots</b><span>A dot while any app uses your microphone or camera.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="performance">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow">Light on your PC</div>
+      <h2>Tiny download, tiny footprint</h2>
+      <p class="sub">Nookly is one small program written in Rust and drawn on the GPU. It wakes for what happens and sleeps the rest of the time, so you can leave it running all day.</p>
+    </div>
+    <div class="perf">
+      <div><b>~3 MB</b><span>The whole download. No runtime, framework or browser engine to install alongside it.</span></div>
+      <div><b>~30 MB</b><span>Of memory in everyday use, opening it and switching panels. Less than a browser tab.</span></div>
+      <div><b>~0% CPU</b><span>At rest. A song changing, a hover or a window moving wakes it; nothing polls.</span></div>
+      <div><b>Only what's on</b><span>A feature you switch off doesn't run at all.</span></div>
     </div>
   </div>
 </section>
