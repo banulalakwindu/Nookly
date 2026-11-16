@@ -160,46 +160,39 @@ pub fn finish(w: u32, h: u32, mut px: Vec<u8>) -> Backdrop {
 /// is a little further in (the edge magnifies and bends what's behind it,
 /// like the rim of a lens), with a touch of light caught in the bend. Only
 /// the edge band is touched, on the small backdrop, so it costs next to
-/// nothing. `rad` is the corner radius in backdrop pixels. `open` sides
-/// (left, top, right, bottom) run on past the screen edge: no bend there,
-/// nor at the corners beside them.
-pub fn lens(px: &mut [u8], w: u32, h: u32, rad: f32, open: [bool; 4]) {
+/// nothing. Each edge bends on its own and near a corner the two bends add
+/// up, so they blend with no seam (choosing the nearest edge instead drew
+/// a diagonal line from each corner). `open` sides (left, top, right,
+/// bottom) run on past the screen edge: no bend there.
+pub fn lens(px: &mut [u8], w: u32, h: u32, open: [bool; 4]) {
     let (w, h) = (w as i32, h as i32);
     if w < 6 || h < 6 {
         return;
     }
     let src = px.to_vec();
     let band = (w.min(h) as f32 * 0.42).max(3.0);
-    let rad = rad.clamp(0.0, w.min(h) as f32 / 2.0);
-    // The shape the bend follows: an open side lies far beyond the picture.
-    let far = (w + h) as f32 * 4.0;
-    let l = if open[0] { -far } else { 0.0 };
-    let t = if open[1] { -far } else { 0.0 };
-    let r = w as f32 + if open[2] { far } else { 0.0 };
-    let b = h as f32 + if open[3] { far } else { 0.0 };
+    // How strongly an edge `d` pixels away bends (0 beyond the band).
+    let pull = |d: f32, open: bool| {
+        if open || d >= band {
+            0.0
+        } else {
+            let k = 1.0 - d.max(0.0) / band;
+            k * k
+        }
+    };
     for y in 0..h {
         for x in 0..w {
             let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            // Distance in from the rounded rectangle's edge, and the way in.
-            let (cx, cy) = (fx.clamp(l + rad, r - rad), fy.clamp(t + rad, b - rad));
-            let (d, nx, ny) = if (fx - cx).abs() > 0.0 && (fy - cy).abs() > 0.0 {
-                let (dx, dy) = (cx - fx, cy - fy);
-                let len = (dx * dx + dy * dy).sqrt().max(1e-3);
-                (rad - len, dx / len, dy / len)
-            } else {
-                let e = [(fx - l, 1.0, 0.0), (r - fx, -1.0, 0.0), (fy - t, 0.0, 1.0), (b - fy, 0.0, -1.0)];
-                let m = e.iter().fold(e[0], |a, b| if b.0 < a.0 { *b } else { a });
-                (m.0, m.1, m.2)
-            };
-            if d >= band || d < 0.0 {
+            let (kl, kr) = (pull(fx, open[0]), pull(w as f32 - fx, open[2]));
+            let (kt, kb) = (pull(fy, open[1]), pull(h as f32 - fy, open[3]));
+            let k = 1.0 - (1.0 - kl) * (1.0 - kr) * (1.0 - kt) * (1.0 - kb);
+            if k <= 0.0 {
                 continue;
             }
-            let k = 1.0 - d / band;
-            let shift = k * k * band * 0.6;
-            let sx = ((fx + nx * shift) as i32).clamp(0, w - 1);
-            let sy = ((fy + ny * shift) as i32).clamp(0, h - 1);
+            let sx = ((fx + (kl - kr) * band * 0.6) as i32).clamp(0, w - 1);
+            let sy = ((fy + (kt - kb) * band * 0.6) as i32).clamp(0, h - 1);
             let (i, j) = (((y * w + x) * 4) as usize, ((sy * w + sx) * 4) as usize);
-            let lift = k * k * 18.0;
+            let lift = k * 18.0;
             for c in 0..3 {
                 px[i + c] = (src[j + c] as f32 + lift).min(255.0) as u8;
             }

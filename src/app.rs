@@ -1417,7 +1417,7 @@ impl App {
         let ix1 = (((inner.r() * k).ceil().max(0.0) as u32).saturating_sub(x0)).min(cw);
         let iy1 = (((inner.b() * k).ceil().max(0.0) as u32).saturating_sub(y0)).min(ch);
         if (ix0, iy0, ix1, iy1) == (0, 0, cw, ch) {
-            crate::glass::lens(&mut px, cw, ch, rad * k, open);
+            crate::glass::lens(&mut px, cw, ch, open);
         } else if ix1 > ix0 + 1 && iy1 > iy0 + 1 {
             let (iw, ih) = (ix1 - ix0, iy1 - iy0);
             let mut body = Vec::with_capacity((iw * ih * 4) as usize);
@@ -1425,7 +1425,7 @@ impl App {
                 let s = ((y * cw + ix0) * 4) as usize;
                 body.extend_from_slice(&px[s..s + (iw * 4) as usize]);
             }
-            crate::glass::lens(&mut body, iw, ih, rad * k, open);
+            crate::glass::lens(&mut body, iw, ih, open);
             for y in 0..ih {
                 let d = (((iy0 + y) * cw + ix0) * 4) as usize;
                 let s = (y * iw * 4) as usize;
