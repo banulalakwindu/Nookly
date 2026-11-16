@@ -1389,7 +1389,10 @@ impl App {
             self.glass_light = false;
         }
         // Refraction: the edges bend what's behind, like thick glass.
-        crate::glass::lens(&mut px, cw, ch, rad * k);
+        // (not along the screen edge: the glass runs on past it).
+        let e = self.edge();
+        let open = [e == Edge::Left, e == Edge::Top, e == Edge::Right, e == Edge::Bottom];
+        crate::glass::lens(&mut px, cw, ch, rad * k, open);
         let at = Rect::new(x0 as f32 / k, y0 as f32 / k, cw as f32 / k, ch as f32 / k);
         // Same size as last time: refill the bitmap rather than make a new one.
         if let Some(b) = self.backdrop.as_mut().filter(|b| b.1 == self.gfx.generation) {

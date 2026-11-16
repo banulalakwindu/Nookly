@@ -160,8 +160,10 @@ pub fn finish(w: u32, h: u32, mut px: Vec<u8>) -> Backdrop {
 /// is a little further in (the edge magnifies and bends what's behind it,
 /// like the rim of a lens), with a touch of light caught in the bend. Only
 /// the edge band is touched, on the small backdrop, so it costs next to
-/// nothing. `rad` is the corner radius in backdrop pixels.
-pub fn lens(px: &mut [u8], w: u32, h: u32, rad: f32) {
+/// nothing. `rad` is the corner radius in backdrop pixels. `open` sides
+/// (left, top, right, bottom) run on past the screen edge: no bend there,
+/// nor at the corners beside them.
+pub fn lens(px: &mut [u8], w: u32, h: u32, rad: f32, open: [bool; 4]) {
     let (w, h) = (w as i32, h as i32);
     if w < 6 || h < 6 {
         return;
@@ -169,17 +171,23 @@ pub fn lens(px: &mut [u8], w: u32, h: u32, rad: f32) {
     let src = px.to_vec();
     let band = (w.min(h) as f32 * 0.42).max(3.0);
     let rad = rad.clamp(0.0, w.min(h) as f32 / 2.0);
+    // The shape the bend follows: an open side lies far beyond the picture.
+    let far = (w + h) as f32 * 4.0;
+    let l = if open[0] { -far } else { 0.0 };
+    let t = if open[1] { -far } else { 0.0 };
+    let r = w as f32 + if open[2] { far } else { 0.0 };
+    let b = h as f32 + if open[3] { far } else { 0.0 };
     for y in 0..h {
         for x in 0..w {
             let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
             // Distance in from the rounded rectangle's edge, and the way in.
-            let (cx, cy) = (fx.clamp(rad, w as f32 - rad), fy.clamp(rad, h as f32 - rad));
+            let (cx, cy) = (fx.clamp(l + rad, r - rad), fy.clamp(t + rad, b - rad));
             let (d, nx, ny) = if (fx - cx).abs() > 0.0 && (fy - cy).abs() > 0.0 {
                 let (dx, dy) = (cx - fx, cy - fy);
                 let len = (dx * dx + dy * dy).sqrt().max(1e-3);
                 (rad - len, dx / len, dy / len)
             } else {
-                let e = [(fx, 1.0, 0.0), (w as f32 - fx, -1.0, 0.0), (fy, 0.0, 1.0), (h as f32 - fy, 0.0, -1.0)];
+                let e = [(fx - l, 1.0, 0.0), (r - fx, -1.0, 0.0), (fy - t, 0.0, 1.0), (b - fy, 0.0, -1.0)];
                 let m = e.iter().fold(e[0], |a, b| if b.0 < a.0 { *b } else { a });
                 (m.0, m.1, m.2)
             };
