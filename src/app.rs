@@ -119,8 +119,15 @@ const TIMER_GLASS: usize = 8;
 /// times a second, to notice what's behind it changing with no window event
 /// (scrolling, a video, a page loading).
 const TIMER_GLASS_PROBE: usize = 9;
-/// How often the ring is checked (ms).
+/// How often the ring is checked (ms): at rest, and while what's behind is
+/// moving (until it has been still for GLASS_LIVE seconds).
 const GLASS_PROBE_MS: u32 = 200;
+const GLASS_LIVE_MS: u32 = 33;
+const GLASS_LIVE: f64 = 1.0;
+/// Margin (in grab pixels, 4 screen pixels each) kept around the notch when
+/// only its own part is grabbed again: wider than the blur reaches, so the
+/// patch's edge never shows inside the notch.
+const GLASS_PATCH_MARGIN: i32 = 7;
 /// Smart hide: after a window comes under the notch (or you switch to it),
 /// the notch stays out of the way this long; it also stays away until this
 /// long after the mouse leaves the area around it.
@@ -335,6 +342,11 @@ pub struct App {
     glass_shape: Option<Rect>,
     glass_probe: u64,
     glass_probing: bool,
+    /// What's behind is moving: the ring is checked fast until this time.
+    glass_live_until: f64,
+    glass_fast: bool,
+    /// The next grab must cover the whole window (the notch is opening).
+    glass_full: bool,
     excluded: bool,
     /// Hit under the mouse with a tooltip: (module, id, since, suppressed by a click).
     tip: Option<(usize, u32, f64, bool)>,
@@ -564,6 +576,9 @@ impl App {
                 glass_shape: None,
                 glass_probe: 0,
                 glass_probing: false,
+                glass_live_until: 0.0,
+                glass_fast: false,
+                glass_full: false,
                 excluded: false,
                 tip: None,
                 deferred: Vec::new(),
@@ -840,6 +855,11 @@ impl App {
         self.check_fullscreen();
         self.sync_glass_probe();
         self.keep_on_top();
+        // Once a minute while closed and untouched, give back memory that
+        // drawing and grabbing used and no longer need.
+        if self.mode() == Mode::Collapsed && !self.hover && now.sec == 30 {
+            trim_memory();
+        }
         crate::time::H12.store(self.settings.clock12, std::sync::atomic::Ordering::Relaxed);
         crate::time::SECONDS.store(self.settings.seconds, std::sync::atomic::Ordering::Relaxed);
         self.update_make_room();
@@ -1267,15 +1287,47 @@ impl App {
     /// are drawn), never while the notch moves; a resting closed notch draws
     /// no frames, so it costs nothing. Each frame just crops the notch's
     /// part and bends its edges (both tiny: a quarter of the pixels).
+    /// Refreshes at rest grab only the notch's own part (and a margin) and
+    /// patch it into the whole grab: a fraction of the work, so it can keep
+    /// up with a page scrolling behind.
     fn update_backdrop(&mut self, notch: Rect, t: f64, dist: f32, rad: f32) {
         let (pw, ph) = (self.gfx.pw, self.gfx.ph);
         let (gw, gh) = ((pw / 4).max(2) as u32, (ph / 4).max(2) as u32);
-        let stale = match &self.glass_raw {
+        let whole = match &self.glass_raw {
             None => true,
-            Some(r) => self.glass_dirty || r.origin != self.origin || (r.w, r.h) != (gw, gh) || (dist <= 0.0 && t - r.at > 1.0),
+            Some(r) => self.glass_full || r.origin != self.origin || (r.w, r.h) != (gw, gh),
         };
-        self.glass_dirty = false;
-        if stale {
+        let stale = whole || self.glass_dirty || self.glass_raw.as_ref().map_or(false, |r| dist <= 0.0 && t - r.at > 1.0);
+        let testing = crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed);
+        if stale && !whole && !testing {
+            self.glass_dirty = false;
+            if let Some(raw) = self.glass_raw.as_mut() {
+                // The notch's part of the grab, with a margin, in grab pixels.
+                let k = raw.w as f32 / (pw as f32 / self.scale);
+                let m = GLASS_PATCH_MARGIN;
+                let bx0 = ((notch.x * k).floor() as i32 - m).clamp(0, raw.w as i32);
+                let by0 = ((notch.y * k).floor() as i32 - m).clamp(0, raw.h as i32);
+                let bx1 = ((notch.r() * k).ceil() as i32 + m).clamp(0, raw.w as i32);
+                let by1 = ((notch.b() * k).ceil() as i32 + m).clamp(0, raw.h as i32);
+                let (ox, oy) = self.origin;
+                let r = RECT { left: ox + bx0 * 4, top: oy + by0 * 4, right: ox + bx1 * 4, bottom: oy + by1 * 4 };
+                let t0 = std::time::Instant::now();
+                let grab = crate::glass::capture_behind(self.hwnd, r);
+                dlog(format!("glass grab: notch part {}x{} px, {:.1} ms", r.right - r.left, r.bottom - r.top, t0.elapsed().as_secs_f32() * 1000.0));
+                if let Some((w, h, px, _)) = grab {
+                    let (w, h) = (w.min((bx1 - bx0) as u32) as usize, h.min((by1 - by0) as u32) as usize);
+                    for y in 0..h {
+                        let d = ((by0 as usize + y) * raw.w as usize + bx0 as usize) * 4;
+                        let s = y * w * 4;
+                        raw.px[d..d + w * 4].copy_from_slice(&px[s..s + w * 4]);
+                    }
+                    raw.at = t;
+                    raw.serial = raw.serial.wrapping_add(1);
+                }
+            }
+        } else if stale {
+            self.glass_dirty = false;
+            self.glass_full = false;
             let testing = crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed);
             let data = if testing {
                 // Renders and tests: a made-up background (light, dark, colour).
@@ -1325,8 +1377,16 @@ impl App {
         }
         // Refraction: the edges bend what's behind, like thick glass.
         crate::glass::lens(&mut px, cw, ch, rad * k);
+        let at = Rect::new(x0 as f32 / k, y0 as f32 / k, cw as f32 / k, ch as f32 / k);
+        // Same size as last time: refill the bitmap rather than make a new one.
+        if let Some(b) = self.backdrop.as_mut().filter(|b| b.1 == self.gfx.generation) {
+            if crate::gfx::refill_bitmap(&b.0, cw, ch, &px) {
+                b.2 = key;
+                b.3 = at;
+                return;
+            }
+        }
         if let Some(b) = self.gfx.make_bitmap(cw, ch, &px) {
-            let at = Rect::new(x0 as f32 / k, y0 as f32 / k, cw as f32 / k, ch as f32 / k);
             self.backdrop = Some((b, self.gfx.generation, key, at));
         }
     }
@@ -1356,6 +1416,7 @@ impl App {
         }
         self.glass_probing = want;
         self.glass_probe = 0;
+        self.glass_fast = false;
         unsafe {
             if want {
                 SetTimer(Some(self.hwnd), TIMER_GLASS_PROBE, GLASS_PROBE_MS, None);
@@ -1384,9 +1445,23 @@ impl App {
         ];
         let Some(h) = crate::glass::probe(&ring) else { return };
         let before = std::mem::replace(&mut self.glass_probe, h);
+        let t = self.t();
         if before != 0 && before != h {
             self.glass_dirty = true;
+            self.glass_live_until = t + GLASS_LIVE;
             self.request_frame();
+        }
+        // Moving behind: look again every frame or two; still: slow down.
+        let fast = t < self.glass_live_until;
+        if fast != self.glass_fast {
+            self.glass_fast = fast;
+            if !fast {
+                // A burst of grabs just ended: hand the memory it used back.
+                trim_memory();
+            }
+            unsafe {
+                SetTimer(Some(self.hwnd), TIMER_GLASS_PROBE, if fast { GLASS_LIVE_MS } else { GLASS_PROBE_MS }, None);
+            }
         }
     }
 
@@ -2019,6 +2094,7 @@ impl App {
         let open = self.mode() != Mode::Collapsed;
         if open && !self.glass_was_open {
             self.glass_dirty = true;
+            self.glass_full = true;
         }
         self.glass_was_open = open;
 
@@ -8227,6 +8303,19 @@ extern "system" fn on_movesize(_h: windows::Win32::UI::Accessibility::HWINEVENTH
             a.glass_changed();
         }
     });
+}
+
+/// Give memory that's no longer in use back to Windows: free heap pages,
+/// and the working set (pages still needed come back on their own).
+pub fn trim_memory() {
+    unsafe {
+        use windows::Win32::System::Memory::{GetProcessHeap, HeapCompact, HEAP_FLAGS};
+        use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
+        if let Ok(h) = GetProcessHeap() {
+            HeapCompact(h, HEAP_FLAGS(0));
+        }
+        let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
+    }
 }
 
 /// Is a visible window above the notch in the z-order and over its place?

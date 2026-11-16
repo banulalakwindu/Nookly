@@ -1039,3 +1039,14 @@ pub fn make_tray_icon() -> HICON {
         icon
     }
 }
+
+/// Put new pixels into a bitmap of the same size (false if the size differs).
+pub fn refill_bitmap(bmp: &ID2D1Bitmap, w: u32, h: u32, bgra: &[u8]) -> bool {
+    unsafe {
+        let sz = bmp.GetPixelSize();
+        if (sz.width, sz.height) != (w, h) || bgra.len() < (w * h * 4) as usize {
+            return false;
+        }
+        bmp.CopyFromMemory(None, bgra.as_ptr() as _, w * 4).is_ok()
+    }
+}
