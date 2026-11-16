@@ -1517,9 +1517,20 @@ impl App {
         let a = if light { 1.0 } else { 0.8 };
         let white = hex(0xFFFFFF);
         self.gfx.push_layer(Some(geo), 1.0);
-        // Fresnel rim: half of each stroke falls outside and is clipped.
+        // Fresnel rim: half of each stroke falls outside and is clipped. It
+        // runs round the body only, as if the glass went on past the screen
+        // edge: no rim along that edge or the flared corners beside it, so
+        // the corners read as glass, not as a rounded cut-out.
+        let (len, dep) = if self.edge().vertical() { (notch.h, notch.w) } else { (notch.w, notch.h) };
+        let rad = self.cur.2.min(dep / 2.0).min(len / 2.0).max(0.0);
+        let body = match self.edge() {
+            Edge::Top => Rect::new(notch.x, notch.y - 60.0, notch.w, notch.h + 60.0),
+            Edge::Bottom => Rect::new(notch.x, notch.y, notch.w, notch.h + 60.0),
+            Edge::Left => Rect::new(notch.x - 60.0, notch.y, notch.w + 60.0, notch.h),
+            Edge::Right => Rect::new(notch.x, notch.y, notch.w + 60.0, notch.h),
+        };
         for (w, k) in [(2.0, 0.32), (7.0, 0.10), (16.0, 0.05), (30.0, 0.022)] {
-            self.gfx.stroke_geometry_raw(geo, white.with_a(k * a), w);
+            self.gfx.stroke_rr_raw(body, rad, white.with_a(k * a), w);
         }
         // Light from above: a soft band along the top inside edge.
         for k in 0..6 {
