@@ -71,7 +71,7 @@ fn fmt(cf: u16) -> FORMATETC {
 }
 
 /// Paths from CF_HDROP, or a .url shortcut for links dragged from a browser.
-unsafe fn extract(d: &IDataObject) -> Vec<String> {
+unsafe fn extract(d: &IDataObject) -> Vec<String> { unsafe {
     let mut out = Vec::new();
     if let Ok(mut med) = d.GetData(&fmt(CF_HDROP.0)) {
         let h = HDROP(med.u.hGlobal.0);
@@ -104,7 +104,7 @@ unsafe fn extract(d: &IDataObject) -> Vec<String> {
         }
     }
     out
-}
+}}
 
 /// Store a dropped link as an Internet Shortcut so it can live on the shelf.
 fn save_url(url: &str) -> Option<String> {

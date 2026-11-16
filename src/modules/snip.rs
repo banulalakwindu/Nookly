@@ -175,7 +175,7 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().collect()
 }
 
-unsafe fn paint(ov: &Overlay) {
+unsafe fn paint(ov: &Overlay) { unsafe {
     let mut ps = PAINTSTRUCT::default();
     let hdc = BeginPaint(ov.hwnd, &mut ps);
     let rc = ps.rcPaint;
@@ -229,9 +229,9 @@ unsafe fn paint(ov: &Overlay) {
         let _ = DeleteDC(bb);
     }
     let _ = EndPaint(ov.hwnd, &ps);
-}
+}}
 
-unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT { unsafe {
     let xy = || (((lp.0 & 0xffff) as u16 as i16) as i32, (((lp.0 >> 16) & 0xffff) as u16 as i16) as i32);
     match msg {
         WM_PAINT => {
@@ -307,7 +307,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         WM_DPICHANGED => LRESULT(0),
         _ => DefWindowProcW(hwnd, msg, wp, lp),
     }
-}
+}}
 
 // ------------------------------------------------------------ saving
 

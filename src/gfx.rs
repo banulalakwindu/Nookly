@@ -313,7 +313,7 @@ pub struct Gfx {
     pub alpha: f32,
     /// Bumped whenever the render target is recreated; bitmaps made with an
     /// older generation must be rebuilt (see `music.rs`).
-    pub gen: u32,
+    pub generation: u32,
     layers: Vec<ID2D1Layer>,
     /// The colour theme every draw call goes through.
     pub theme: Theme,
@@ -374,7 +374,7 @@ impl Gfx {
                 ph: 0,
                 scale: 1.0,
                 alpha: 1.0,
-                gen: 0,
+                generation: 0,
                 layers: Vec::new(),
                 theme: THEMES[0],
             };
@@ -383,7 +383,7 @@ impl Gfx {
         }
     }
 
-    unsafe fn make_rt(factory: &ID2D1Factory) -> Result<ID2D1DCRenderTarget> {
+    unsafe fn make_rt(factory: &ID2D1Factory) -> Result<ID2D1DCRenderTarget> { unsafe {
         let props = D2D1_RENDER_TARGET_PROPERTIES {
             r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
             pixelFormat: D2D1_PIXEL_FORMAT {
@@ -398,7 +398,7 @@ impl Gfx {
         let rt = factory.CreateDCRenderTarget(&props)?;
         rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
         Ok(rt)
-    }
+    }}
 
     pub fn resize(&mut self, pw: i32, ph: i32) -> Result<()> {
         if pw == self.pw && ph == self.ph {
@@ -457,7 +457,7 @@ impl Gfx {
                             self.brush = b;
                         }
                         self.layers.clear();
-                        self.gen += 1;
+                        self.generation += 1;
                         let (pw, ph) = (self.pw, self.ph);
                         self.pw = 0;
                         let _ = self.resize(pw, ph);

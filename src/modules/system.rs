@@ -34,7 +34,7 @@ fn wake(h: isize) {
 /// Low-level keyboard hook: wakes the app right after Caps Lock or a
 /// language-switch chord so the toast appears instantly instead of on the
 /// next 1 s tick.
-unsafe extern "system" fn kb_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+unsafe extern "system" fn kb_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT { unsafe {
     if code >= 0 && (wp.0 as u32 == WM_KEYUP || wp.0 as u32 == WM_SYSKEYUP) {
         let k = &*(lp.0 as *const KBDLLHOOKSTRUCT);
         let vk = VIRTUAL_KEY(k.vkCode as u16);
@@ -43,7 +43,7 @@ unsafe extern "system" fn kb_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT 
         }
     }
     CallNextHookEx(None, code, wp, lp)
-}
+}}
 
 #[implement(IAudioEndpointVolumeCallback)]
 struct VolCb {

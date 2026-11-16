@@ -576,11 +576,11 @@ impl Module for Clipboard {
             if let Content::Image(im) = &e.content {
                 // Thumbnail instead of an icon.
                 let tr = row.cut_left(40.0, 8.0).centered(40.0, 24.0);
-                let fresh = matches!(self.thumbs.get(&e.id), Some((g, _)) if *g == ui.gen);
+                let fresh = matches!(self.thumbs.get(&e.id), Some((g, _)) if *g == ui.generation);
                 if !fresh {
                     let (tw, th, px) = &im.thumb;
                     if let Some(b) = ui.make_bitmap(*tw, *th, px) {
-                        self.thumbs.insert(e.id, (ui.gen, b));
+                        self.thumbs.insert(e.id, (ui.generation, b));
                     }
                 }
                 ui.fill_rr(tr, 4.0, col::TEXT.with_a(0.08));
@@ -957,7 +957,7 @@ fn open_clipboard(owner: HWND) -> bool {
 
 /// True when the app that copied asked monitors not to record it
 /// (password managers do this for passwords and one-time codes).
-unsafe fn is_private() -> bool {
+unsafe fn is_private() -> bool { unsafe {
     for name in [w!("ExcludeClipboardContentFromMonitorProcessing"), w!("Clipboard Viewer Ignore")] {
         let f = RegisterClipboardFormatW(name);
         if f != 0 && IsClipboardFormatAvailable(f).is_ok() {
@@ -978,7 +978,7 @@ unsafe fn is_private() -> bool {
         }
     }
     false
-}
+}}
 
 /// Read what is on the clipboard, limited by `mode` (0 text, 1 + files,
 /// 2 + images). Text wins over a picture when both are offered (Excel and

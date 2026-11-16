@@ -187,7 +187,7 @@ struct ArtTrack {
     hash: u64,
 }
 
-unsafe fn poll(mgr: &GlobalSystemMediaTransportControlsSessionManager, shared: &Arc<Mutex<MediaInfo>>, art_st: &mut ArtTrack) -> MediaInfo {
+unsafe fn poll(mgr: &GlobalSystemMediaTransportControlsSessionManager, shared: &Arc<Mutex<MediaInfo>>, art_st: &mut ArtTrack) -> MediaInfo { unsafe {
     let prev = shared.lock().unwrap().clone();
     let Ok(s) = mgr.GetCurrentSession() else {
         art_st.key = String::new();
@@ -258,7 +258,7 @@ unsafe fn poll(mgr: &GlobalSystemMediaTransportControlsSessionManager, shared: &
         }
     }
     info
-}
+}}
 
 fn fnv1a(b: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
@@ -303,7 +303,7 @@ pub(crate) unsafe fn read_stream_bytes(r: &windows::Storage::Streams::IRandomAcc
 }
 
 /// Decode any image WIC understands, centre-crop to a square, scale to `side`.
-pub(crate) unsafe fn decode_square(bytes: &[u8], side: u32) -> Option<(u32, u32, Vec<u8>)> {
+pub(crate) unsafe fn decode_square(bytes: &[u8], side: u32) -> Option<(u32, u32, Vec<u8>)> { unsafe {
     let f: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).ok()?;
     let stream = f.CreateStream().ok()?;
     stream.InitializeFromMemory(bytes).ok()?;
@@ -326,7 +326,7 @@ pub(crate) unsafe fn decode_square(bytes: &[u8], side: u32) -> Option<(u32, u32,
     let mut px = vec![0u8; (side * side * 4) as usize];
     conv.CopyPixels(std::ptr::null(), side * 4, &mut px).ok()?;
     Some((side, side, px))
-}
+}}
 
 // ------------------------------------------------------------------ lyrics
 
@@ -553,11 +553,11 @@ impl Music {
 
     fn art_bitmap(&mut self, ui: &mut Ui) -> Option<ID2D1Bitmap> {
         let art = self.info.art.clone()?;
-        let ok = matches!(&self.art, Some((v, g, _)) if *v == self.info.art_ver && *g == ui.gen);
+        let ok = matches!(&self.art, Some((v, g, _)) if *v == self.info.art_ver && *g == ui.generation);
         if !ok {
             let (w, h, px) = &*art;
             let bmp = ui.make_bitmap(*w, *h, px)?;
-            self.art = Some((self.info.art_ver, ui.gen, bmp));
+            self.art = Some((self.info.art_ver, ui.generation, bmp));
         }
         self.art.as_ref().map(|(_, _, b)| b.clone())
     }

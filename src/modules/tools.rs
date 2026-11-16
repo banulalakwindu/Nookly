@@ -710,7 +710,7 @@ pub mod picker {
         }
     }
 
-    unsafe extern "system" fn add_monitor(_m: HMONITOR, _dc: HDC, r: *mut RECT, lp: LPARAM) -> BOOL {
+    unsafe extern "system" fn add_monitor(_m: HMONITOR, _dc: HDC, r: *mut RECT, lp: LPARAM) -> BOOL { unsafe {
         let u = &mut *(lp.0 as *mut RECT);
         let r = &*r;
         if u.right <= u.left {
@@ -722,7 +722,7 @@ pub mod picker {
             u.bottom = u.bottom.max(r.bottom);
         }
         TRUE
-    }
+    }}
 
     /// Set while the notch's window is hidden for a screen capture.
     static APP_HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -903,7 +903,7 @@ pub mod picker {
         s.encode_utf16().collect()
     }
 
-    unsafe fn paint(ov: &Overlay) {
+    unsafe fn paint(ov: &Overlay) { unsafe {
         let mut ps = PAINTSTRUCT::default();
         let hdc = BeginPaint(ov.hwnd, &mut ps);
         let rc = ps.rcPaint;
@@ -965,7 +965,7 @@ pub mod picker {
             let _ = DeleteDC(bb);
         }
         let _ = EndPaint(ov.hwnd, &ps);
-    }
+    }}
 
     fn invalidate(ov: &Overlay, old: (i32, i32)) {
         unsafe {
@@ -981,7 +981,7 @@ pub mod picker {
         }
     }
 
-    unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT { unsafe {
         let xy = || (((lp.0 & 0xffff) as u16 as i16) as i32, (((lp.0 >> 16) & 0xffff) as u16 as i16) as i32);
         match msg {
             WM_PAINT => {
@@ -1056,7 +1056,7 @@ pub mod picker {
             WM_DPICHANGED => LRESULT(0),
             _ => DefWindowProcW(hwnd, msg, wp, lp),
         }
-    }
+    }}
 }
 
 // ----------------------------------------------------------------- module

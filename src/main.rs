@@ -45,7 +45,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 /// wake on a precise high-resolution timer, and when nothing moves the
 /// thread sleeps until a message arrives. (A plain Windows timer ticks in
 /// ~15.6 ms steps and is delayed freely, which made animations choppy.)
-unsafe fn run_loop() {
+unsafe fn run_loop() { unsafe {
     const TIMER_ALL_ACCESS: u32 = 0x1F0003;
     let timer = CreateWaitableTimerExW(None, PCWSTR::null(), CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS)
         .or_else(|_| CreateWaitableTimerExW(None, PCWSTR::null(), 0, TIMER_ALL_ACCESS))
@@ -91,7 +91,7 @@ unsafe fn run_loop() {
             }
         }
     }
-}
+}}
 
 fn main() {
     // Run by Claude Code / Codex hooks: hand the event to the notch and quit

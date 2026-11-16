@@ -154,14 +154,14 @@ const K_VID: DEVPROPKEY = key(0x2BD67D8B_8BEB_48D5_87E0_6CDA3428040A, 7);
 const K_CLASS: DEVPROPKEY = key(0x2BD67D8B_8BEB_48D5_87E0_6CDA3428040A, 10);
 
 /// Raw property bytes of one device.
-unsafe fn prop(set: HDEVINFO, d: &SP_DEVINFO_DATA, k: &DEVPROPKEY) -> Option<Vec<u8>> {
+unsafe fn prop(set: HDEVINFO, d: &SP_DEVINFO_DATA, k: &DEVPROPKEY) -> Option<Vec<u8>> { unsafe {
     let mut ty = DEVPROPTYPE(0);
     let mut buf = vec![0u8; 512];
     let mut need = 0u32;
     SetupDiGetDevicePropertyW(set, d, k, &mut ty, Some(&mut buf), Some(&mut need), 0).ok()?;
     buf.truncate(need as usize);
     Some(buf)
-}
+}}
 
 fn utf16(b: &[u8]) -> String {
     let w: Vec<u16> = b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|c| *c != 0).collect();

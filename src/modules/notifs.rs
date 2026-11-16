@@ -267,7 +267,7 @@ pub fn app_icon(aumid: &str) -> Option<Arc<(u32, u32, Vec<u8>)>> {
     icon
 }
 
-unsafe fn shell_icon(aumid: &str, side: i32) -> Option<(u32, u32, Vec<u8>)> {
+unsafe fn shell_icon(aumid: &str, side: i32) -> Option<(u32, u32, Vec<u8>)> { unsafe {
     use windows::Win32::Foundation::SIZE;
     use windows::Win32::Graphics::Gdi::*;
     use windows::Win32::UI::Shell::*;
@@ -292,7 +292,7 @@ unsafe fn shell_icon(aumid: &str, side: i32) -> Option<(u32, u32, Vec<u8>)> {
         px = resize_nearest(&px, w as usize, h as usize, side as usize);
     }
     Some((side as u32, side as u32, px))
-}
+}}
 
 fn resize_nearest(px: &[u8], w: usize, h: usize, side: usize) -> Vec<u8> {
     let mut out = vec![0u8; side * side * 4];
@@ -306,7 +306,7 @@ fn resize_nearest(px: &[u8], w: usize, h: usize, side: usize) -> Vec<u8> {
 }
 
 /// The watcher thread (see the module docs).
-fn watch(inbox: Arc<Mutex<Vec<Note>>>, hwnd: isize, gen: u32) {
+fn watch(inbox: Arc<Mutex<Vec<Note>>>, hwnd: isize, generation: u32) {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
     }
@@ -318,7 +318,7 @@ fn watch(inbox: Arc<Mutex<Vec<Note>>>, hwnd: isize, gen: u32) {
     let mut last_read = Instant::now() - Duration::from_secs(60);
     loop {
         std::thread::sleep(Duration::from_millis(400));
-        if GEN.load(Ordering::Relaxed) != gen {
+        if GEN.load(Ordering::Relaxed) != generation {
             return;
         }
         BEAT.store(crate::time::unix_now() as u64, Ordering::Relaxed);
@@ -466,9 +466,9 @@ impl Module for Notifs {
             }
             self.started = true;
             BEAT.store(crate::time::unix_now() as u64, Ordering::Relaxed);
-            let gen = GEN.fetch_add(1, Ordering::Relaxed) + 1;
+            let generation = GEN.fetch_add(1, Ordering::Relaxed) + 1;
             let (inbox, hwnd) = (self.inbox.clone(), self.hwnd);
-            std::thread::spawn(move || watch(inbox, hwnd, gen));
+            std::thread::spawn(move || watch(inbox, hwnd, generation));
         }
         // Just turned on: Windows keeps showing its own banners unless the
         // user switches them off, so offer the way there once.

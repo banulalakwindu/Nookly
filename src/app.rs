@@ -1306,7 +1306,7 @@ impl App {
             return;
         }
         let key = ((x0 as u64) << 48) ^ ((y0 as u64) << 36) ^ ((x1 as u64) << 24) ^ ((y1 as u64) << 12) ^ ((rad * k) as u64) ^ ((raw.serial as u64) << 56);
-        if self.backdrop.as_ref().map_or(false, |b| b.1 == self.gfx.gen && b.2 == key) {
+        if self.backdrop.as_ref().map_or(false, |b| b.1 == self.gfx.generation && b.2 == key) {
             return;
         }
         let (cw, ch) = (x1 - x0, y1 - y0);
@@ -1327,7 +1327,7 @@ impl App {
         crate::glass::lens(&mut px, cw, ch, rad * k);
         if let Some(b) = self.gfx.make_bitmap(cw, ch, &px) {
             let at = Rect::new(x0 as f32 / k, y0 as f32 / k, cw as f32 / k, ch as f32 / k);
-            self.backdrop = Some((b, self.gfx.gen, key, at));
+            self.backdrop = Some((b, self.gfx.generation, key, at));
         }
     }
 
@@ -2936,10 +2936,10 @@ impl App {
         let bmp = toast.image.as_ref().and_then(|img| {
             let key = std::sync::Arc::as_ptr(img) as usize;
             match &self.toast_bmp {
-                Some((k, g, b)) if *k == key && *g == self.gfx.gen => Some(b.clone()),
+                Some((k, g, b)) if *k == key && *g == self.gfx.generation => Some(b.clone()),
                 _ => {
                     let b = self.gfx.make_bitmap(img.0, img.1, &img.2)?;
-                    self.toast_bmp = Some((key, self.gfx.gen, b.clone()));
+                    self.toast_bmp = Some((key, self.gfx.generation, b.clone()));
                     Some(b)
                 }
             }
@@ -5435,7 +5435,8 @@ pub fn selftest() -> String {
                 let _ = std::fs::remove_dir_all(&hh);
                 let _ = std::fs::create_dir_all(&hh);
                 let _ = std::fs::write(hh.join("config.yaml"), "hooks:\n  pre_tool_call:\n  - command: mine.sh\n    matcher: terminal\n");
-                std::env::set_var("NOOKLY_HERMES_HOME", &hh);
+                // Safe: the self-test and doc renders run on one thread.
+                unsafe { std::env::set_var("NOOKLY_HERMES_HOME", &hh) };
                 let t0 = std::time::Instant::now();
                 let c1 = ag::hermes_connect(true);
                 let cfg = std::fs::read_to_string(hh.join("config.yaml")).unwrap_or_default();
@@ -5446,7 +5447,8 @@ pub fn selftest() -> String {
                 let allow2 = std::fs::read_to_string(hh.join("shell-hooks-allowlist.json")).unwrap_or_default();
                 let ok = c1.is_ok() && c2.is_ok() && linked && cfg.contains("on_stream_start") && cfg.contains("mine.sh") && allow.matches("--agent-event hermes").count() == 6 && !cfg2.contains("agent-event") && cfg2.contains("mine.sh") && !allow2.contains("agent-event") && ag::hermes_link() == Link::Off;
                 out += &format!("{:<4} real hermes CLI: connect writes 6 hooks + consent, keeps the user's hook, disconnect removes them ({:.1} s) {:?}\n", if ok { "OK" } else { "FAIL" }, t0.elapsed().as_secs_f32(), (c1, c2, linked));
-                std::env::remove_var("NOOKLY_HERMES_HOME");
+                // Safe: the self-test and doc renders run on one thread.
+                unsafe { std::env::remove_var("NOOKLY_HERMES_HOME") };
             }
             // The hook keeps only status fields: no prompt, no file contents.
             let big = json!({"hook_event_name": "PostToolUse", "session_id": "s", "cwd": "C:/x/y", "tool_name": "Read", "prompt": "SECRET-PROMPT", "tool_input": {"file_path": "C:/x/.env"}, "tool_response": {"content": "SECRET-FILE"}});
@@ -5497,7 +5499,8 @@ pub fn selftest() -> String {
             let home = crate::store::dir().join("agent-home");
             let _ = std::fs::remove_dir_all(&home);
             let _ = std::fs::create_dir_all(&home);
-            std::env::set_var("NOOKLY_AGENT_HOME", &home);
+            // Safe: the self-test and doc renders run on one thread.
+            unsafe { std::env::set_var("NOOKLY_AGENT_HOME", &home) };
             let missing = ag::claude_link() == Link::Missing && ag::claude_connect(true).is_err() && ag::codex_link() == Link::Missing;
             let _ = std::fs::create_dir_all(home.join(".claude"));
             let original = "{\n  \"model\": \"opus\",\n  \"hooks\": {\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo mine\"\n          }\n        ]\n      }\n    ]\n  },\n  \"zzz\": 1\n}\n";
@@ -5534,9 +5537,11 @@ pub fn selftest() -> String {
             ag::disconnect_all();
             out += &format!("{:<4} uninstall disconnects both agents\n", if ag::claude_link() == Link::Off && ag::codex_link() == Link::Off { "OK" } else { "FAIL" });
             // Never the real Hermes during tests.
-            std::env::remove_var("NOOKLY_HERMES_HOME");
+            // Safe: the self-test and doc renders run on one thread.
+            unsafe { std::env::remove_var("NOOKLY_HERMES_HOME") };
             out += &format!("{:<4} self-test can't reach the real Hermes or agent settings ({:?}, {:?})\n", if ag::hermes_home().is_none() && ag::hermes_link() == Link::Missing { "OK" } else { "FAIL" }, ag::hermes_home(), ag::hermes_link());
-            std::env::remove_var("NOOKLY_AGENT_HOME");
+            // Safe: the self-test and doc renders run on one thread.
+            unsafe { std::env::remove_var("NOOKLY_AGENT_HOME") };
             let _ = std::fs::remove_dir_all(&home);
             a.call(ai, |m, c| m.action(ag::A_DEMO, (0.0, 0.0), c));
             a.expanded = true;
@@ -6553,7 +6558,8 @@ pub fn render_docs(dir: &std::path::Path) -> String {
             let scene = std::env::var("NOOKLY_GLASS_SCENE").ok().filter(|p| std::path::Path::new(p).exists());
             let kinds: Vec<(String, &str)> = scene.into_iter().map(|p| (p, "glass_scene")).chain([("color".to_string(), "glass_color"), ("light".to_string(), "glass_light")]).collect();
             for (kind, name) in kinds {
-                std::env::set_var("NOOKLY_RENDER_BACKDROP", &kind);
+                // Safe: the self-test and doc renders run on one thread.
+                unsafe { std::env::set_var("NOOKLY_RENDER_BACKDROP", &kind) };
                 a.backdrop = None;
                 a.glass_raw = None;
                 let tgt = a.target();
@@ -6564,7 +6570,8 @@ pub fn render_docs(dir: &std::path::Path) -> String {
                 let full = kind.ends_with(".raw").then(|| (0, 0, a.gfx.pw - 1, a.gfx.ph - 1));
                 write_raw(&a.gfx, &dir.join(format!("{name}.raw")), full);
             }
-            std::env::remove_var("NOOKLY_RENDER_BACKDROP");
+            // Safe: the self-test and doc renders run on one thread.
+            unsafe { std::env::remove_var("NOOKLY_RENDER_BACKDROP") };
             (a.settings.theme, a.tab) = (theme, tab);
             a.backdrop = None;
             a.glass_raw = None;
@@ -8225,7 +8232,7 @@ extern "system" fn on_movesize(_h: windows::Win32::UI::Accessibility::HWINEVENTH
 /// Is a visible window above the notch in the z-order and over its place?
 /// Menus, tooltips, the shell's own pop-ups and see-through overlays don't
 /// count: those come and go on their own.
-unsafe fn window_above(me: HWND, area: RECT) -> bool {
+unsafe fn window_above(me: HWND, area: RECT) -> bool { unsafe {
     const SKIP: &[&str] = &["#32768", "tooltips_class32", "Xaml_WindowedPopupClass", "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "NotifyIconOverflowWindow", "Windows.UI.Core.CoreWindow", "XamlExplorerHostIslandWindow", "TopLevelWindowForOverflowXamlIsland", "ForegroundStaging", "SysShadow", "IME", "MSCTFIME UI"];
     let mut h = GetWindow(me, GW_HWNDPREV).unwrap_or_default();
     let mut n = 0;
@@ -8252,7 +8259,7 @@ unsafe fn window_above(me: HWND, area: RECT) -> bool {
         h = GetWindow(h, GW_HWNDPREV).unwrap_or_default();
     }
     false
-}
+}}
 
 /// Looking for a window under the notch (EnumWindows).
 struct UnderSearch {
@@ -8265,19 +8272,19 @@ struct UnderSearch {
 /// Does this window sit under the notch's area? Skips our own windows,
 /// hidden, minimized and cloaked ones, tool windows, click-through overlays,
 /// the desktop and the taskbar.
-unsafe extern "system" fn under_cb(h: HWND, lp: LPARAM) -> BOOL {
+unsafe extern "system" fn under_cb(h: HWND, lp: LPARAM) -> BOOL { unsafe {
     let s = &mut *(lp.0 as *mut UnderSearch);
     if covers(h, s.area, s.me, s.pid) {
         s.found = true;
         return FALSE;
     }
     TRUE
-}
+}}
 
 /// Is this window under `area`? False for our own windows, hidden,
 /// minimized and cloaked ones, tool windows, click-through overlays, the
 /// desktop, the taskbar and small popups.
-unsafe fn covers(h: HWND, area: RECT, me: HWND, me_pid: u32) -> bool {
+unsafe fn covers(h: HWND, area: RECT, me: HWND, me_pid: u32) -> bool { unsafe {
     if h == me || !IsWindowVisible(h).as_bool() || IsIconic(h).as_bool() {
         return false;
     }
@@ -8311,7 +8318,7 @@ unsafe fn covers(h: HWND, area: RECT, me: HWND, me_pid: u32) -> bool {
         return false;
     }
     under_rect(wr, area)
-}
+}}
 
 /// Two screen rectangles overlap.
 pub(crate) fn under_rect(w: RECT, area: RECT) -> bool {

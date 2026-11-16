@@ -52,7 +52,7 @@ impl Mirror {
 }
 
 /// Read frames from the first camera until `running` goes false.
-unsafe fn capture(frame: &Frame, running: &AtomicBool) -> std::result::Result<(), String> {
+unsafe fn capture(frame: &Frame, running: &AtomicBool) -> std::result::Result<(), String> { unsafe {
     let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
     MFStartup(MF_VERSION, MFSTARTUP_LITE).map_err(|_| "Media Foundation isn't available".to_string())?;
     let result = (|| {
@@ -126,7 +126,7 @@ unsafe fn capture(frame: &Frame, running: &AtomicBool) -> std::result::Result<()
     })();
     let _ = MFShutdown();
     result
-}
+}}
 
 impl Module for Mirror {
     fn title(&self) -> &'static str {
