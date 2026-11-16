@@ -115,6 +115,12 @@ const TIMER_MOVE: usize = 7;
 /// Liquid Glass: grab the background again once a window that changed
 /// under the notch has finished animating.
 const TIMER_GLASS: usize = 8;
+/// Liquid Glass: looks at a thin ring of pixels just around the notch a few
+/// times a second, to notice what's behind it changing with no window event
+/// (scrolling, a video, a page loading).
+const TIMER_GLASS_PROBE: usize = 9;
+/// How often the ring is checked (ms).
+const GLASS_PROBE_MS: u32 = 200;
 /// Smart hide: after a window comes under the notch (or you switch to it),
 /// the notch stays out of the way this long; it also stays away until this
 /// long after the mouse leaves the area around it.
@@ -324,6 +330,11 @@ pub struct App {
     /// The notch was open (or showing a toast) last frame.
     glass_was_open: bool,
     glass_light: bool,
+    /// The notch's shape last drawn over glass (window DIPs) while at rest,
+    /// the last look at the ring around it, and whether the probe runs.
+    glass_shape: Option<Rect>,
+    glass_probe: u64,
+    glass_probing: bool,
     excluded: bool,
     /// Hit under the mouse with a tooltip: (module, id, since, suppressed by a click).
     tip: Option<(usize, u32, f64, bool)>,
@@ -550,6 +561,9 @@ impl App {
                 glass_dirty: false,
                 glass_was_open: false,
                 glass_light: false,
+                glass_shape: None,
+                glass_probe: 0,
+                glass_probing: false,
                 excluded: false,
                 tip: None,
                 deferred: Vec::new(),
@@ -824,6 +838,8 @@ impl App {
             self.tab = tabs.first().copied().unwrap_or(0);
         }
         self.check_fullscreen();
+        self.sync_glass_probe();
+        self.keep_on_top();
         crate::time::H12.store(self.settings.clock12, std::sync::atomic::Ordering::Relaxed);
         crate::time::SECONDS.store(self.settings.seconds, std::sync::atomic::Ordering::Relaxed);
         self.update_make_room();
@@ -1330,6 +1346,68 @@ impl App {
         self.request_frame();
     }
 
+    /// Run the ring probe only while it can matter: Liquid Glass on and the
+    /// notch showing.
+    fn sync_glass_probe(&mut self) {
+        let testing = crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed);
+        let want = self.settings.theme == "glass" && !self.hidden && !testing;
+        if want == self.glass_probing {
+            return;
+        }
+        self.glass_probing = want;
+        self.glass_probe = 0;
+        unsafe {
+            if want {
+                SetTimer(self.hwnd, TIMER_GLASS_PROBE, GLASS_PROBE_MS, None);
+            } else {
+                let _ = KillTimer(self.hwnd, TIMER_GLASS_PROBE);
+            }
+        }
+    }
+
+    /// The ring around the resting notch changed (a page scrolled under it,
+    /// a video plays behind it): what's behind the notch changed too, so
+    /// grab it again. The ring sits a little way out, clear of the notch's
+    /// own shadow and dots, so looking at it needs no hiding of the notch.
+    fn glass_probe_tick(&mut self) {
+        let Some(n) = self.glass_shape else { return };
+        if self.hidden || self.settings.theme != "glass" {
+            return;
+        }
+        let (ox, oy, k) = (self.origin.0 as f32, self.origin.1 as f32, self.scale);
+        let px = |x: f32, y: f32, w: f32, h: f32| RECT { left: (ox + x * k) as i32, top: (oy + y * k) as i32, right: (ox + (x + w) * k) as i32, bottom: (oy + (y + h) * k) as i32 };
+        let (gap, th) = (16.0, 4.0);
+        let ring = [
+            px(n.x - gap - th, n.y, th, n.h),
+            px(n.r() + gap, n.y, th, n.h),
+            px(n.x - gap, n.b() + gap, n.w + gap * 2.0, th),
+        ];
+        let Some(h) = crate::glass::probe(&ring) else { return };
+        let before = std::mem::replace(&mut self.glass_probe, h);
+        if before != 0 && before != h {
+            self.glass_dirty = true;
+            self.request_frame();
+        }
+    }
+
+    /// Stay on top: another always-on-top window (or one that took the top
+    /// for itself) may have come over the notch, or Windows may have let go
+    /// of the notch's always-on-top flag. Put it back, without fighting
+    /// menus, tooltips or the shell's own pop-ups.
+    fn keep_on_top(&mut self) {
+        if self.hidden {
+            return;
+        }
+        unsafe {
+            let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
+            let lost = ex & WS_EX_TOPMOST.0 as isize == 0;
+            if lost || window_above(self.hwnd, self.notch_area()) {
+                dlog(format!("back on top (flag lost: {lost})"));
+                self.raise();
+            }
+        }
+    }
+
     /// Liquid Glass light, no outline: a rim that glows from the very edge
     /// and fades inward (brighter on the top, where the light comes from),
     /// and two soft glints that drift slowly, like light moving through
@@ -1592,6 +1670,7 @@ impl App {
             if !busy {
                 self.raise();
             }
+            self.sync_glass_probe();
             self.request_frame();
         }
     }
@@ -2074,6 +2153,7 @@ impl App {
                     // Liquid Glass: what is behind, blurred and bent near
                     // the edges like a lens (glass.rs), under a light tint.
                     self.update_backdrop(notch, t, dist, rad);
+                    self.glass_shape = if dist <= 0.0 { Some(notch) } else { None };
                     if let Some((b, _, _, at)) = self.backdrop.clone() {
                         self.gfx.push_layer(Some(&geo), 1.0);
                         self.gfx.image_rr(&b, at, 0.0);
@@ -3515,6 +3595,7 @@ impl App {
                         }
                     }
                     TIMER_MOVE => self.drag_tick(),
+                    TIMER_GLASS_PROBE => self.glass_probe_tick(),
                     _ => {}
                 }
                 Some(LRESULT(0))
@@ -8122,6 +8203,7 @@ fn is_fullscreen(win: RECT, mon: RECT, zoomed: bool, class: &str) -> bool {
 extern "system" fn on_foreground(_h: windows::Win32::UI::Accessibility::HWINEVENTHOOK, e: u32, w: HWND, _o: i32, _c: i32, _t: u32, _ms: u32) {
     with_app(|a| {
         a.check_fullscreen();
+        a.keep_on_top();
         a.glass_changed();
         if e == EVENT_SYSTEM_FOREGROUND {
             a.window_switched(w);
@@ -8138,6 +8220,38 @@ extern "system" fn on_movesize(_h: windows::Win32::UI::Accessibility::HWINEVENTH
             a.glass_changed();
         }
     });
+}
+
+/// Is a visible window above the notch in the z-order and over its place?
+/// Menus, tooltips, the shell's own pop-ups and see-through overlays don't
+/// count: those come and go on their own.
+unsafe fn window_above(me: HWND, area: RECT) -> bool {
+    const SKIP: &[&str] = &["#32768", "tooltips_class32", "Xaml_WindowedPopupClass", "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "NotifyIconOverflowWindow", "Windows.UI.Core.CoreWindow", "XamlExplorerHostIslandWindow", "TopLevelWindowForOverflowXamlIsland", "ForegroundStaging", "SysShadow", "IME", "MSCTFIME UI"];
+    let mut h = GetWindow(me, GW_HWNDPREV).unwrap_or_default();
+    let mut n = 0;
+    while !h.0.is_null() && n < 256 {
+        n += 1;
+        if IsWindowVisible(h).as_bool() && !IsIconic(h).as_bool() {
+            let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+            let see_through = ex & WS_EX_TRANSPARENT.0 as isize != 0;
+            let mut cloaked = 0u32;
+            let _ = windows::Win32::Graphics::Dwm::DwmGetWindowAttribute(h, windows::Win32::Graphics::Dwm::DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut _, 4);
+            let mut r = RECT::default();
+            if !see_through && cloaked == 0 && GetWindowRect(h, &mut r).is_ok() {
+                let overlaps = r.left < area.right && r.right > area.left && r.top < area.bottom && r.bottom > area.top;
+                if overlaps && r.right - r.left > 1 && r.bottom - r.top > 1 {
+                    let mut buf = [0u16; 128];
+                    let len = GetClassNameW(h, &mut buf) as usize;
+                    let class = String::from_utf16_lossy(&buf[..len.min(buf.len())]);
+                    if !SKIP.contains(&class.as_str()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        h = GetWindow(h, GW_HWNDPREV).unwrap_or_default();
+    }
+    false
 }
 
 /// Looking for a window under the notch (EnumWindows).

@@ -38,6 +38,55 @@ pub fn exclude_from_capture(hwnd: HWND, on: bool) {
     }
 }
 
+/// A fingerprint of a few small screen rectangles (pixels), coarse enough
+/// that noise in the low bits doesn't count. Cheap: a few hundred pixels.
+pub fn probe(rects: &[RECT]) -> Option<u64> {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    unsafe {
+        let screen = GetDC(None);
+        if screen.is_invalid() {
+            return None;
+        }
+        let mem = CreateCompatibleDC(screen);
+        for r in rects {
+            let (w, h) = (r.right - r.left, r.bottom - r.top);
+            if w < 1 || h < 1 {
+                continue;
+            }
+            let (sw, sh) = ((w / 2).max(1), (h / 2).max(1));
+            let bi = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: sw,
+                    biHeight: -sh,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+            let Ok(dib) = CreateDIBSection(mem, &bi, DIB_RGB_COLORS, &mut bits, None, 0) else { continue };
+            let old = SelectObject(mem, dib);
+            SetStretchBltMode(mem, HALFTONE);
+            if StretchBlt(mem, 0, 0, sw, sh, screen, r.left, r.top, w, h, SRCCOPY).as_bool() && !bits.is_null() {
+                let px = std::slice::from_raw_parts(bits as *const u8, (sw * sh * 4) as usize);
+                for p in px.chunks_exact(4) {
+                    for c in &p[..3] {
+                        hash = (hash ^ (*c >> 4) as u64).wrapping_mul(0x100_0000_01b3);
+                    }
+                }
+            }
+            SelectObject(mem, old);
+            let _ = DeleteObject(dib);
+        }
+        let _ = DeleteDC(mem);
+        ReleaseDC(None, screen);
+    }
+    Some(hash)
+}
+
 /// Capture the screen rectangle `r` (pixels), scaled down and blurred.
 pub fn capture(r: RECT) -> Option<Backdrop> {
     let (w, h) = (r.right - r.left, r.bottom - r.top);
