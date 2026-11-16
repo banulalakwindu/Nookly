@@ -1290,7 +1290,11 @@ impl App {
     /// Refreshes at rest grab only the notch's own part (and a margin) and
     /// patch it into the whole grab: a fraction of the work, so it can keep
     /// up with a page scrolling behind.
-    fn update_backdrop(&mut self, notch: Rect, t: f64, dist: f32, rad: f32) {
+    /// The glass covers the whole shape, the flared corners ("ears") where
+    /// it meets the screen edge included; the lens bends the main body.
+    fn update_backdrop(&mut self, notch: Rect, t: f64, dist: f32, rad: f32, ear: f32, edge: Edge) {
+        let inner = notch;
+        let notch = if edge.vertical() { Rect::new(notch.x, notch.y - ear, notch.w, notch.h + ear * 2.0) } else { Rect::new(notch.x - ear, notch.y, notch.w + ear * 2.0, notch.h) };
         let (pw, ph) = (self.gfx.pw, self.gfx.ph);
         let (gw, gh) = ((pw / 4).max(2) as u32, (ph / 4).max(2) as u32);
         let whole = match &self.glass_raw {
@@ -1376,7 +1380,27 @@ impl App {
             self.glass_light = false;
         }
         // Refraction: the edges bend what's behind, like thick glass.
-        crate::glass::lens(&mut px, cw, ch, rad * k);
+        // (on the main body only: the ears just show what's behind).
+        let ix0 = (((inner.x * k).floor().max(0.0) as u32).saturating_sub(x0)).min(cw);
+        let iy0 = (((inner.y * k).floor().max(0.0) as u32).saturating_sub(y0)).min(ch);
+        let ix1 = (((inner.r() * k).ceil().max(0.0) as u32).saturating_sub(x0)).min(cw);
+        let iy1 = (((inner.b() * k).ceil().max(0.0) as u32).saturating_sub(y0)).min(ch);
+        if (ix0, iy0, ix1, iy1) == (0, 0, cw, ch) {
+            crate::glass::lens(&mut px, cw, ch, rad * k);
+        } else if ix1 > ix0 + 1 && iy1 > iy0 + 1 {
+            let (iw, ih) = (ix1 - ix0, iy1 - iy0);
+            let mut body = Vec::with_capacity((iw * ih * 4) as usize);
+            for y in iy0..iy1 {
+                let s = ((y * cw + ix0) * 4) as usize;
+                body.extend_from_slice(&px[s..s + (iw * 4) as usize]);
+            }
+            crate::glass::lens(&mut body, iw, ih, rad * k);
+            for y in 0..ih {
+                let d = (((iy0 + y) * cw + ix0) * 4) as usize;
+                let s = (y * iw * 4) as usize;
+                px[d..d + (iw * 4) as usize].copy_from_slice(&body[s..s + (iw * 4) as usize]);
+            }
+        }
         let at = Rect::new(x0 as f32 / k, y0 as f32 / k, cw as f32 / k, ch as f32 / k);
         // Same size as last time: refill the bitmap rather than make a new one.
         if let Some(b) = self.backdrop.as_mut().filter(|b| b.1 == self.gfx.generation) {
@@ -2228,7 +2252,7 @@ impl App {
                 if glass {
                     // Liquid Glass: what is behind, blurred and bent near
                     // the edges like a lens (glass.rs), under a light tint.
-                    self.update_backdrop(notch, t, dist, rad);
+                    self.update_backdrop(notch, t, dist, rad, ear, edge);
                     self.glass_shape = if dist <= 0.0 { Some(notch) } else { None };
                     if let Some((b, _, _, at)) = self.backdrop.clone() {
                         self.gfx.push_layer(Some(&geo), 1.0);
