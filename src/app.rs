@@ -7795,7 +7795,10 @@ fn look_tests(a: &mut App) -> String {
                 let f = k as f32 / 4.0;
                 a.cur = (lerp(a.cur.0, tgt.0, f), lerp(a.cur.1, tgt.1, f), lerp(a.cur.2, tgt.2, f));
                 a.render(tgt, if k < 4 { 20.0 } else { 0.0 });
-                let notch = a.edge_rect(a.cur.0, a.cur.1);
+                // The glass also fills the flares beside it at the screen edge.
+                let n = a.edge_rect(a.cur.0, a.cur.1);
+                let ear = (a.cur.1 / 4.0).min(9.0);
+                let notch = Rect::new(n.x - ear, n.y, n.w + ear * 2.0, n.h);
                 if let Some((_, _, _, at)) = &a.backdrop {
                     covers &= (at.x - notch.x).abs() <= 4.0 / a.scale + 1.0 && (at.r() - notch.r()).abs() <= 4.0 / a.scale + 1.0 && (at.b() - notch.b()).abs() <= 4.0 / a.scale + 1.0;
                 } else {
