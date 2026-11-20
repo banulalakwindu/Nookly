@@ -1,0 +1,121 @@
+name: release
+
+# A release goes out by itself when the version in Cargo.toml goes up:
+# raise `version` (and add a "## <version>" section to CHANGELOG.md) after
+# a batch of good changes, push to main, and this builds the installer on
+# GitHub's servers (so it's verifiably built from this source), tags
+# v<version> and publishes the release with that changelog section as its
+# notes. Pushes that don't change the version release nothing.
+# "Run workflow" (workflow_dispatch) does the same by hand.
+
+on:
+  push:
+    branches: [main]
+    paths: ['Cargo.toml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      new: ${{ steps.v.outputs.new }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "v$version is already released"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+            echo "releasing v$version"
+          fi
+
+  release:
+    needs: check
+    if: needs.check.outputs.new == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      # No build cache for releases: always a clean build from source.
+      - name: Build nookly.exe
+        shell: pwsh
+        run: .\build.ps1 -SkipInstaller -NoSelfTest
+
+      - name: Self-test (informational)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $env:NOOKLY_DATA_DIR = "$env:RUNNER_TEMP\wl"
+          $env:NOOKLY_SELFTEST_OUT = "$env:RUNNER_TEMP\selftest.txt"
+          Start-Process .\target\release\nookly.exe -ArgumentList '--selftest' -Wait
+          Get-Content $env:NOOKLY_SELFTEST_OUT | ForEach-Object { if ($_ -like 'FAIL*') { Write-Host "::warning::$_" } else { Write-Host $_ } }
+
+      # The installer is nookly.exe under its setup name (src/setup.rs).
+      - name: Build installer
+        shell: pwsh
+        run: .\build.ps1 -InstallerOnly
+
+      # The taskbar add-on: its own file, downloaded from inside Nookly
+      # (Settings > Taskbar) only by those who want it.
+      - name: Taskbar add-on
+        shell: pwsh
+        run: |
+          $v = '${{ needs.check.outputs.version }}'
+          Copy-Item target\release\nookly-taskbar.exe "dist\NooklyTaskbar-$v.exe"
+
+      - name: Checksum and notes
+        id: pick
+        shell: pwsh
+        run: |
+          $f = Get-ChildItem "dist\NooklySetup-*.exe" | Select-Object -First 1
+          $sha = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+          Write-Host "$($f.Name) sha256 $sha"
+          "file=$($f.FullName)" >> $env:GITHUB_OUTPUT
+          $t = Get-ChildItem "dist\NooklyTaskbar-*.exe" | Select-Object -First 1
+          $tsha = (Get-FileHash $t.FullName -Algorithm SHA256).Hash.ToLower()
+          "bar=$($t.FullName)" >> $env:GITHUB_OUTPUT
+          # The CHANGELOG section for this version is the release notes.
+          $v = '${{ needs.check.outputs.version }}'
+          $lines = Get-Content CHANGELOG.md -Encoding utf8
+          $out = @(); $in = $false
+          foreach ($l in $lines) {
+            if ($l -match '^## ') {
+              if ($in) { break }
+              if ($l -match "^## $([regex]::Escape($v))\b") { $in = $true; continue }
+            } elseif ($in) { $out += $l }
+          }
+          if ($out.Count -eq 0) { $out = @("Nookly $v") }
+          $out += ""
+          $out += "SHA-256 of $($f.Name): ``$sha``"
+          $out += ""
+          $out += "SHA-256 of $($t.Name) (the optional taskbar add-on, installed from inside Nookly): ``$tsha``"
+          $out += ""
+          $out += 'Windows may say "Windows protected your PC": click More info, then Run anyway (the app is not code-signed yet).'
+          Set-Content -Path notes.md -Value $out -Encoding utf8
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.check.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Nookly ${{ needs.check.outputs.version }}
+          body_path: notes.md
+          files: |
+            ${{ steps.pick.outputs.file }}
+            ${{ steps.pick.outputs.bar }}
+          make_latest: true

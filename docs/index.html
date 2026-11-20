@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nookly: a living notch for Windows</title>
+<meta name="description" content="Nookly puts a small, smart notch at the top of your Windows screen: music with synced lyrics, widgets, notifications, AI agents, timers, to-do, calendar and more. Free and open source.">
+<meta property="og:title" content="Nookly: a living notch for Windows">
+<meta property="og:description" content="Music with lyrics, widgets, notifications, AI agents, timers, calendar and more, in a notch at the top of your screen. Free and open source.">
+<meta property="og:image" content="https://banulalakwindu.github.io/Nookly/images/hero.png">
+<meta property="og:url" content="https://banulalakwindu.github.io/Nookly/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" href="images/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0c14;
+    --bg2: #14121f;
+    --card: #191726;
+    --line: rgba(255, 255, 255, 0.08);
+    --text: #f5f5f7;
+    --dim: #a7a5b8;
+    --faint: #6f6c82;
+    --amber: #ffb43c;
+    --amber2: #ff8038;
+    --teal: #5ce1d2;
+    --violet: #8b6cff;
+    --radius: 20px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 Inter, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; }
+  img { max-width: 100%; display: block; }
+  .wrap { width: min(1160px, 100% - 32px); margin: 0 auto; }
+
+  /* Nav */
+  nav {
+    position: sticky; top: 0; z-index: 10;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    background: rgba(13, 12, 20, 0.72);
+    border-bottom: 1px solid var(--line);
+  }
+  nav .wrap { display: flex; align-items: center; gap: 24px; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 19px; text-decoration: none; letter-spacing: -0.02em; }
+  .brand img { width: 30px; height: 30px; }
+  nav .links { margin-left: auto; display: flex; gap: 22px; align-items: center; }
+  nav .links a { text-decoration: none; color: var(--dim); font-size: 14px; font-weight: 500; }
+  nav .links a:hover { color: var(--text); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 12px 22px; border-radius: 999px;
+    font-weight: 700; font-size: 15px; text-decoration: none;
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn.primary { background: linear-gradient(180deg, var(--amber), var(--amber2)); color: #1a1206; box-shadow: 0 8px 30px rgba(255, 140, 50, 0.28); }
+  .btn.ghost { border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: var(--text); }
+  .btn.small { padding: 8px 16px; font-size: 13px; }
+
+  /* Hero */
+  .hero { position: relative; padding: 88px 0 40px; text-align: center; }
+  .hero::before {
+    content: ""; position: absolute; inset: -200px 0 auto 0; height: 700px; z-index: -1;
+    background:
+      radial-gradient(600px 300px at 50% 30%, rgba(255, 160, 60, 0.16), transparent 70%),
+      radial-gradient(700px 400px at 20% 10%, rgba(139, 108, 255, 0.22), transparent 70%),
+      radial-gradient(700px 400px at 85% 20%, rgba(92, 225, 210, 0.12), transparent 70%);
+  }
+  .notch-demo {
+    margin: 0 auto 34px; width: 220px; height: 38px; border-radius: 0 0 20px 20px;
+    background: #000; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 14px; font-weight: 600; font-size: 14px; box-shadow: 0 10px 40px rgba(0,0,0,.6), inset 0 -1px 0 rgba(255,255,255,0.06);
+    animation: breathe 6s ease-in-out infinite;
+  }
+  .notch-demo .art { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(135deg, var(--violet), var(--teal)); }
+  .notch-demo .eq { display: flex; gap: 2px; align-items: flex-end; height: 14px; }
+  .notch-demo .eq i { width: 3px; background: var(--amber); border-radius: 2px; animation: eq 1s ease-in-out infinite; }
+  .notch-demo .eq i:nth-child(2) { animation-delay: .2s; }
+  .notch-demo .eq i:nth-child(3) { animation-delay: .4s; }
+  @keyframes eq { 0%, 100% { height: 4px; } 50% { height: 14px; } }
+  @keyframes breathe { 0%, 100% { width: 220px; } 50% { width: 250px; } }
+  h1 { font-size: clamp(42px, 7vw, 76px); line-height: 1.02; letter-spacing: -0.04em; margin: 0 0 18px; font-weight: 800; }
+  h1 .grad { background: linear-gradient(90deg, var(--amber), var(--amber2) 50%, var(--teal)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { font-size: clamp(17px, 2.2vw, 20px); color: var(--dim); max-width: 680px; margin: 0 auto 30px; }
+  .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .meta { margin-top: 14px; color: var(--faint); font-size: 13px; }
+  .stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 22px auto 0; }
+  .stats a { display: flex; align-items: baseline; gap: 8px; padding: 9px 16px; border-radius: 999px; background: rgba(255,255,255,0.05); border: 1px solid var(--line); color: var(--dim); font-size: 14px; text-decoration: none; }
+  .stats a:hover { border-color: rgba(255, 180, 60, 0.35); }
+  .stats b { font-size: 17px; font-weight: 800; letter-spacing: -0.02em; background: linear-gradient(90deg, var(--amber), var(--amber2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .shot-hero {
+    margin: 56px auto 0; border-radius: 24px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 40px 120px rgba(0,0,0,.55);
+    width: 100%; max-height: 720px; object-fit: cover; object-position: top;
+    -webkit-mask-image: linear-gradient(180deg, #000 75%, transparent); mask-image: linear-gradient(180deg, #000 75%, transparent);
+  }
+
+  /* Sections */
+  section { padding: 84px 0; }
+  .eyebrow { color: var(--amber); font-weight: 700; font-size: 13px; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 10px; }
+  h2 { font-size: clamp(30px, 4.2vw, 44px); letter-spacing: -0.03em; line-height: 1.1; margin: 0 0 14px; }
+  .sub { color: var(--dim); max-width: 640px; margin: 0 0 36px; font-size: 17px; }
+  .center { text-align: center; }
+  .center .sub { margin-left: auto; margin-right: auto; }
+
+  /* Split rows */
+  .split { display: grid; grid-template-columns: 1fr 1.25fr; gap: 48px; align-items: center; }
+  .split.rev { grid-template-columns: 1.25fr 1fr; }
+  .split.rev .text { order: 2; }
+  .split .shot { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); background: var(--bg2); }
+  ul.ticks { list-style: none; padding: 0; margin: 18px 0 0; }
+  ul.ticks li { padding-left: 28px; position: relative; margin: 10px 0; color: var(--dim); }
+  ul.ticks li b { color: var(--text); font-weight: 600; }
+  ul.ticks li::before { content: ""; position: absolute; left: 0; top: 7px; width: 14px; height: 14px; border-radius: 50%; background: radial-gradient(circle, var(--teal) 40%, rgba(92,225,210,0.2) 42%); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+  .chip { padding: 6px 14px; border-radius: 999px; background: rgba(255,255,255,0.05); border: 1px solid var(--line); font-size: 13px; color: var(--dim); }
+
+  /* Feature grid */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; transition: transform .2s ease, border-color .2s ease; }
+  .card:hover { transform: translateY(-3px); border-color: rgba(255, 180, 60, 0.35); }
+  .card img { aspect-ratio: 16 / 10; object-fit: cover; object-position: top; background: var(--bg2); cursor: zoom-in; }
+  .card .body { padding: 18px 20px 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 18px; letter-spacing: -0.01em; }
+  .card p { margin: 0; color: var(--dim); font-size: 14.5px; }
+
+  /* Small feature list */
+  .mini { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 18px; }
+  .mini div { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+  .mini b { display: block; margin-bottom: 4px; }
+  .mini span { color: var(--dim); font-size: 14px; }
+
+  /* Performance */
+  .perf { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .perf div { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px 20px; }
+  .perf b { display: block; font-size: clamp(28px, 3.6vw, 38px); letter-spacing: -0.03em; line-height: 1.05; margin-bottom: 8px; background: linear-gradient(90deg, var(--amber), var(--amber2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .perf span { color: var(--dim); font-size: 14.5px; }
+
+  /* Install */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; counter-reset: s; }
+  .steps div { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; counter-increment: s; }
+  .steps div::before { content: counter(s); display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: rgba(255,180,60,0.14); color: var(--amber); font-weight: 800; margin-bottom: 12px; }
+  .steps b { display: block; margin-bottom: 6px; font-size: 17px; }
+  .steps span { color: var(--dim); font-size: 14.5px; }
+
+  .privacy { background: linear-gradient(180deg, var(--bg2), var(--bg)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+
+  .final { text-align: center; padding: 100px 0; }
+  .final img { width: 88px; margin: 0 auto 22px; filter: drop-shadow(0 18px 40px rgba(255, 140, 50, .35)); }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; color: var(--faint); font-size: 14px; }
+  footer .wrap { display: flex; gap: 20px; justify-content: space-between; flex-wrap: wrap; }
+  footer a { color: var(--dim); }
+
+  /* Lightbox */
+  .lb { position: fixed; inset: 0; background: rgba(5, 5, 10, 0.92); display: none; place-items: center; z-index: 50; padding: 24px; cursor: zoom-out; }
+  .lb.on { display: grid; }
+  .lb img { max-height: 92vh; border-radius: 14px; }
+
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: repeat(2, 1fr); }
+    .mini, .perf { grid-template-columns: repeat(2, 1fr); }
+    .split, .split.rev { grid-template-columns: 1fr; gap: 26px; }
+    .split.rev .text { order: 0; }
+    .steps { grid-template-columns: 1fr; }
+    nav .links a.hide-sm { display: none; }
+  }
+  @media (max-width: 560px) {
+    .grid, .mini, .perf { grid-template-columns: 1fr; }
+    section { padding: 64px 0; }
+    .hero { padding-top: 56px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="images/logo.png" alt="">Nookly</a>
+    <div class="links">
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#choose">Make it yours</a>
+      <a class="hide-sm" href="#privacy">Privacy</a>
+      <a class="hide-sm" href="https://github.com/banulalakwindu/Nookly/blob/main/docs/USER_GUIDE.md">Guide</a>
+      <a href="https://github.com/banulalakwindu/Nookly">GitHub</a>
+      <a class="btn primary small" href="https://github.com/banulalakwindu/Nookly/releases/latest" data-dl>Download</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="notch-demo" aria-hidden="true"><span class="art"></span><span>4:20</span><span class="eq"><i></i><i></i><i></i></span></div>
+    <h1>A little notch<br><span class="grad">that does a lot</span></h1>
+    <p class="lead">Nookly sits quietly at the top of your Windows screen. Hover it for music with lyrics, your calendar and next meeting, notes, countdowns, timers, health breaks, quick toggles and more. Move away and it tucks itself back. Want more? Add <b>Nookly Taskbar</b>, a whole new taskbar with live widgets.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/banulalakwindu/Nookly/releases/latest" data-dl>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 21h16"/></svg>
+        <span>Download for Windows</span>
+      </a>
+      <a class="btn ghost" href="https://github.com/banulalakwindu/Nookly">View source</a>
+    </div>
+    <div class="meta"><span id="dl-meta">Windows 10 and 11</span> · Free and open source · No account, no ads</div>
+    <div class="stats" aria-label="Light on your PC">
+      <a href="#performance"><b>~3 MB</b> download</a>
+      <a href="#performance"><b>~30 MB</b> RAM</a>
+      <a href="#performance"><b>~0%</b> CPU at rest</a>
+    </div>
+    <img class="shot-hero" src="images/hero-collage.png" alt="Nookly: music with lyrics, alerts, AI agents, tools, system monitor and clipboard">
+  </div>
+</header>
+
+<section id="performance">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow">Light on your PC</div>
+      <h2>Tiny download, tiny footprint</h2>
+      <p class="sub">Nookly is one small program written in Rust and drawn on the GPU. It wakes for what happens and sleeps the rest of the time, so you can leave it running all day.</p>
+    </div>
+    <div class="perf">
+      <div><b>~3 MB</b><span>The whole download. No runtime, framework or browser engine to install alongside it.</span></div>
+      <div><b>~30 MB</b><span>Of memory in everyday use, opening it and switching panels. Less than a browser tab.</span></div>
+      <div><b>~0% CPU</b><span>At rest. A song changing, a hover or a window moving wakes it; nothing polls.</span></div>
+      <div><b>Off is off</b><span>A feature you switch off doesn't run at all: no work, no memory.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="taskbar">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow">New · optional add-on</div>
+      <h2>Nookly Taskbar</h2>
+      <p class="sub">A taskbar in the notch's bubble shape and theme, Liquid Glass included, with your apps, Windows' own right-hand items and 33 live widgets. Get it only if you want it: it isn't in the Nookly download, so without it Nookly stays exactly as light.</p>
+    </div>
+    <div class="shot" style="max-width:860px;margin:0 auto 26px"><img src="images/taskbar-widgets.png" alt="Nookly Taskbar widgets: every widget at every size" loading="lazy"></div>
+    <div class="perf">
+      <div><b>0 MB</b><span>Until you add it: no space, no memory, no CPU. It's a separate file, downloaded from inside Nookly when you choose.</span></div>
+      <div><b>&lt;1 MB</b><span>The add-on itself, fetched from the same GitHub release and checked against its SHA-256 before it's installed. It updates with Nookly.</span></div>
+      <div><b>~0.2% CPU</b><span>At rest, in its own small process (30 to 45 MB of memory), so it can never take the notch down.</span></div>
+      <div><b>Always safe</b><span>Windows' taskbar comes back when you switch it off, when it quits, and even if it crashes.</span></div>
+    </div>
+    <div class="mini">
+      <div><b>33 widgets, 4 sizes</b><span>Clock, Date, World clock, Day and Year progress, CPU &amp; memory graphs, Network, Battery, Weather, Sunrise &amp; sunset, Moon, Now playing, Currency, Tasks, Quote of the day and more. Bigger sizes show more.</span></div>
+      <div><b>Each opens its own view</b><span>A bubble grows out of the widget: a big clock, a month calendar, the day's sky, a minute of graphs, your drives, world cities, today's rates, the moon's phases.</span></div>
+      <div><b>Your layout</b><span>Pin anything at the left or right end, or let it scroll in the middle. Drag to reorder; Settings tells you when a pin won't fit.</span></div>
+      <div><b>Like Windows on the right</b><span>Hidden icons with every app's tray icon, keyboard language, Wi-Fi / sound / battery, the clock and notifications.</span></div>
+      <div><b>Your apps</b><span>Pinned and running, live window previews, collections and a ⋯ tile for the rest. The middle scrolls with the wheel when it's full.</span></div>
+      <div><b>Your way</b><span>Auto-hide (the Windows key brings it out), hover or click, three sizes, and the notch's theme or one of its own.</span></div>
+      <div><b>Separate from the notch</b><span>Hide a panel in the notch and its widget stays on the taskbar. Use either one, or both.</span></div>
+      <div><b>How to get it</b><span>Settings &gt; Taskbar &gt; Download taskbar. Remove taskbar in the same place deletes it again.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="choose">
+  <div class="wrap split">
+    <div class="text">
+      <div class="eyebrow">Only what you need</div>
+      <h2>Switch on just the parts you use</h2>
+      <p class="sub">All in Settings, now in its own window: a master switch for the notch, then start from a preset and turn anything on or off. A feature that's off doesn't run at all, so Nookly stays light, written in Rust and drawn on the GPU.</p>
+      <div class="chips"><span class="chip">Minimal</span><span class="chip">Student</span><span class="chip">Work</span><span class="chip">Everything</span></div>
+      <ul class="ticks">
+        <li><b>Win+Alt+N</b> opens the notch from anywhere; set your own keys for clipboard and screenshots.</li>
+        <li><b>Too many panels?</b> The extras tuck under ⋯, so the tab bar never gets crowded.</li>
+        <li><b>New PC?</b> Export your settings to one file and import them there.</li>
+        <li><b>Your order.</b> Drag the panels into the order you like; set your location once for the weather.</li>
+        <li><b>Want a taskbar too?</b> Nookly Taskbar is an optional add-on with its own switch in Settings; without it, nothing of it runs.</li>
+      </ul>
+    </div>
+    <div class="shot"><img src="images/settings-features.png" alt="Settings: Features page with presets and switches" loading="lazy"></div>
+  </div>
+</section>
+
+<section id="features" style="padding-top:20px">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow">Everything in one notch</div>
+      <h2>Small on the outside, a lot inside</h2>
+      <p class="sub">Each panel is one hover away. Roll the mouse wheel on the open notch to move between them.</p>
+    </div>
+    <div class="grid">
+      <div class="card"><img src="images/lyrics.png" alt="Music with synced lyrics" loading="lazy"><div class="body"><h3>Music and synced lyrics</h3><p>Any media app: Spotify, YouTube in the browser, Apple Music. Controls, a seek bar and lyrics that light up line by line.</p></div></div>
+      <div class="card"><img src="images/widgets.png" alt="Widgets on the closed notch" loading="lazy"><div class="body"><h3>Widgets on the notch</h3><p>Battery, AirPods, weather, Wi-Fi, CPU and more beside the clock. You pick what shows and in which order.</p></div></div>
+      <div class="card"><img src="images/notifications.png" alt="Windows notifications in the notch" loading="lazy"><div class="body"><h3>Your notifications</h3><p>Messages, mail and calendar alerts drop out of the notch with the app's icon, instead of the corner of the screen.</p></div></div>
+      <div class="card"><img src="images/agents.png" alt="AI agents" loading="lazy"><div class="body"><h3>AI agents</h3><p>Claude Code, Codex and Hermes: see when they're working, when one needs you, and when it's done.</p></div></div>
+      <div class="card"><img src="images/calendar.png" alt="Calendar" loading="lazy"><div class="body"><h3>Calendar and meetings</h3><p>Link your Google or Outlook calendar: "Standup in 8 min" on the notch, and Join for Teams, Zoom and Meet.</p></div></div>
+      <div class="card"><img src="images/weather.png" alt="Weather" loading="lazy"><div class="body"><h3>Weather</h3><p>Now, hour by hour and the week ahead for your place, with icons for every kind of weather.</p></div></div>
+      <div class="card"><img src="images/volume.png" alt="Volume mixer" loading="lazy"><div class="body"><h3>Volume mixer</h3><p>The master volume and each app's own, with mute, one hover away.</p></div></div>
+      <div class="card"><img src="images/health.png" alt="Health" loading="lazy"><div class="body"><h3>Health</h3><p>Screen time today, eye breaks, stand-up reminders and battery care. Reminders wait while you're in a game or on a call.</p></div></div>
+      <div class="card"><img src="images/countdowns.png" alt="Countdowns" loading="lazy"><div class="body"><h3>Countdowns</h3><p>Exams, trips and birthdays, with "12 days" right on the closed notch.</p></div></div>
+      <div class="card"><img src="images/notes.png" alt="Notes" loading="lazy"><div class="body"><h3>Notes</h3><p>A scratchpad that saves as you type, a shortcut away.</p></div></div>
+      <div class="card"><img src="images/launcher.png" alt="Launcher" loading="lazy"><div class="body"><h3>Launcher</h3><p>Your apps, folders and favourite sites, one click away.</p></div></div>
+      <div class="card"><img src="images/toggles.png" alt="Quick toggles" loading="lazy"><div class="body"><h3>Quick toggles</h3><p>Wi-Fi, Bluetooth, dark mode and microphone mute without digging through Settings.</p></div></div>
+      <div class="card"><img src="images/commands.png" alt="Commands" loading="lazy"><div class="body"><h3>Commands</h3><p>Run your own commands on a schedule and see what they print on the notch.</p></div></div>
+      <div class="card"><img src="images/settings.png" alt="Settings window" loading="lazy"><div class="body"><h3>Settings, in its own window</h3><p>Every setting in one place, grouped, with a switch to turn the notch on or off, and a Taskbar tab for the optional taskbar add-on.</p></div></div>
+      <div class="card"><img src="images/glass.png" alt="Liquid Glass" loading="lazy"><div class="body"><h3>Liquid Glass</h3><p>Real glass with no outline: the edges bend what's behind like a lens, and light drifts through it like water.</p></div></div>
+      <div class="card"><img src="images/themes.png" alt="Themes" loading="lazy"><div class="body"><h3>Ten themes</h3><p>Black, Rose, Forest, Ocean, Paper, Liquid Glass and more, every one checked for readable contrast.</p></div></div>
+      <div class="card"><img src="images/timer.png" alt="Timer" loading="lazy"><div class="body"><h3>Timer and Pomodoro</h3><p>Countdowns and focus sessions with the time left on the closed notch, so you never need another window.</p></div></div>
+      <div class="card"><img src="images/todo.png" alt="To-do" loading="lazy"><div class="body"><h3>To-do with reminders</h3><p>Quick tasks with due times; the notch reminds you and lets you snooze or tick it off.</p></div></div>
+      <div class="card"><img src="images/clipboard.png" alt="Clipboard history" loading="lazy"><div class="body"><h3>Clipboard history</h3><p>Search what you copied, keep snippets, click to paste. Passwords from password managers are never kept.</p></div></div>
+      <div class="card"><img src="images/shelf.png" alt="File shelf" loading="lazy"><div class="body"><h3>File shelf and screenshots</h3><p>Drop files on the notch to keep them close, then drag them into a chat. Screenshots land here too.</p></div></div>
+      <div class="card"><img src="images/tools.png" alt="Tools" loading="lazy"><div class="body"><h3>Handy tools</h3><p>Colour picker, calculator, QR codes, unit converter with today's currency rates, and world clocks.</p></div></div>
+      <div class="card"><img src="images/prayer.png" alt="Prayer times" loading="lazy"><div class="body"><h3>Prayer times and water</h3><p>Prayer times calculated on your PC with gentle reminders, and a water reminder that counts your glasses.</p></div></div>
+    </div>
+    <div class="mini">
+      <div><b>Smart hide</b><span>Steps aside when a window's title bar or tabs are under it, and comes back when you need it.</span></div>
+      <div><b>Five styles</b><span>Full, Slim, Compact, Pill or Hidden, on any screen edge.</span></div>
+      <div><b>Profiles</b><span>Home, Work and Focus, each with its own features and look; Auto switches for work hours.</span></div>
+      <div><b>Downloads</b><span>A finished download pops up on the notch; click to open it.</span></div>
+      <div><b>Share and Mirror</b><span>Drop files to share them; check your camera before a call.</span></div>
+      <div><b>Mascots</b><span>Eight little companions that follow your mouse, on the notch or the taskbar.</span></div>
+      <div><b>Its own windows</b><span>Settings, the installer, uninstaller, About and tray menu, all in the notch's style and your theme.</span></div>
+      <div><b>Mic and camera dots</b><span>A dot while any app uses your microphone or camera.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="privacy" class="privacy">
+  <div class="wrap split rev">
+    <div class="text">
+      <div class="eyebrow">Private by design</div>
+      <h2>Your data stays on your PC</h2>
+      <p class="sub">No account, no analytics, no ads. Everything Nookly keeps is plain text in your own AppData folder.</p>
+      <ul class="ticks">
+        <li><b>Offline first.</b> It goes online only for lyrics, the weather widget if you switch it on, and checking for updates.</li>
+        <li><b>Opt-in.</b> Clipboard history and Windows notifications stay off until you turn them on.</li>
+        <li><b>Open source.</b> Read every line on GitHub; releases are built from it on GitHub's servers.</li>
+      </ul>
+      <p style="margin-top:22px"><a class="btn ghost small" href="https://github.com/banulalakwindu/Nookly/blob/main/PRIVACY.md">Read the privacy policy</a></p>
+    </div>
+    <div class="shot"><img src="images/settings-privacy.png" alt="Privacy settings" loading="lazy"></div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow">Get started</div>
+      <h2>Up and running in a minute</h2>
+      <p class="sub">No admin rights needed. Updates install themselves when you say so.</p>
+    </div>
+    <div class="steps">
+      <div><b>Download</b><span>Get the installer from the latest release.</span></div>
+      <div><b>Run it</b><span>Nookly's own install window, just for you. If Windows says "Windows protected your PC", click <i>More info</i> then <i>Run anyway</i>: the app isn't code-signed yet.</span></div>
+      <div><b>Make it yours</b><span>A 30-second welcome tour: the look, the colour and what you want in it.</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <img src="images/logo.png" alt="Nookly logo">
+    <h2>Give your screen a nook</h2>
+    <p class="sub" style="margin:0 auto 28px">Free forever, open source, made for Windows.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/banulalakwindu/Nookly/releases/latest" data-dl><span>Download for Windows</span></a>
+      <a class="btn ghost" href="https://github.com/banulalakwindu/Nookly/issues/new/choose">Suggest a feature</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>Nookly by <a href="https://github.com/banulalakwindu">Banula Lakwindu</a>. Free and open source (MIT). Not affiliated with Apple.</div>
+    <div><a href="https://github.com/banulalakwindu/Nookly">Source</a> · <a href="https://github.com/banulalakwindu/Nookly/blob/main/docs/USER_GUIDE.md">User guide</a> · <a href="https://github.com/banulalakwindu/Nookly/blob/main/CHANGELOG.md">Changelog</a> · <a href="https://github.com/banulalakwindu/Nookly/blob/main/PRIVACY.md">Privacy</a></div>
+  </div>
+</footer>
+
+<div class="lb" id="lb"><img alt=""></div>
+
+<script>
+  // Point the download buttons straight at the latest installer.
+  fetch("https://api.github.com/repos/banulalakwindu/Nookly/releases/latest")
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (rel) {
+      if (!rel) return;
+      var a = (rel.assets || []).find(function (x) { return /^NooklySetup.*\.exe$/i.test(x.name); });
+      if (a) document.querySelectorAll("[data-dl]").forEach(function (el) { el.href = a.browser_download_url; });
+      var mb = a ? " · " + (a.size / 1048576).toFixed(1) + " MB" : "";
+      document.getElementById("dl-meta").textContent = "Version " + String(rel.tag_name || "").replace(/^v/, "") + mb + " · Windows 10 and 11";
+    })
+    .catch(function () {});
+  // Click a screenshot to see it large.
+  var lb = document.getElementById("lb");
+  document.querySelectorAll(".card img, .shot img").forEach(function (img) {
+    img.addEventListener("click", function () { lb.querySelector("img").src = img.src; lb.classList.add("on"); });
+  });
+  lb.addEventListener("click", function () { lb.classList.remove("on"); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") lb.classList.remove("on"); });
+</script>
+</body>
+</html>

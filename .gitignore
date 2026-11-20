@@ -1,0 +1,13 @@
+/target
+/dist
+*.tmp
+*.log
+selftest.txt
+.idea/
+.vscode/
+*.iml
+__pycache__/
+/marketing
+
+# IDE
+.openidea/

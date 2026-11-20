@@ -1,0 +1,368 @@
+"""Screenshots for the README and user guide (run via make_images.py).
+
+Every image is 1600 px wide: a desktop "screen" card with the real
+Nookly render at its top edge, then a title, a line of text and a row of
+feature chips, on a dark page. Collections (styles, alerts, mascots,
+positions) arrange several renders on one card.
+"""
+
+import shutil
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFilter
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+IMAGES = ROOT / "docs" / "images"
+BG = (13, 12, 20)
+TEXT = (245, 245, 247)
+DIM = (160, 164, 176)
+CHIP = (30, 26, 40)
+AMBER = (255, 180, 60)
+TEAL = (92, 225, 210)
+W = 1600
+PAD = 40
+
+
+def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
+    out = Path(data).parent / "docs"
+    if out.exists():
+        shutil.rmtree(out)
+    print("rendering stills...")
+    run(["--render-docs", str(out)], data)
+
+    def shot(name):
+        return read_raw(out / f"{name}.raw")
+
+    def card(h, windows=True):
+        cw = W - 2 * PAD
+        wp = wallpaper(cw, h, 0.0)
+        if windows:
+            fake_windows(wp)
+        return wp, rounded_mask(cw, h, 26)
+
+    def page(card_img, mask, title, sub, chips):
+        """Card on the page, then the title block."""
+        ch = card_img.height
+        h = PAD + ch + 36 + 70 + 44 + (64 if chips else 0) + 24
+        im = Image.new("RGBA", (W, h), BG + (255,))
+        im.paste(card_img, (PAD, PAD), mask)
+        d = ImageDraw.Draw(im)
+        y = PAD + ch + 36
+        d.rounded_rectangle((PAD + 4, y - 14, PAD + 64, y - 8), 3, fill=AMBER)
+        d.ellipse((PAD + 72, y - 15, PAD + 80, y - 7), fill=TEAL)
+        d.text((PAD + 4, y), title, font=font(54, "bold"), fill=TEXT)
+        y += 72
+        d.text((PAD + 4, y), sub, font=font(28), fill=DIM)
+        y += 52
+        x = PAD
+        f = font(22, "semibold")
+        for c in chips:
+            tw = d.textlength(c, font=f)
+            d.rounded_rectangle((x, y, x + tw + 36, y + 42), 21, fill=CHIP, outline=AMBER + (150,), width=2)
+            d.text((x + 18, y + 21), c, font=f, fill=(255, 214, 150), anchor="lm")
+            x += tw + 48
+        return im.convert("RGB")
+
+    def page_chips(top, title, sub, chips):
+        """A finished image on top, then the title, a line of text and
+        chips that wrap onto as many rows as they need."""
+        f = font(22, "semibold")
+        probe = ImageDraw.Draw(top)
+        rows, row, x = [], [], PAD
+        for c in chips:
+            tw = probe.textlength(c, font=f) + 36
+            if x + tw > W - PAD and row:
+                rows.append(row)
+                row, x = [], PAD
+            row.append(c)
+            x += tw + 12
+        if row:
+            rows.append(row)
+        h = top.height + 110 + 50 + len(rows) * 54 + 30
+        im = Image.new("RGBA", (W, h), BG + (255,))
+        im.alpha_composite(top, (0, 0))
+        d = ImageDraw.Draw(im)
+        y = top.height + 6
+        d.rounded_rectangle((PAD + 4, y - 14, PAD + 64, y - 8), 3, fill=AMBER)
+        d.ellipse((PAD + 72, y - 15, PAD + 80, y - 7), fill=TEAL)
+        d.text((PAD + 4, y), title, font=font(54, "bold"), fill=TEXT)
+        y += 72
+        d.text((PAD + 4, y), sub, font=font(28), fill=DIM)
+        y += 56
+        for row in rows:
+            x = PAD
+            for c in row:
+                tw = d.textlength(c, font=f)
+                d.rounded_rectangle((x, y, x + tw + 36, y + 42), 21, fill=CHIP, outline=AMBER + (150,), width=2)
+                d.text((x + 18, y + 21), c, font=f, fill=(255, 214, 150), anchor="lm")
+                x += tw + 48
+            y += 54
+        return im.convert("RGB")
+
+    def single(name, raw, title, sub, chips, min_h=420):
+        """One render at the top centre of a card."""
+        img = shot(raw)
+        h = max(min_h, img.height + 140)
+        c, m = card(h)
+        c.alpha_composite(img, ((c.width - img.width) // 2, 0))
+        page(c, m, title, sub, chips).save(IMAGES / f"{name}.png")
+        print("  ", name)
+
+    def shadowed(img, blur=26, alpha=150):
+        """A window with a soft drop shadow (room around it for the shadow)."""
+        pad = blur * 2
+        sh = Image.new("RGBA", (img.width + 2 * pad, img.height + 2 * pad), (0, 0, 0, 0))
+        mask = img.split()[3].point(lambda v: alpha if v > 0 else 0)
+        sh.paste((0, 0, 0, 255), (pad, pad + 10), mask)
+        sh = sh.filter(ImageFilter.GaussianBlur(blur))
+        sh.alpha_composite(img, (pad, pad))
+        return sh
+
+    def window(name, raw, title, sub, chips, scale=0.78):
+        """A window render (Settings) floating in the middle of a desktop."""
+        img = shot(raw)
+        img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
+        img = shadowed(img)
+        c, m = card(img.height + 40)
+        c.alpha_composite(img, ((c.width - img.width) // 2, (c.height - img.height) // 2))
+        page(c, m, title, sub, chips).save(IMAGES / f"{name}.png")
+        print("  ", name)
+
+    # Hero: every panel at a glance (a collage), so the first image shows
+    # how much is in it.
+    pairs = [
+        [("panel_calendar", "Calendar with your meetings"), ("panel_health", "Health: screen time and breaks")],
+        [("panel_countdowns", "Countdowns"), ("panel_commands", "Commands on a schedule")],
+        [("panel_agents", "AI agents: Claude Code, Codex, Hermes"), ("panel_tools_color", "Tools: colour, maths, QR, money")],
+        [("panel_launcher", "Launcher"), ("panel_toggles", "Quick toggles")],
+        [("panel_timer", "Timer and stopwatch"), ("panel_pomodoro", "Pomodoro")],
+        [("panel_clipboard", "Clipboard: click to paste"), ("panel_shelf", "Shelf and Share")],
+    ]
+    cw = W - 2 * PAD
+    gap = 22
+    big_w = (cw - gap) * 58 // 100
+    side_w = cw - gap - big_w
+    col2 = (cw - gap) // 2
+
+    def badge(img, label, h, top=False, right=False):
+        d = ImageDraw.Draw(img)
+        f = font(21, "semibold")
+        tw = d.textlength(label, font=f)
+        y0 = 14 if top else h - 52
+        x0 = img.width - tw - 46 if right else 16
+        d.rounded_rectangle((x0, y0, x0 + tw + 30, y0 + 38), 19, fill=(0, 0, 0, 150))
+        d.text((x0 + 15, y0 + 19), label, font=f, fill=TEXT, anchor="lm")
+
+    def tile(raw, label, w, h, seed):
+        """A desktop tile with the panel dropping from its top edge."""
+        wp = wallpaper(w, h, seed)
+        img = shot(raw)
+        scale = min((w - 36) / img.width, (h - 64) / img.height, 1.0)
+        img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
+        wp.alpha_composite(img, ((w - img.width) // 2, 0))
+        badge(wp, label, h)
+        return wp
+
+    # Row 1: lyrics (big) and two alerts + the closed notch on the side.
+    big_h = 420
+    row1 = tile("panel_lyrics", "Music + synced lyrics", big_w, big_h, 0.0)
+    side = wallpaper(side_w, big_h, 1.3)
+    y = 0
+    side_imgs = [shot(r) for r in ["collapsed_full_music", "toast_agent", "toast_notification"]]
+    fit = min((side_w - 30) / max(i.width for i in side_imgs), (big_h - 70) / sum(i.height + 6 for i in side_imgs), 1.0)
+    for img in side_imgs:
+        img = img.resize((round(img.width * fit), round(img.height * fit)), Image.LANCZOS)
+        side.alpha_composite(img, ((side_w - img.width) // 2, y))
+        y += img.height + 6
+    badge(side, "Alerts drop out of the notch", big_h)
+
+    # Last row: what's new, the Settings window floating on the desktop.
+    small_h = 330
+    tb_h = 470
+
+    def taskbar_tile(w, h):
+        wp = wallpaper(w, h, 2.2)
+        win = shot("settings_general")
+        k = min((h - 40) / win.height, (w * 0.55) / win.width)
+        win = shadowed(win.resize((round(win.width * k), round(win.height * k)), Image.LANCZOS), blur=18)
+        wp.alpha_composite(win, (10, (h - win.height) // 2))
+        d = ImageDraw.Draw(wp)
+        # Text on the right, where the desktop is empty.
+        tx = round(w * 0.62)
+        d.text((tx, 120), "New: Settings in its", font=font(34, "bold"), fill=TEXT)
+        d.text((tx, 162), "own window", font=font(34, "bold"), fill=TEXT)
+        lines = ["Every setting in one place, grouped,", "with a switch to turn the notch on or off.", "A custom taskbar is coming next."]
+        for i, line in enumerate(lines):
+            d.text((tx, 222 + i * 32), line, font=font(22), fill=TEXT)
+        return wp
+
+    total_h = big_h + len(pairs) * (small_h + gap) + tb_h + gap
+    collage = Image.new("RGBA", (cw, total_h), (0, 0, 0, 0))
+    collage.paste(row1, (0, 0), rounded_mask(big_w, big_h, 22))
+    collage.paste(side, (big_w + gap, 0), rounded_mask(side_w, big_h, 22))
+    y = big_h + gap
+    for r, row in enumerate(pairs):
+        for k, (raw, label) in enumerate(row):
+            t = tile(raw, label, col2, small_h, 0.4 + r * 0.9 + k * 0.33)
+            collage.paste(t, (k * (col2 + gap), y), rounded_mask(col2, small_h, 22))
+        y += small_h + gap
+    collage.paste(taskbar_tile(cw, tb_h), (0, y), rounded_mask(cw, tb_h, 22))
+    # The website shows the collage alone (its own title is above it).
+    collage.save(IMAGES / "hero-collage.png")
+    hero = Image.new("RGBA", (W, total_h + 2 * PAD), BG + (255,))
+    hero.alpha_composite(collage, (PAD, PAD))
+    page_img = page_chips(hero, "Nookly", "A Dynamic Island for Windows: music, AI agents, tools, reminders and more. Free and open source.",
+                          ["Music + lyrics", "AI agents", "Color picker", "Calculator", "QR codes", "Converter", "System monitor", "Clipboard",
+                           "Screenshots", "File shelf", "Notifications", "Prayer times", "Timer", "Pomodoro", "To-do", "Water", "8 mascots", "Taskbar mascot"])
+    page_img.save(IMAGES / "hero.png")
+    print("   hero")
+
+    single("music", "panel_music", "Now playing", "Album art, seek bar and controls for whatever is playing.", ["Spotify", "Browsers", "Media Player", "Any app in the Windows media overlay"])
+    single("lyrics", "panel_lyrics", "Synced lyrics", "Tap the lyrics button and the panel splits in two. The current line lights up as it is sung.", ["Click a line to jump there", "Scroll to browse", "Lyrics by LRCLIB"])
+    single("timer", "panel_timer", "Timer", "Presets or your own time. The notch tells you when it's done.", ["Presets", "+1 min", "Restart from the alert"])
+    single("stopwatch", "panel_stopwatch", "Stopwatch", "Tenths of a second, right in the notch.", ["Start / pause", "Reset"])
+    single("pomodoro", "panel_pomodoro", "Pomodoro", "Focus sessions with short and long breaks.", ["25 / 5 / 15", "Sessions today", "Break alerts"])
+    single("todo", "panel_todo", "To-do with reminders", "Jot a task and give it a time. The notch taps you on the shoulder when it is due.", ["Add Task", "Click a task to edit", "Tick to complete", "Done tasks clear the next day"])
+    single("todo-editor", "panel_todo_editor", "Add a task", "Type it, pick when to be reminded, done.", ["+15m", "+30m", "+1h", "Tonight", "Tomorrow"])
+    single("water", "panel_water", "Water reminder", "A gentle nudge to drink, and a chart of your day.", ["One-tap log", "Daily goal", "Refill alerts"])
+    single("water-settings", "panel_water_settings", "Water settings", "Bottle size, daily goal and reminder hours.", ["Bottle", "Goal", "Sip", "Hours"])
+    single("shelf", "panel_shelf", "File shelf", "Drop files on the notch to keep them handy, drag them out when you need them.", ["Drag in", "Drag out", "Open with a click"])
+    single("clipboard", "panel_clipboard", "Clipboard history", "Everything you copy, newest first. Off until you turn it on.", ["Text, files or images", "Pin to keep", "Skips password managers"])
+    window("settings", "settings_general", "Settings", "Its own window: the gear, a right-click on the notch or the tray icon opens it.", ["Notch on / off", "Appearance", "Theme", "Mascot", "Features", "Widgets", "Shortcuts"])
+    window("settings-taskbar", "settings_taskbar", "Taskbar: coming soon", "A custom Nookly taskbar in the same style, with its own on / off switch.", ["Coming soon", "Taskbar mascot today"])
+    single("prayer", "panel_prayer", "Prayer times", "Worked out on your PC for your city, with optional reminders.", ["16 cities or any place", "Hanafi or Shafi Asr", "Minute nudges"])
+    single("agents", "panel_agents", "AI agents", "See when Hermes, Claude Code or Codex is working, needs your OK, or is done.", ["Connect with one click", "Status only, stays on your PC", "Alerts when it needs you"])
+    single("monitor", "panel_monitor", "System monitor", "CPU, memory and network speed, with a minute of history.", ["Free disk space", "Optional on the closed notch"])
+    window("widgets", "settings_widgets", "Widgets", "Settings > Widgets: choose what the closed notch shows, and drag it into the order you want.", ["Battery and AirPods", "Two side by side", "Drag to reorder"])
+    single("tools", "panel_tools_color", "Color picker", "Pick any color on your screen, then copy it as HEX, RGB or HSL.", ["Magnifier", "Recent colors", "Contrast check"])
+    single("tools-calc", "panel_tools_calc", "Calculator", "Type a sum and see the answer as you type.", ["15% and +10%", "sqrt, sin, 5!", "Hex and binary"])
+    single("tools-qr", "panel_tools_qr", "QR code", "Whatever you copy, as a QR code for your phone.", ["From clipboard or typed", "Copy as image", "Works offline"])
+    single("tools-convert", "panel_tools_convert", "Converter", "Units, including katha, bigha and maund, and world time zones.", ["Length to data", "Bangladesh units", "12 cities"])
+    single("tools-zones", "panel_tools_zones", "Time zones", "What time it is in 12 cities, now or an hour from now.", ["Daylight saving handled", "Pick any city as base"])
+    window("settings-privacy", "settings_privacy", "Privacy", "Mic and camera dots, clipboard history, and apps to hide the notch for: all opt-in.", ["Mic & camera dots", "Clipboard history", "Hide for apps"])
+    single("calendar", "panel_calendar", "Calendar", "The month at a glance, with the days your tasks are due.", ["Today in red", "Due-task dots", "Wheel for months"])
+    window("themes", "settings_look", "Themes", "Ten themes, Liquid Glass included, and your own colours, checked for readable contrast.", ["Black", "Rose", "Forest", "Paper", "Liquid Glass", "Yours"])
+    # Liquid Glass on the very scene it was rendered over, lined up, so the
+    # blur and the bent edges show against what's around it.
+    scene_png = Path(data) / "scene.png"
+    if scene_png.exists() and (out / "glass_scene.raw").exists():
+        bg = Image.open(scene_png).convert("RGBA")
+        glass = shot("glass_scene")
+        cw = W - 2 * PAD
+        k = cw / bg.width
+        bg = bg.resize((cw, round(bg.height * k)), Image.LANCZOS)
+        glass = glass.resize((cw, round(glass.height * k)), Image.LANCZOS)
+        bg.alpha_composite(glass)
+        page(bg, rounded_mask(cw, bg.height, 26), "Liquid Glass", "Real glass: what's behind is blurred and bent at the edges, with light that moves like water. No outline.", ["Lens edges", "Rim light", "Drifting glints", "Adapts to light and dark"]).save(IMAGES / "glass.png")
+        print("   glass")
+    else:
+        single("glass", "glass_color", "Liquid Glass", "Real glass: what's behind, blurred and bent at the edges, with light that moves like water. No outline.", ["Lens edges", "Rim light", "Drifting glints", "Adapts to light and dark"])
+    window("settings-panels", "settings_panels", "Your panel order", "Settings > Panels: drag the panels into the order the notch shows them.", ["Drag to reorder", "Numbered", "Reset order"])
+    window("settings-location", "settings_location", "Location", "Settings > Location: your place, once, for the weather and prayer times.", ["Time zone (offline)", "Windows location", "Search a city"])
+    window("settings-features", "settings_features", "Features", "Switch on only what you use; what's off doesn't run at all.", ["Minimal", "Student", "Work", "Everything", "Profiles"])
+
+    # Nookly's own windows: install, uninstall, About and the tray menu.
+    names = [("dlg_setup", "Install"), ("dlg_uninstall", "Uninstall"), ("dlg_about", "About"), ("dlg_menu", "Tray menu")]
+    imgs = [shadowed(shot(n), blur=18) for n, _ in names]
+    colw = (W - 2 * PAD - 30) // 2
+    k = min(1.0, (colw - 20) / max(i.width for i in imgs))
+    imgs = [i.resize((round(i.width * k), round(i.height * k)), Image.LANCZOS) for i in imgs]
+    rows = [max(imgs[0].height, imgs[1].height), max(imgs[2].height, imgs[3].height)]
+    gh = sum(rows) + 60
+    c, m = card(gh)
+    y = 20
+    for r in range(2):
+        for col in range(2):
+            img = imgs[r * 2 + col]
+            x = 20 + col * (colw + 30) + (colw - img.width) // 2
+            c.alpha_composite(img, (x, y + (rows[r] - img.height) // 2))
+        y += rows[r] + 20
+    page(c, m, "Nookly's own windows", "Install, uninstall, About and the tray menu, in the notch's style and theme.", ["Just for you, no admin", "Minimize and close", "Your theme"]).save(IMAGES / "windows.png")
+    print("   windows")
+    single("tour", "tour_hello", "A friendly start", "Five quick steps: look, place, colour, what's in it, and how to use it.", ["30 seconds", "Change it anytime"])
+    single("notes", "panel_notes", "Notes", "A scratchpad that saves as you type.", ["Saves itself", "Quick-note shortcut"])
+    single("countdowns", "panel_countdowns", "Countdowns", "Exams, trips, birthdays: \"12 days\" right on the notch.", ["Date picker", "Every year", "Notch widget"])
+    single("launcher", "panel_launcher", "Launcher", "Your apps, folders and sites, one click away.", ["Add apps...", "Drop to pin", "Links"])
+    single("commands", "panel_commands", "Commands", "Run your own commands on a schedule and see what they print.", ["1 min to daily", "Up to 5", "On the notch"])
+    single("toggles", "panel_toggles", "Quick toggles", "Wi-Fi, Bluetooth, dark mode and the microphone in one place.", ["Wi-Fi", "Bluetooth", "Dark mode", "Mic mute"])
+    single("weather", "panel_weather", "Weather", "Now, the hours around it and the week ahead, with icons for every kind of weather.", ["Hourly", "7 days", "Rain chance"])
+    single("volume", "panel_volume", "Volume mixer", "The master volume and every app's own, with mute.", ["Per app", "Drag to set", "Mute"])
+    single("health", "panel_health", "Health", "Screen time today, eye breaks, stand-up reminders and battery care.", ["Screen time", "20-20-20", "Stand up", "Unplug at 80%"])
+    single("notifications", "toast_notification", "Windows notifications", "Other apps' notifications drop out of the notch, with their icon and colour.", ["Click to open the app", "Mute an app", "Respects Do Not Disturb"], min_h=300)
+
+    # Styles: five small cards, two per row.
+    cw = (W - 2 * PAD - 30) // 2
+    grid = Image.new("RGBA", (W - 2 * PAD, 3 * 230 + 60), (0, 0, 0, 0))
+    styles = [("collapsed_full_music", "Full"), ("collapsed_slim_music", "Slim"), ("collapsed_compact_music", "Compact"), ("collapsed_pill_music", "Pill"), (None, "Hidden")]
+    for i, (raw, label) in enumerate(styles):
+        wp = wallpaper(cw, 230, i * 0.7)
+        if raw:
+            img = shot(raw)
+            wp.alpha_composite(img, ((cw - img.width) // 2, 0))
+        else:
+            ImageDraw.Draw(wp).text((cw // 2, 115), "Rest the mouse at the edge", font=font(26), fill=TEXT, anchor="mm")
+        d = ImageDraw.Draw(wp)
+        f = font(22, "semibold")
+        tw = d.textlength(label, font=f)
+        d.rounded_rectangle((20, 230 - 62, 20 + tw + 32, 230 - 20), 21, fill=(0, 0, 0, 150))
+        d.text((36, 230 - 41), label, font=f, fill=TEXT, anchor="lm")
+        grid.paste(wp, ((i % 2) * (cw + 30), (i // 2) * 260), rounded_mask(cw, 230, 22))
+    im = Image.new("RGBA", (W, grid.height + 2 * PAD + 150), BG + (255,))
+    im.alpha_composite(grid, (PAD, PAD))
+    d = ImageDraw.Draw(im)
+    d.text((PAD + 4, PAD + grid.height + 30), "Notch styles", font=font(54, "bold"), fill=TEXT)
+    d.text((PAD + 4, PAD + grid.height + 102), "Settings > Appearance, or the welcome tour, picks the style.", font=font(28), fill=DIM)
+    im.convert("RGB").save(IMAGES / "styles.png")
+    print("   styles")
+
+    # Alerts: toasts in two columns.
+    toasts = ["toast_notification", "toast_agent", "toast_timer", "toast_water", "toast_todo", "toast_pomodoro", "toast_charging", "toast_volume", "toast_mic", "toast_caps", "toast_bt", "toast_copy", "toast_agent_done"]
+    imgs = [shot(t) for t in toasts]
+    row_h = max(i.height for i in imgs) + 40
+    rows = (len(imgs) + 1) // 2
+    grid = Image.new("RGBA", (W - 2 * PAD, rows * (row_h + 24)), (0, 0, 0, 0))
+    for i, img in enumerate(imgs):
+        wp = wallpaper(cw, row_h, i * 0.37)
+        wp.alpha_composite(img, ((cw - img.width) // 2, 0))
+        grid.paste(wp, ((i % 2) * (cw + 30), (i // 2) * (row_h + 24)), rounded_mask(cw, row_h, 22))
+    im = Image.new("RGBA", (W, grid.height + 2 * PAD + 150), BG + (255,))
+    im.alpha_composite(grid, (PAD, PAD))
+    d = ImageDraw.Draw(im)
+    d.text((PAD + 4, PAD + grid.height + 20), "Alerts and overlays", font=font(54, "bold"), fill=TEXT)
+    d.text((PAD + 4, PAD + grid.height + 92), "The notch drops down for a moment, then gets out of the way.", font=font(28), fill=DIM)
+    im.convert("RGB").save(IMAGES / "alerts.png")
+    print("   alerts")
+
+    # Mascots: eight closed notches in a row of four.
+    from_store = ["eyes", "cat", "ghost", "robot", "sparky", "sprout", "owl", "panda"]
+    mw = (W - 2 * PAD - 3 * 24) // 4
+    grid = Image.new("RGBA", (W - 2 * PAD, 2 * 170 + 24), (0, 0, 0, 0))
+    for i, k in enumerate(from_store):
+        img = shot(f"mascot_{k}")
+        if img.width > mw - 60:
+            img = img.resize((mw - 60, round(img.height * (mw - 60) / img.width)), Image.LANCZOS)
+        wp = wallpaper(mw, 170, i * 0.5)
+        wp.alpha_composite(img, ((mw - img.width) // 2, 0))
+        ImageDraw.Draw(wp).text((mw // 2, 130), k.capitalize(), font=font(26, "semibold"), fill=TEXT, anchor="mm")
+        grid.paste(wp, ((i % 4) * (mw + 24), (i // 4) * 194), rounded_mask(mw, 170, 20))
+    im = Image.new("RGBA", (W, grid.height + 2 * PAD + 150), BG + (255,))
+    im.alpha_composite(grid, (PAD, PAD))
+    d = ImageDraw.Draw(im)
+    d.text((PAD + 4, PAD + grid.height + 20), "Pick a companion", font=font(54, "bold"), fill=TEXT)
+    d.text((PAD + 4, PAD + grid.height + 92), "In Full style, when nothing is going on. They follow your mouse, blink, doze and wave.", font=font(28), fill=DIM)
+    im.convert("RGB").save(IMAGES / "mascot.png")
+    print("   mascot")
+
+    # Positions: one screen with the notch on four edges.
+    c, m = card(720, windows=False)
+    top, left, right, bottom = shot("collapsed_full_music"), shot("edge_left_full"), shot("edge_right_compact"), shot("edge_bottom_pill")
+    c.alpha_composite(top, ((c.width - top.width) // 2, 0))
+    c.alpha_composite(left, (0, (c.height - left.height) // 2))
+    c.alpha_composite(right, (c.width - right.width, (c.height - right.height) // 2))
+    c.alpha_composite(bottom, ((c.width - bottom.width) // 2, c.height - bottom.height))
+    d = ImageDraw.Draw(c)
+    d.text((c.width // 2, c.height // 2 - 24), "Right-click and drag", font=font(56, "bold"), fill=TEXT, anchor="mm")
+    d.text((c.width // 2, c.height // 2 + 34), "to any edge of any screen, like the taskbar", font=font(30), fill=TEXT, anchor="mm")
+    page(c, m, "Top, bottom, left or right", "Or pick one in Settings > Appearance. Panels always open upright.", []).save(IMAGES / "positions.png")
+    print("   positions")
+    shutil.rmtree(out)
