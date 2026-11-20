@@ -2,6 +2,13 @@
 
 Versions 0.1.x below were released before the Nookly name.
 
+## 0.6.1: Taskbar fixes
+
+- **Auto-hide always hides again**: the taskbar could stay out (and its last pop-up open) when Windows didn't report the mouse leaving, for example when it left straight from a pop-up or a press went to the Start menu. It now checks where the mouse really is while it's out, and slides away as it should.
+- **Pop-ups close when you leave them**: a widget's view or an app's windows no longer stays open after the mouse moves off the taskbar.
+- **No "more apps" tile for one app**: when just one app is past your limit, it shows in the tile's place; the ⋯ tile appears from two.
+- **Private by default**: a new taskbar starts with the offline CPU & memory widget instead of Weather, so nothing goes online until you add a widget that needs it.
+
 ## 0.6.0: Nookly Taskbar, an optional add-on
 
 - **Nookly Taskbar**: a taskbar that replaces Windows' own, in the notch's bubble shape and theme (Liquid Glass included), that grows and shrinks to fit what's on it. It's an **optional add-on** of under 1 MB: get it in **Settings > Taskbar > Download taskbar**. Nookly fetches the add-on of its own version from the release, checks its SHA-256 and installs it beside itself. Without it, nothing changes: no space, no memory, no CPU. It runs in its own small process, updates with Nookly, and Windows' taskbar always comes back (switched off, quit, or even a crash).

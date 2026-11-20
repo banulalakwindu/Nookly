@@ -5539,11 +5539,15 @@ pub fn selftest() -> String {
                     sw.bar_section = 1;
                 }
                 a.sw_render();
+                use crate::barcfg::{Thing, Zone, layout};
                 let clock = crate::barcfg::ITEMS.iter().position(|x| x.0 == "clock").unwrap() as u32;
-                let before = crate::barcfg::order(&a.settings).iter().position(|x| x.0 == "clock");
-                let moved = a.sw_click_id(S_BAR_UP + clock) && crate::barcfg::order(&a.settings).iter().position(|x| x.0 == "clock") == before.map(|b| b - 1);
+                let at = |a: &App| layout(&a.settings).iter().position(|e| e.thing == Thing::Item("clock")).unwrap_or(0);
+                // Pinned left with its Left switch, then switched off.
+                let k = at(&a) as u32;
+                let moved = a.sw_click_id(S_LAY_ZONE + k * 3) && layout(&a.settings).iter().any(|e| e.thing == Thing::Item("clock") && e.zone == Zone::Left);
+                a.sw_render();
                 let hid = a.sw_click_id(S_BAR_SHOW + clock) && !crate::barcfg::order(&a.settings).iter().any(|x| x.0 == "clock" && x.1);
-                for k in ["bar_order", "bar_off", "bar_on"] {
+                for k in ["bar_layout", "bar_order", "bar_off", "bar_on"] {
                     a.settings.extra.remove(k);
                 }
                 if let Some(sw) = a.swin.as_mut() {

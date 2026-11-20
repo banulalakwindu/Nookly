@@ -1487,7 +1487,57 @@ impl Bar {
         if self.autohide() && (self.left_at.is_some() || self.shown() < 0.5) {
             ms = ms.min(100);
         }
+        // Out (auto-hide) or a pop-up open: check where the mouse really is
+        // now and then (see verify_mouse), so neither can get stuck.
+        if (self.autohide() && self.shown() > 0.5) || self.popup.is_some() || self.down.is_some() {
+            ms = ms.min(250);
+        }
         ms.max(15)
+    }
+
+    /// Where the mouse really is: Windows doesn't always say the mouse left
+    /// (a window resized under it, or it left straight from a pop-up), and
+    /// the bar would then stay out (auto-hide) and its last pop-up open. And
+    /// is Start (or Search) still in front?
+    fn verify_mouse(&mut self) {
+        unsafe {
+            let mut p = POINT::default();
+            if GetCursorPos(&mut p).is_err() {
+                return;
+            }
+            let under = WindowFromPoint(p);
+            let bubbles: Vec<HWND> = [self.pop_b.as_ref(), self.sub_b.as_ref()].into_iter().flatten().map(|b| b.hwnd).collect();
+            if under != self.hwnd && !bubbles.contains(&under) {
+                let mut changed = false;
+                if self.inside {
+                    self.inside = false;
+                    self.left_at = Some(Instant::now());
+                    changed = true;
+                }
+                for b in [self.pop_b.as_mut(), self.sub_b.as_mut()].into_iter().flatten() {
+                    if b.inside {
+                        b.inside = false;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    self.mouse = (-1e4, -1e4);
+                    self.dirty = true;
+                }
+            }
+            // A press whose release went elsewhere (Start took it): over.
+            if self.down.is_some() && self.drag.is_none() {
+                use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+                if GetAsyncKeyState(VK_LBUTTON.0 as i32) >= 0 {
+                    self.down = None;
+                    self.dirty = true;
+                }
+            }
+            if self.shell_open && !is_shell(GetForegroundWindow()) {
+                self.shell_open = false;
+                self.dirty = true;
+            }
+        }
     }
 }
 
@@ -1755,6 +1805,16 @@ unsafe extern "system" fn on_show(_: HWINEVENTHOOK, _: u32, hwnd: HWND, id_objec
     }
 }
 
+/// Start, Search or one of Windows' own panels (by the program behind it).
+fn is_shell(hwnd: HWND) -> bool {
+    let mut pid = 0u32;
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    }
+    let exe = apps::exe_of(pid).unwrap_or_default().to_ascii_lowercase();
+    ["startmenuexperiencehost.exe", "searchhost.exe", "searchapp.exe", "shellexperiencehost.exe"].iter().any(|n| exe.ends_with(n))
+}
+
 /// Top-level windows made, closed, shown, hidden, renamed, minimized or
 /// brought to front: the app list needs reading again (once, soon).
 unsafe extern "system" fn on_window(_: HWINEVENTHOOK, ev: u32, hwnd: HWND, id_object: i32, id_child: i32, _: u32, _: u32) {
@@ -1767,12 +1827,7 @@ unsafe extern "system" fn on_window(_: HWINEVENTHOOK, ev: u32, hwnd: HWND, id_ob
     if ev == EVENT_SYSTEM_FOREGROUND {
         // Start, Search or Windows' panels in front: an auto-hidden bar
         // comes out with them.
-        let mut pid = 0u32;
-        unsafe {
-            GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        }
-        let exe = apps::exe_of(pid).unwrap_or_default().to_ascii_lowercase();
-        let shell = ["startmenuexperiencehost.exe", "searchhost.exe", "searchapp.exe", "shellexperiencehost.exe"].iter().any(|n| exe.ends_with(n));
+        let shell = is_shell(hwnd);
         with_bar(|b| {
             b.check_fullscreen();
             if b.shell_open != shell {
@@ -1957,6 +2012,9 @@ fn run_loop() {
                 MsgWaitForMultipleObjectsEx(None, wait, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
                 with_bar(|b| {
                     b.check_fullscreen();
+                    if b.inside || b.popup.is_some() || b.shell_open || b.down.is_some() {
+                        b.verify_mouse();
+                    }
                     // Auto-hide: notice the cursor at the screen's bottom
                     // edge even where no sliver catches it.
                     if b.autohide() && !b.inside {

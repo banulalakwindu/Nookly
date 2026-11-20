@@ -22,8 +22,13 @@ pub fn fit_apps(n: usize, max: usize, room: f32, tile: f32, gap: f32) -> Fit {
         return Fit { shown: n, overflow: false };
     }
     // The overflow tile takes a slot of its own.
-    let shown = cap.min(slots.saturating_sub(1)).min(n);
-    Fit { shown: shown.max(if slots >= 2 { 1 } else { 0 }), overflow: true }
+    let shown = cap.min(slots.saturating_sub(1)).min(n).max(if slots >= 2 { 1 } else { 0 });
+    // A "more" tile for a single app is pointless: the app takes its place
+    // (the same width).
+    if n - shown == 1 && slots > shown {
+        return Fit { shown: n, overflow: false };
+    }
+    Fit { shown, overflow: true }
 }
 
 /// Width of the app section for a fit.
@@ -49,6 +54,10 @@ mod tests {
     fn max_apps_limits_and_overflows() {
         assert_eq!(fit_apps(12, 8, 2000.0, TILE, GAP), Fit { shown: 8, overflow: true });
         assert_eq!(fit_apps(8, 8, 2000.0, TILE, GAP), Fit { shown: 8, overflow: false });
+        // One app more than the limit: it shows instead of a "more" tile.
+        assert_eq!(fit_apps(9, 8, 2000.0, TILE, GAP), Fit { shown: 9, overflow: false });
+        assert_eq!(fit_apps(4, 3, 2000.0, TILE, GAP), Fit { shown: 4, overflow: false });
+        assert_eq!(fit_apps(5, 3, 2000.0, TILE, GAP), Fit { shown: 3, overflow: true });
     }
 
     #[test]
@@ -79,7 +88,11 @@ mod tests {
                     assert!(apps_width(f, TILE, GAP) <= room.max(TILE), "n={n} max={max} room={room} {f:?}");
                     assert!(f.shown <= n);
                     if max > 0 {
-                        assert!(f.shown <= max);
+                        // (One more when it takes the "more" tile's place.)
+                        assert!(f.shown <= max || (f.shown == max + 1 && !f.overflow));
+                    }
+                    if f.overflow {
+                        assert!(n - f.shown >= 2, "a more tile holds two or more");
                     }
                 }
             }

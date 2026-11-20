@@ -103,7 +103,9 @@ fn home(key: &str) -> Zone {
     }
 }
 
-const DEFAULT_WIDGETS: &str = "weather:m";
+/// The widgets a new taskbar starts with: offline ones (the weather goes
+/// online, so it waits until you add it).
+const DEFAULT_WIDGETS: &str = "system:m";
 
 /// Everything on the bar, in order (`bar_layout`): the left end, the
 /// middle, the right end. Settings from before (`bar_order`, `bar_widgets`
@@ -609,7 +611,7 @@ mod tests {
     #[test]
     fn default_layout() {
         let s = st();
-        assert_eq!(keys(&s), ["start:l", "search:l", "apps:m", "@weather:m:m", "tray:r", "lang:r", "quick:r", "clock:r", "notifs:r"]);
+        assert_eq!(keys(&s), ["start:l", "search:l", "apps:m", "@system:m:m", "tray:r", "lang:r", "quick:r", "clock:r", "notifs:r"]);
         assert!(order(&s).iter().all(|x| x.1));
     }
 
@@ -628,7 +630,7 @@ mod tests {
         let mut s = st();
         add_widget(&mut s, "clock");
         add_widget(&mut s, "clock");
-        assert_eq!(ids(&s), ["weather:m", "clock:m"]);
+        assert_eq!(ids(&s), ["system:m", "clock:m"]);
         // Pin the clock right: at the right end's inner side.
         pin_widget(&mut s, 1, Pin::Right);
         assert_eq!(keys(&s)[4], "@clock:m:r");
@@ -646,7 +648,7 @@ mod tests {
         assert_eq!(keys(&s)[0], "notifs:l");
         resize_widget(&mut s, 0, Size::S);
         remove_widget(&mut s, 1);
-        assert_eq!(ids(&s), ["weather:s"]);
+        assert_eq!(ids(&s), ["system:m"]);
         set_shown(&mut s, "search", false);
         assert!(!order(&s).iter().find(|x| x.0 == "search").unwrap().1);
     }
