@@ -337,6 +337,15 @@ impl App {
         self.open_settings_at(None);
     }
 
+    /// Open Settings on the Taskbar tab.
+    pub fn open_settings_taskbar(&mut self) {
+        self.open_settings();
+        if let Some(sw) = self.swin.as_mut() {
+            sw.tab = 1;
+        }
+        self.sw_render();
+    }
+
     /// Open Settings on a section of the Notch tab.
     pub fn open_settings_at(&mut self, section: Option<u8>) {
         self.startup_cache = tray::startup_enabled();
@@ -2107,8 +2116,8 @@ fn draw_taskbar_tab(ui: &mut Ui, tight: &mut Tight, body: Rect, st: &Settings, s
             }
             group(ui, &mut c, "Collections");
             ui.text_wrap(
-                "Drag an app onto another on the taskbar to put them in a collection; drag more apps onto it to add them. Collections sit after your apps; hover one to see its apps. Right-click a collection to undo it, or an app in it to take it out.",
-                c.cut_top(64.0, 0.0),
+                "Drag an app between others to move it (into and out of the \u{22EF} tile too), or onto another to put them in a collection; drag more apps onto it to add them. Collections sit after your apps; hover one to see its apps. Right-click a collection to undo it, or an app in it to take it out.",
+                c.cut_top(80.0, 0.0),
                 11.5,
                 col::DIM,
                 Weight::Regular,

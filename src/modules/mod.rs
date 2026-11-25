@@ -416,6 +416,10 @@ pub trait Module {
     fn animating(&self) -> bool {
         false
     }
+    /// How often, while `animating` (milliseconds between frames).
+    fn frame_ms(&self) -> u32 {
+        100
+    }
     /// True if dragging files over the notch should open this module's tab.
     fn wants_drops(&self) -> bool {
         false

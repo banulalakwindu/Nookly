@@ -428,6 +428,10 @@ impl Module for Timer {
         ui.digits(&text, right, size, col::TEXT, Align::Right);
     }
 
+    fn frame_ms(&self) -> u32 {
+        50
+    }
+
     fn animating(&self) -> bool {
         // Tenths of a second on the stopwatch need frames between ticks.
         self.sw_running

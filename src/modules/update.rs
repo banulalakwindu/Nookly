@@ -253,8 +253,15 @@ pub fn get_addon(dest: std::path::PathBuf, done: impl FnOnce() + Send + 'static)
             if dest.exists() {
                 let _ = std::fs::rename(&dest, &old);
             }
-            std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())?;
+            if let Err(e) = std::fs::rename(&tmp, &dest) {
+                // The old one stays.
+                let _ = std::fs::rename(&old, &dest);
+                return Err(e.to_string());
+            }
             let _ = std::fs::remove_file(&old);
+            // Which version is here (the add-on also writes it, but only
+            // once it has started).
+            crate::store::write("taskbar_version.txt", version);
             Ok(())
         })();
         *ADDON.lock().unwrap() = match got {

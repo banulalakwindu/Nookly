@@ -60,6 +60,14 @@ pub const INPUT_LEAVE: usize = 4;
 /// Faces that move only move while they can be seen.
 pub const SHOWN_MSG: PCWSTR = w!("Nookly.SurfaceShown");
 
+/// Taskbar -> notch: do something with the settings (they're the notch's).
+/// wParam: COMMAND_*.
+pub const COMMAND_MSG: PCWSTR = w!("Nookly.BarCommand");
+/// Open Settings on its Taskbar tab.
+pub const COMMAND_SETTINGS: usize = 1;
+/// Switch auto-hide.
+pub const COMMAND_AUTOHIDE: usize = 2;
+
 /// The face name of a widget's full view.
 pub fn full_face(id: &str) -> String {
     format!("full@{id}")

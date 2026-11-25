@@ -1073,7 +1073,7 @@ impl Widgets {
                     continue;
                 }
                 let on = self.layout.contains(&it.id);
-                let hov = ui.hovered(cell) && list.contains(ui.mouse.0, ui.mouse.1);
+                let hov = ui.hovered(cell) && ui.hovered(list);
                 ui.fill_rr(cell, 10.0, if on { it.color.with_a(0.18) } else if hov { col::BTN_HOVER } else { col::BTN });
                 if on {
                     ui.stroke_rr(cell, 10.0, it.color.with_a(0.6), 1.2);

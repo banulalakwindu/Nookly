@@ -152,6 +152,10 @@ impl Module for Mirror {
         self.seen_at = 0.0;
         self.tick(ctx);
     }
+    fn frame_ms(&self) -> u32 {
+        33
+    }
+
     fn animating(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }

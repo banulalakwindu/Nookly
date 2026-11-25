@@ -121,6 +121,24 @@ fn on_top(h: HWND) {
     }
 }
 
+/// Run `f` with our tray window behind Windows' own, so what `f` asks of
+/// the taskbar (the screen strip) goes straight to Windows. Passed on by
+/// us, to ourselves, Windows says yes to the strip's position but never
+/// keeps it free (maximized windows went under the bar).
+pub fn step_aside<R>(f: impl FnOnce() -> R) -> R {
+    let h = WND.load(Ordering::Relaxed);
+    if h <= 0 {
+        return f();
+    }
+    let h = HWND(h as *mut _);
+    unsafe {
+        let _ = SetWindowPos(h, Some(HWND_BOTTOM), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+    let r = f();
+    on_top(h);
+    r
+}
+
 fn changed() {
     VER.fetch_add(1, Ordering::Relaxed);
     let b = BAR.load(Ordering::Relaxed);
@@ -296,7 +314,7 @@ fn read(d: &[u8]) -> bool {
 }
 
 /// An icon's pixels (premultiplied BGRA, square).
-fn icon_pixels(h: HICON) -> Option<(u32, Vec<u8>)> {
+pub fn icon_pixels(h: HICON) -> Option<(u32, Vec<u8>)> {
     if h.0.is_null() {
         return None;
     }

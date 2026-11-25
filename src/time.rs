@@ -181,6 +181,23 @@ pub fn fmt_mod(m: u32) -> String {
     clock_full((m / 60) % 24, m % 60)
 }
 
+/// Fast displays: every 2nd (3rd...) refresh, so animations run at 60 to
+/// about 90 frames a second. More can hardly be seen and costs the GPU as
+/// much again.
+fn refresh_step(hz: f64) -> i64 {
+    ((hz / 60.0 + 0.05).floor() as i64).max(1)
+}
+
+#[cfg(test)]
+mod refresh_tests {
+    #[test]
+    fn steps() {
+        for (hz, n) in [(59.94, 1), (60.0, 1), (75.0, 1), (100.0, 1), (119.9, 2), (144.0, 2), (165.0, 2), (240.0, 4), (30.0, 1)] {
+            assert_eq!(super::refresh_step(hz), n, "{hz}");
+        }
+    }
+}
+
 /// Sleep until just after the display's next refresh (from DWM's timing;
 /// DwmFlush can wait ~250 ms when nothing else on screen changes). Falls
 /// back to ~120 fps if the timing isn't available.
@@ -195,7 +212,8 @@ pub fn wait_refresh() {
             let (period, vblank) = (ti.qpcRefreshPeriod as i64, ti.qpcVBlank as i64);
             // Sane refresh rates only (24..500 Hz).
             if freq > 0 && period > freq / 500 && period < freq / 24 {
-                let next = vblank + ((now - vblank).div_euclid(period) + 1) * period;
+                let n = refresh_step(freq as f64 / period as f64);
+                let next = vblank + ((now - vblank).div_euclid(period) + n) * period;
                 secs = (next - now) as f64 / freq as f64 + 0.0005;
             }
         }

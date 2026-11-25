@@ -31,6 +31,24 @@ pub fn fit_apps(n: usize, max: usize, room: f32, tile: f32, gap: f32) -> Fit {
     Fit { shown, overflow: true }
 }
 
+/// Where an app lands when it's dropped, as "before the one at this place
+/// in the list" (`apps::Apps::move_to`). The bar shows the first `shown`
+/// apps and the rest are in the "more apps" grid, so one that comes out
+/// pushes the bar's last app in, and one that goes in lets the grid's first
+/// out. `k`: before this place; `on_bar`: dropped among the bar's tiles
+/// (else among the grid's).
+pub fn landing(from: usize, k: usize, on_bar: bool, shown: usize) -> usize {
+    if on_bar {
+        // From the grid, past the bar's last tile: it becomes the last.
+        if from >= shown { k.min(shown.saturating_sub(1)) } else { k.min(shown) }
+    } else if from < shown {
+        // From the bar: into the grid, not just to the bar's end.
+        k.max(shown + 1)
+    } else {
+        k.max(shown)
+    }
+}
+
 /// Width of the app section for a fit.
 pub fn apps_width(f: Fit, tile: f32, gap: f32) -> f32 {
     let k = f.shown + f.overflow as usize;
@@ -48,6 +66,27 @@ mod tests {
     fn everything_fits() {
         assert_eq!(fit_apps(5, 0, 1000.0, TILE, GAP), Fit { shown: 5, overflow: false });
         assert_eq!(fit_apps(0, 0, 1000.0, TILE, GAP), Fit { shown: 0, overflow: false });
+    }
+
+    #[test]
+    fn dropping_between_bar_and_grid() {
+        // What the list looks like after a move (as Apps::move_to does it).
+        let mv = |from: usize, k: usize, on_bar: bool| {
+            let to = landing(from, k, on_bar, 3);
+            let mut v: Vec<char> = "abcde".chars().collect();
+            if to != from && to != from + 1 {
+                let c = v.remove(from);
+                v.insert(if to > from { to - 1 } else { to }.min(v.len()), c);
+            }
+            v.into_iter().collect::<String>()
+        };
+        // The bar shows abc; the grid has de.
+        assert_eq!(mv(4, 0, true), "eabcd"); // out, first: c went into the grid
+        assert_eq!(mv(3, 3, true), "abdce"); // out, past the bar's last tile
+        assert_eq!(mv(0, 3, true), "bcade"); // along the bar, to its end
+        assert_eq!(mv(0, 3, false), "bcdae"); // into the grid: d came out
+        assert_eq!(mv(0, 5, false), "bcdea"); // into the grid, last
+        assert_eq!(mv(4, 3, false), "abced"); // within the grid
     }
 
     #[test]

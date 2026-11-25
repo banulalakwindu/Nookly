@@ -24,6 +24,8 @@ use windows::core::*;
 
 /// Pins made in Nookly's taskbar.
 const PINS: &str = "taskbar_pins.txt";
+/// The order the apps were dragged into (a key per line).
+const ORDER: &str = "taskbar_order.txt";
 
 /// PKEY_AppUserModel_ID.
 const PKEY_AUMID: PROPERTYKEY = PROPERTYKEY { fmtid: GUID::from_u128(0x9F4C2855_9F79_4B39_A8D0_E1D42DE1D5F3), pid: 5 };
@@ -43,6 +45,21 @@ pub struct App {
     pub front: Option<HWND>,
     /// The exe it runs (lower case), to match windows without an id.
     pub target: Option<String>,
+}
+
+/// The key of Windows' permission prompts (User Account Control): all the
+/// ones waiting, under one tile.
+pub const CONSENT: &str = "nookly:permission";
+
+/// A window whose program can't be read (it runs above us: a permission
+/// prompt, some administrator programs): known by its class only.
+fn unread_key(h: HWND) -> (String, String) {
+    let c = class(h);
+    if c.contains("Secure UAP") {
+        (CONSENT.to_string(), "Administrator permission".to_string())
+    } else {
+        (format!("nookly:window:{}", c.to_lowercase()), String::new())
+    }
 }
 
 /// Pixels of an app's icon (premultiplied BGRA, square).
@@ -146,6 +163,31 @@ pub struct Apps {
     me: u32,
     /// Each window's exe and app id, read once (they don't change).
     ids: HashMap<isize, (String, Option<String>)>,
+    /// The order the apps are in (keys).
+    order: Vec<String>,
+    /// Windows asking to be looked at (they flashed), until they're in front.
+    pub attention: Vec<HWND>,
+}
+
+/// Where things go: what's known keeps its place, a new pinned app comes
+/// after the pinned ones there are, anything else new at the end.
+/// `items`: (key, pinned); gives their new order as indexes.
+fn arrange(order: &[String], items: &[(String, bool)]) -> Vec<usize> {
+    let rank = |k: &String| order.iter().position(|x| x == k);
+    let mut out: Vec<usize> = (0..items.len()).filter(|&i| rank(&items[i].0).is_some()).collect();
+    out.sort_by_key(|&i| rank(&items[i].0));
+    for i in 0..items.len() {
+        if rank(&items[i].0).is_some() {
+            continue;
+        }
+        if items[i].1 {
+            let at = out.iter().rposition(|&j| items[j].1).map_or(0, |p| p + 1);
+            out.insert(at, i);
+        } else {
+            out.push(i);
+        }
+    }
+    out
 }
 
 fn wstr(p: PWSTR) -> String {
@@ -341,9 +383,29 @@ pub fn icon_pixels(path: &str, px: u32) -> Option<Icon> {
     }
 }
 
+/// Windows' shield (what asks for an administrator).
+fn shield() -> Option<Icon> {
+    let mut info = SHSTOCKICONINFO { cbSize: std::mem::size_of::<SHSTOCKICONINFO>() as u32, ..Default::default() };
+    unsafe {
+        SHGetStockIconInfo(SIID_SHIELD, SHGSI_ICON | SHGSI_LARGEICON, &mut info).ok()?;
+        let px = crate::tray::icon_pixels(info.hIcon);
+        let _ = DestroyIcon(info.hIcon);
+        px
+    }
+}
+
+/// The icon a window has itself (its class's).
+fn window_icon(h: HWND) -> Option<Icon> {
+    unsafe {
+        let i = GetClassLongPtrW(h, GCLP_HICON);
+        let i = if i == 0 { GetClassLongPtrW(h, GCLP_HICONSM) } else { i };
+        crate::tray::icon_pixels(HICON(i as *mut _))
+    }
+}
+
 impl Apps {
     pub fn new() -> Apps {
-        Apps { list: Vec::new(), groups: Vec::new(), active: HWND::default(), icons: HashMap::new(), pins: Vec::new(), pins_read: None, me: std::process::id(), ids: HashMap::new() }
+        Apps { list: Vec::new(), groups: Vec::new(), active: HWND::default(), icons: HashMap::new(), pins: Vec::new(), pins_read: None, me: std::process::id(), ids: HashMap::new(), order: nookly_core::store::read(ORDER).lines().filter(|l| !l.is_empty()).map(String::from).collect(), attention: Vec::new() }
     }
 
     /// Nookly's own pins (launch strings) and the Windows pins unpinned
@@ -368,6 +430,7 @@ impl Apps {
             g.members.iter().map(|m| (m.key.clone(), m.windows.len())).collect::<Vec<_>>().hash(&mut h);
         }
         (self.active.0 as usize).hash(&mut h);
+        self.attention.len().hash(&mut h);
         h.finish()
     }
 
@@ -414,6 +477,11 @@ impl Apps {
             let exe_l = exe.to_lowercase();
             let key = aumid.clone().unwrap_or_else(|| exe.clone()).to_lowercase();
             if key.is_empty() {
+                let (key, name) = unread_key(h);
+                match list.iter().position(|a| a.key == key) {
+                    Some(i) => list[i].windows.push(h),
+                    None => list.push(App { key, name, launch: String::new(), pinned: false, windows: vec![h], front: None, target: None }),
+                }
                 continue;
             }
             // Without an id, a pin of the same exe takes the window.
@@ -435,15 +503,21 @@ impl Apps {
         // one comes forward. Keep the order apps and windows had (new ones
         // last), as Windows' own taskbar does: tiles, strip icons and
         // preview cards must not swap places under the cursor.
-        let old_apps: Vec<String> = self.list.iter().map(|a| a.key.clone()).collect();
         let old_wins: Vec<HWND> = self.list.iter().flat_map(|a| a.windows.iter().copied()).collect();
         let rank_w = |h: &HWND| old_wins.iter().position(|w| w == h).unwrap_or(usize::MAX);
         for a in list.iter_mut() {
             a.front = a.windows.first().copied();
             a.windows.sort_by_key(|h| rank_w(h));
         }
-        let pins = list.iter().take_while(|a| a.pinned).count();
-        list[pins..].sort_by_key(|a| old_apps.iter().position(|k| *k == a.key).unwrap_or(usize::MAX));
+        let keys: Vec<(String, bool)> = list.iter().map(|a| (a.key.clone(), a.pinned)).collect();
+        let mut from: Vec<Option<App>> = list.into_iter().map(Some).collect();
+        let mut list: Vec<App> = arrange(&self.order, &keys).into_iter().filter_map(|i| from[i].take()).collect();
+        // A permission prompt waits for an answer: first, where it's seen.
+        if let Some(k) = list.iter().position(|a| a.key == CONSENT) {
+            let a = list.remove(k);
+            list.insert(0, a);
+        }
+        self.order = list.iter().map(|a| a.key.clone()).collect();
         for a in list.iter_mut() {
             if a.name.is_empty() || a.name.eq_ignore_ascii_case("ApplicationFrameHost") {
                 a.name = a.windows.first().map(|&h| title(h)).unwrap_or_default();
@@ -465,13 +539,55 @@ impl Apps {
         self.active = unsafe { GetForegroundWindow() };
         self.list = list;
         self.groups = groups;
+        let root = unsafe { GetAncestor(self.active, GA_ROOTOWNER) };
+        let active = self.active;
+        self.attention.retain(|&h| h != active && h != root && unsafe { IsWindow(Some(h)).as_bool() });
+    }
+
+    /// A window flashed (it wants to be looked at). True when that's new.
+    pub fn flashed(&mut self, h: HWND) -> bool {
+        let root = unsafe { GetAncestor(h, GA_ROOTOWNER) };
+        let h = if root.is_invalid() { h } else { root };
+        let fg = unsafe { GetForegroundWindow() };
+        let known = self.list.iter().any(|a| a.windows.contains(&h)) || self.groups.iter().any(|g| g.members.iter().any(|a| a.windows.contains(&h)));
+        if h == fg || !known || self.attention.contains(&h) {
+            return false;
+        }
+        self.attention.push(h);
+        true
+    }
+
+    /// Does this app want to be looked at?
+    pub fn wants(&self, a: &App) -> bool {
+        a.key == CONSENT || (!self.attention.is_empty() && a.windows.iter().any(|h| self.attention.contains(h)))
+    }
+
+    /// Move the app at `from` to before the one at `to` (an index into the
+    /// list as it is; its length: the end), and remember the order.
+    pub fn move_to(&mut self, from: usize, to: usize) {
+        if from >= self.list.len() || to == from || to == from + 1 {
+            return;
+        }
+        let a = self.list.remove(from);
+        let at = if to > from { to - 1 } else { to }.min(self.list.len());
+        self.list.insert(at, a);
+        // (Pinned apps shown only in their collection keep their place.)
+        let hidden: Vec<String> = self.order.iter().filter(|k| !self.list.iter().any(|a| a.key == **k)).cloned().collect();
+        self.order = self.list.iter().map(|a| a.key.clone()).chain(hidden).collect();
+        nookly_core::store::write(ORDER, &(self.order.join("\n") + "\n"));
     }
 
     /// The app's icon (made once, then kept).
     pub fn icon(&mut self, a: &App, px: u32) -> Option<&Icon> {
         let k = format!("{}@{px}", a.key);
         if !self.icons.contains_key(&k) {
-            let i = icon_pixels(&a.launch, px).or_else(|| a.windows.first().and_then(|_| icon_pixels(&a.key, px)));
+            let i = if a.key == CONSENT {
+                shield()
+            } else if a.launch.is_empty() {
+                a.windows.first().and_then(|&h| window_icon(h))
+            } else {
+                icon_pixels(&a.launch, px).or_else(|| a.windows.first().and_then(|_| icon_pixels(&a.key, px)))
+            };
             self.icons.insert(k.clone(), i);
         }
         self.icons.get(&k).and_then(|i| i.as_ref())
@@ -487,6 +603,11 @@ pub fn activate(h: HWND) {
     unsafe {
         if IsIconic(h).as_bool() {
             let _ = ShowWindow(h, SW_RESTORE);
+            // A window that runs above us doesn't take that: Windows' own
+            // way of switching to it does.
+            if IsIconic(h).as_bool() {
+                SwitchToThisWindow(h, true);
+            }
         }
         let ok = SetForegroundWindow(h).as_bool();
         crate::dbg_log(&format!("activate {:?}: {ok}", h.0));
@@ -513,8 +634,74 @@ pub fn close(h: HWND) {
 
 /// Start an app (a new window of it).
 pub fn launch(what: &str) {
+    if what.is_empty() {
+        return;
+    }
     unsafe {
         ShellExecuteW(None, w!("open"), &HSTRING::from(what), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+    }
+}
+
+/// The app's program file, when it's an ordinary one (not a Store app's).
+pub fn exe(a: &App) -> Option<String> {
+    if a.launch.starts_with("shell:") {
+        return None;
+    }
+    a.target.clone().filter(|t| t.ends_with(".exe") && Path::new(t).exists())
+}
+
+/// Start it as administrator (Windows asks first).
+pub fn launch_admin(a: &App) {
+    unsafe {
+        ShellExecuteW(None, w!("runas"), &HSTRING::from(&a.launch), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+    }
+}
+
+/// Show its program file in File Explorer.
+pub fn open_location(a: &App) {
+    if let Some(p) = exe(a) {
+        unsafe {
+            ShellExecuteW(None, w!("open"), w!("explorer.exe"), &HSTRING::from(format!("/select,\"{p}\"")), PCWSTR::null(), SW_SHOWNORMAL);
+        }
+    }
+}
+
+/// The processes its windows belong to, less the ones that aren't only its
+/// own (Windows' frame for Store apps, File Explorer) and Nookly's.
+fn own_pids(a: &App) -> Vec<u32> {
+    let mut v: Vec<u32> = a
+        .windows
+        .iter()
+        .map(|&h| {
+            let mut pid = 0u32;
+            unsafe {
+                GetWindowThreadProcessId(h, Some(&mut pid));
+            }
+            pid
+        })
+        .filter(|&p| {
+            let exe = exe_of(p).unwrap_or_default().to_lowercase();
+            p != 0 && !exe.is_empty() && !["\\applicationframehost.exe", "\\explorer.exe", "\\nookly.exe", "\\nookly-taskbar.exe"].iter().any(|x| exe.ends_with(x))
+        })
+        .collect();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
+pub fn can_end(a: &App) -> bool {
+    !own_pids(a).is_empty()
+}
+
+/// End it, at once (unsaved work is lost; the menu asks first).
+pub fn end(a: &App) {
+    for pid in own_pids(a) {
+        unsafe {
+            if let Ok(p) = OpenProcess(PROCESS_TERMINATE, false, pid) {
+                let _ = TerminateProcess(p, 1);
+                let _ = CloseHandle(p);
+            }
+        }
     }
 }
 
@@ -541,4 +728,33 @@ pub fn debug_ids(h: HWND) -> (String, Option<String>) {
         GetWindowThreadProcessId(h, Some(&mut pid));
     }
     (exe_of(pid).unwrap_or_default(), window_aumid(h))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::arrange;
+
+    fn items(v: &[(&str, bool)]) -> Vec<(String, bool)> {
+        v.iter().map(|(k, p)| (k.to_string(), *p)).collect()
+    }
+    fn keys(order: &[&str], v: &[(&str, bool)]) -> String {
+        let o: Vec<String> = order.iter().map(|s| s.to_string()).collect();
+        let it = items(v);
+        arrange(&o, &it).into_iter().map(|i| it[i].0.as_str()).collect::<Vec<_>>().join(",")
+    }
+
+    #[test]
+    fn nothing_known_keeps_pins_first() {
+        assert_eq!(keys(&[], &[("a", true), ("b", true), ("x", false)]), "a,b,x");
+    }
+
+    #[test]
+    fn known_keep_their_place() {
+        assert_eq!(keys(&["x", "b", "a"], &[("a", true), ("b", true), ("x", false)]), "x,b,a");
+    }
+
+    #[test]
+    fn new_pin_after_pins_new_app_at_end() {
+        assert_eq!(keys(&["b", "x", "a", "y"], &[("a", true), ("b", true), ("c", true), ("x", false), ("y", false), ("z", false)]), "b,x,a,c,y,z");
+    }
 }

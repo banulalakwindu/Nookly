@@ -110,6 +110,25 @@ pub fn keep_hidden() {
     }
 }
 
+/// Where the main screen's usable area ends.
+pub fn work_bottom() -> i32 {
+    let mut r = RECT::default();
+    unsafe {
+        let _ = SystemParametersInfoW(SPI_GETWORKAREA, 0, Some(&mut r as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
+    }
+    r.bottom
+}
+
+/// Nookly's own windows stay in sight while the taskbar peeks at a window
+/// (the others turn to glass).
+pub fn keep_in_peek(h: HWND) {
+    use windows::Win32::Graphics::Dwm::{DWMWA_EXCLUDED_FROM_PEEK, DwmSetWindowAttribute};
+    let yes = TRUE;
+    unsafe {
+        let _ = DwmSetWindowAttribute(h, DWMWA_EXCLUDED_FROM_PEEK, &yes as *const BOOL as *const _, 4);
+    }
+}
+
 /// Put the Windows taskbar back the way it was. Does nothing unless we hid it.
 pub fn restore_windows_taskbar() {
     let kv = crate::store::parse_kv(&crate::store::read(STATE));

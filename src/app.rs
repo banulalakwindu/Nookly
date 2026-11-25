@@ -153,6 +153,9 @@ pub static MAXIMIZED_OVERRIDE: std::sync::atomic::AtomicU8 = std::sync::atomic::
 /// `frame_interval` value meaning "draw on every display refresh".
 pub const VSYNC: u32 = 1;
 
+/// The mouse rests this long on something before its tooltip shows.
+const TIP_DELAY: f64 = 0.6;
+
 /// How the main loop should schedule the next frame.
 pub enum Pacing {
     /// Nothing is moving: sleep until a message arrives.
@@ -287,6 +290,10 @@ pub struct App {
     mascot_rect: Option<Rect>,
     /// What the closed notch shows now (from the Widgets tab's order).
     notch_shown: Option<Shown>,
+    /// The mascot as last drawn (see mascot::key).
+    mascot_drawn: Option<[i32; 3]>,
+    /// What the last frame asked about the mouse (see ui::note_hovers).
+    hovers: Vec<Rect>,
     /// Each widget's last value and when it changed ("On change").
     widget_seen: std::collections::HashMap<&'static str, (String, f64)>,
     /// An alert set to Small: shown inside the closed notch until then.
@@ -396,6 +403,8 @@ pub struct App {
     faces_fast: bool,
     /// The taskbar add-on is being brought to this version.
     bar_updating: bool,
+    /// The add-on update failed this session (it's tried at the next start).
+    bar_update_tried: bool,
     /// The taskbar is out (not slid away): moving faces move only then.
     bar_out: bool,
     /// The widgets in sight on the taskbar (a bit per place).
@@ -555,6 +564,7 @@ impl App {
                 Some(hinst.into()),
                 None,
             )?;
+            crate::shell::keep_in_peek(hwnd);
 
             let gfx = Gfx::new(10, 10)?;
             let modules = modules::all(hwnd);
@@ -598,6 +608,8 @@ impl App {
                 tab_slot: TAB_H + TAB_GAP,
                 mascot_rect: None,
                 notch_shown: None,
+                mascot_drawn: None,
+                hovers: Vec::new(),
                 widget_seen: std::collections::HashMap::new(),
                 small_alert: None,
                 inner_drag: None,
@@ -656,7 +668,8 @@ impl App {
                 surf_cache: std::collections::HashMap::new(),
                 surf_faces: Vec::new(),
                 faces_fast: false,
-                bar_updating: true,
+                bar_updating: false,
+                bar_update_tried: false,
                 bar_out: true,
                 bar_seen: u64::MAX,
                 full: None,
@@ -967,6 +980,10 @@ impl App {
     /// started again after a pause (2, 4, 8 s; then it stays off until the
     /// switch is turned off and on).
     pub fn sync_bar(&mut self) {
+        // A test run: the taskbar on screen belongs to the real Nookly.
+        if crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         let want = self.bar_wanted();
         let t = self.t();
         if let Some(c) = self.bar.as_mut() {
@@ -983,7 +1000,10 @@ impl App {
         // is kept, not started twice.
         // An add-on from another version (Nookly updated): the matching one
         // first (the old one keeps working until it's here).
-        if bar_exe().is_some() && self.settings.extra.get("bar_version").map(String::as_str) != Some(env!("CARGO_PKG_VERSION")) && !self.bar_updating {
+        // (The add-on writes its version when it starts; one from before
+        // that, or another version, is replaced.)
+        let bar_ver = crate::store::read("taskbar_version.txt");
+        if bar_exe().is_some() && bar_ver.trim() != env!("CARGO_PKG_VERSION") && !self.bar_updating && !self.bar_update_tried && !cfg!(debug_assertions) {
             self.bar_updating = true;
             if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
                 crate::modules::update::get_addon(dir.join("nookly-taskbar.exe"), || {});
@@ -992,11 +1012,16 @@ impl App {
         if self.bar_updating && *crate::modules::update::ADDON.lock().unwrap() != crate::modules::update::AddOn::Busy {
             let ok = *crate::modules::update::ADDON.lock().unwrap() == crate::modules::update::AddOn::Idle;
             self.bar_updating = false;
-            self.settings.extra.insert("bar_version".into(), env!("CARGO_PKG_VERSION").into());
-            self.settings.save();
-            if ok && (self.bar.is_some() || bar_window().is_some()) {
-                // The new one takes over.
-                self.stop_bar();
+            self.bar_update_tried = true;
+            if ok {
+                // Recorded only once it's really here (a failed download is
+                // tried again at the next start; the old one works meanwhile).
+                self.settings.extra.insert("bar_version".into(), env!("CARGO_PKG_VERSION").into());
+                self.settings.save();
+                if self.bar.is_some() || bar_window().is_some() {
+                    // The new one takes over.
+                    self.stop_bar();
+                }
             }
         }
         let running = self.bar.is_some() || bar_window().is_some();
@@ -1020,6 +1045,10 @@ impl App {
 
     /// Close the taskbar add-on and put the Windows taskbar back.
     pub fn stop_bar(&mut self) {
+        // A test run: the taskbar on screen belongs to the real Nookly.
+        if crate::modules::agents::ISOLATED.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         let child = self.bar.take();
         if let Some(h) = bar_window() {
             unsafe {
@@ -1121,6 +1150,10 @@ impl App {
             self.surf_cache.clear();
             return;
         };
+        // Slid away: nobody sees them (they're drawn when it comes out).
+        if !self.bar_out && self.surf.is_some() && !self.surf_keys.is_empty() {
+            return;
+        }
         let want = crate::barcfg::faces(&self.settings);
         if want.is_empty() && self.surf_keys.is_empty() && self.surf.is_some() {
             return;
@@ -1166,7 +1199,7 @@ impl App {
         if self.surf.is_none() {
             self.surf = crate::surfaces::Writer::open();
         }
-        let Some(mut g) = self.surf_gfx.take().or_else(|| Gfx::new(1, 1).ok()) else { return };
+        let Some(mut g) = self.surf_gfx.take().or_else(|| Gfx::small(1, 1).ok()) else { return };
         let mut faces = Vec::new();
         self.surf_cache.retain(|name, _| keys.iter().any(|(n, _)| n == name));
         for (i, (p, src)) in jobs.iter().enumerate() {
@@ -2797,26 +2830,130 @@ impl App {
         let target = self.target();
         let dist = self.step_anim(target, dt);
 
-        self.render(target, dist);
+        // A frame nothing asked for but the mascot: drawn only when it would
+        // look different (it looks elsewhere, or blinks).
+        let asked = matches!(self.frame_interval, 0 | VSYNC);
+        let key = self.mascot_key(t);
+        let same = !asked && dist <= 0.0 && key.is_some() && key == self.mascot_drawn;
+        if !same {
+            self.render(target, dist);
+            self.mascot_drawn = key;
+        }
 
-        let ambient = (0..self.modules.len()).any(|i| self.enabled(i) && self.modules[i].animating())
-            || matches!(self.mood, Mood::Eyes | Mood::Doze | Mood::Wave)
-            || self.toast.is_some()
-            || self.leave_at.is_some()
-            || self.hover;
         // Tab switch: slide, highlight glide and glow all finish within 0.6 s.
         let moving = dist > 0.0 || t - self.switch_t < 0.6;
         self.perf_note(t, moving);
-        if moving {
-            self.set_frame_timer(VSYNC);
-        } else if ambient {
-            // Precise timer (see main.rs): 60 fps for live content in the
-            // open panel (lyrics, progress, stopwatch), 30 fps otherwise.
-            let live = self.mode() == Mode::Expanded && (0..self.modules.len()).any(|i| self.enabled(i) && self.modules[i].animating());
-            self.set_frame_timer(if live { 16 } else { 33 });
-        } else {
-            self.set_frame_timer(0);
+        let ms = if moving { VSYNC } else { self.ambient_ms(t) };
+        self.set_frame_timer(ms);
+    }
+
+    /// With nothing in motion: how often to draw (milliseconds, 0: not until
+    /// something happens). Only what can be seen counts, and only as often
+    /// as it changes: every frame costs the GPU, and the CPU with it.
+    /// (Whatever else changes asks for its frame, and there's one a second
+    /// in any case.)
+    fn ambient_ms(&self, t: f64) -> u32 {
+        let mut ms = 0u32;
+        let mut want = |m: u32| ms = if ms == 0 { m } else { ms.min(m) };
+        let until = |at: f64, most: u32| (((at - t) * 1000.0).ceil().max(8.0) as u32).min(most);
+        match self.mode() {
+            Mode::Expanded => {
+                if self.onboarding.is_some() {
+                    want(33);
+                }
+                for i in [Some(self.tab).filter(|_| !self.more_open), self.keyboard].into_iter().flatten() {
+                    if i < self.modules.len() && self.enabled(i) && self.modules[i].animating() {
+                        want(self.modules[i].frame_ms());
+                    }
+                }
+            }
+            Mode::Toast => want(33),
+            Mode::Collapsed => {
+                // The activities it shows (at 30 fps at most).
+                let shown: Vec<usize> = match &self.notch_shown {
+                    Some(Shown::Wide(it)) => vec![it],
+                    Some(Shown::Pair(l, r)) => [l.as_ref(), r.as_ref()].into_iter().flatten().collect(),
+                    None => Vec::new(),
+                }
+                .into_iter()
+                .filter_map(|it| match it {
+                    ShownItem::Live(i) => Some(*i),
+                    ShownItem::W(..) => None,
+                })
+                .chain(self.shown_owner())
+                .collect();
+                for i in shown {
+                    if i < self.modules.len() && self.enabled(i) && self.modules[i].animating() {
+                        want(self.modules[i].frame_ms().max(33));
+                    }
+                }
+                match self.mood {
+                    Mood::Clock => {}
+                    // A sleepy "z" floating up.
+                    Mood::Doze => want(100),
+                    Mood::Eyes | Mood::Wave => want(33),
+                }
+                // Resting on it opens it in a moment.
+                if self.hover && self.can_hover_open() {
+                    want(until(self.hover_since + self.look().hover_delay(), 33));
+                }
+            }
         }
+        if let Some(at) = self.leave_at {
+            want(until(at, 100));
+        }
+        if self.hover {
+            // A tooltip about to show (or fading in); Liquid Glass's lights
+            // drift slowly; else just now and then.
+            match self.tip {
+                Some((_, _, since, false)) if t - since < TIP_DELAY => want(until(since + TIP_DELAY, 250)),
+                Some((_, _, since, false)) if t - since < TIP_DELAY + 0.2 => want(33),
+                _ => {}
+            }
+            want(if self.gfx.theme.glass { 100 } else { 500 });
+        }
+        ms
+    }
+
+    /// The closed notch's mascot right now (see mascot::key), when it's all
+    /// that could make it look different.
+    fn mascot_key(&self, t: f64) -> Option<[i32; 3]> {
+        let alone = self.mode() == Mode::Collapsed
+            && !self.hover
+            && self.queue.is_empty()
+            && self.leave_at.is_none()
+            && !self.settings.extra.get("album_glow").is_some_and(|v| v == "1" && self.shown_owner().is_some())
+            && !(0..self.modules.len()).any(|i| self.enabled(i) && self.modules[i].animating());
+        if !alone {
+            return None;
+        }
+        let n = self.edge_rect(self.cur.0, self.cur.1);
+        let mut p = POINT::default();
+        unsafe {
+            GetCursorPos(&mut p).ok()?;
+        }
+        let m = ((p.x - self.origin.0) as f32 / self.scale, (p.y - self.origin.1) as f32 / self.scale);
+        crate::mascot::key(self.settings.mascot, self.mood, t, gaze(n.cx(), n.cy(), m, 300.0))
+    }
+
+    /// The part of the canvas to draw into: all of it while something moves
+    /// or shows around the notch, else the notch and what can be right
+    /// beside it (dots, the song's glow, a tooltip below the open panel).
+    fn draw_view(&self, notch: Rect, goal: Rect, dist: f32) -> Option<Rect> {
+        if dist > 0.0 || self.drag_files || self.dragging || self.onboarding.is_some() {
+            return None;
+        }
+        let (x, y) = match self.mode() {
+            Mode::Expanded => (120.0, 44.0),
+            Mode::Toast => return None,
+            Mode::Collapsed if self.hover => return None,
+            Mode::Collapsed => (116.0, 84.0),
+        };
+        let l = notch.x.min(goal.x) - x;
+        let t = notch.y.min(goal.y) - y;
+        let r = notch.r().max(goal.r()) + x;
+        let b = notch.b().max(goal.b()) + y;
+        Some(Rect::new(l, t, r - l, b - t))
     }
 
     /// With NOOKLY_DEBUG=1, log each transition's frame rate and worst gap
@@ -2915,7 +3052,10 @@ impl App {
         self.hits.clear();
         crate::ui::clear_text_areas();
         self.apply_theme();
+        let view = self.draw_view(notch, goal, dist);
+        self.gfx.set_view(view, self.scale);
         self.gfx.begin(self.scale);
+        crate::ui::note_hovers(true);
         let ear = (depth / 4.0).min(9.0);
         let barless = matches!(self.look(), NotchStyle::Pill | NotchStyle::Hidden);
         if depth >= 0.5 {
@@ -2987,6 +3127,7 @@ impl App {
         if dist <= 0.0 {
             self.draw_tooltip(t);
         }
+        self.hovers = crate::ui::note_hovers(false);
         self.gfx.end_and_present(self.hwnd, self.origin.0, self.origin.1);
     }
 
@@ -3007,7 +3148,7 @@ impl App {
     }
 
     fn draw_tooltip(&mut self, t: f64) {
-        const DELAY: f64 = 0.6;
+        const DELAY: f64 = TIP_DELAY;
         let hit = if self.press.is_none() && !self.dragging { self.hit_at(self.mouse.0, self.mouse.1) } else { None };
         let Some(mut h) = hit else {
             self.tip = None;
@@ -3939,6 +4080,7 @@ impl App {
     }
 
     fn on_mouse_move(&mut self, x: f32, y: f32) {
+        let (old, entered) = (self.mouse, !self.hover);
         self.mouse = (x, y);
         if !self.hover {
             self.hover = true;
@@ -3987,7 +4129,17 @@ impl App {
                 }
             }
         }
-        self.request_frame();
+        // Dragging a slider follows the mouse at the display's pace; hovering
+        // needs less.
+        if self.press.is_some() || entered {
+            self.request_frame();
+        } else if self.frame_interval == 0 || self.frame_interval > 25 {
+            // (And nothing, while what's under the mouse is the same.)
+            let hit = |p: (f32, f32)| self.hit_at(p.0, p.1).map(|h| (h.module, h.id));
+            if hit(old) != hit((x, y)) || self.hovers.iter().any(|r| r.contains(old.0, old.1) != r.contains(x, y)) {
+                self.set_frame_timer(25);
+            }
+        }
     }
 
     /// Hovering opens the panel unless that would cover something the user is
@@ -4367,11 +4519,29 @@ impl App {
         if msg == unsafe { RegisterWindowMessageW(crate::surfaces::SHOWN_MSG) } {
             self.bar_out = wp.0 != 0;
             self.bar_seen = lp.0 as u64;
+            // Out again: its widgets as they are now.
+            if self.bar_out {
+                self.push_faces();
+            }
             self.sync_fast();
             return Some(LRESULT(0));
         }
         if msg == unsafe { RegisterWindowMessageW(crate::surfaces::OPEN_MSG) } {
             self.open_full(wp.0);
+            return Some(LRESULT(0));
+        }
+        if msg == unsafe { RegisterWindowMessageW(crate::surfaces::COMMAND_MSG) } {
+            match wp.0 {
+                crate::surfaces::COMMAND_SETTINGS => self.open_settings_taskbar(),
+                crate::surfaces::COMMAND_AUTOHIDE => {
+                    let on = crate::barcfg::flag(&self.settings, "bar_autohide", false);
+                    self.settings.extra.insert("bar_autohide".into(), if on { "0" } else { "1" }.into());
+                    self.settings.save();
+                    self.bar_notify();
+                    self.sw_render();
+                }
+                _ => {}
+            }
             return Some(LRESULT(0));
         }
         if msg == unsafe { RegisterWindowMessageW(crate::surfaces::INPUT_MSG) } {

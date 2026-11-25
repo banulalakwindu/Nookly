@@ -84,6 +84,7 @@ impl Bubble {
                 None,
             )
             .ok()?;
+            nookly_core::shell::keep_in_peek(hwnd);
             let gfx = Gfx::new(10, 10).ok()?;
             Some(Bubble {
                 hwnd,

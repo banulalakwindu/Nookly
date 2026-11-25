@@ -47,6 +47,17 @@ impl Pose {
     }
 }
 
+/// What it looks like right now, for the ones that only look and blink:
+/// the same key, the same picture. None: it moves all the time.
+pub fn key(kind: Mascot, mood: Mood, t: f64, look: (f32, f32)) -> Option<[i32; 3]> {
+    if mood != Mood::Eyes || !matches!(kind, Mascot::Eyes | Mascot::Cat | Mascot::Owl | Mascot::Panda) {
+        return None;
+    }
+    let phase = (t % 4.2) as f32;
+    let blink = if phase < 0.12 { (phase * 1000.0) as i32 } else { -1 };
+    Some([(look.0 * 12.0).round() as i32, (look.1 * 12.0).round() as i32, blink])
+}
+
 /// Draw `kind` into `area` (about 28 DIPs tall in the Full notch; it scales
 /// to fit smaller areas). `look` is the gaze offset (-2.5..2.5, -1.5..1.5).
 pub fn draw(ui: &mut Ui, area: Rect, kind: Mascot, mood: Mood, t: f64, look: (f32, f32)) {

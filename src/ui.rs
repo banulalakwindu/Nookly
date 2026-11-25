@@ -40,6 +40,17 @@ impl<'a> DerefMut for Ui<'a> {
     }
 }
 
+thread_local! {
+    /// What the frame being drawn asks about the mouse (see `note_hovers`).
+    static HOVERS: std::cell::RefCell<Option<Vec<Rect>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Start noting what's asked with `hovered` (or give back what was noted):
+/// when the mouse moves and none of it changes, the picture doesn't either.
+pub fn note_hovers(on: bool) -> Vec<Rect> {
+    HOVERS.with_borrow_mut(|h| std::mem::replace(h, on.then(Vec::new)).unwrap_or_default())
+}
+
 impl<'a> Ui<'a> {
     pub fn hit(&mut self, r: Rect, id: u32) {
         self.hit_tip(r, id, "");
@@ -51,6 +62,11 @@ impl<'a> Ui<'a> {
     }
 
     pub fn hovered(&self, r: Rect) -> bool {
+        HOVERS.with_borrow_mut(|h| {
+            if let Some(list) = h {
+                list.push(r);
+            }
+        });
         r.contains(self.mouse.0, self.mouse.1)
     }
 

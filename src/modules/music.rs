@@ -1026,6 +1026,10 @@ impl Module for Music {
         }
     }
 
+    fn frame_ms(&self) -> u32 {
+        if self.show_lyrics { 16 } else { 33 }
+    }
+
     fn animating(&self) -> bool {
         self.info.has && self.info.playing
     }

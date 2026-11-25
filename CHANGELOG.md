@@ -2,6 +2,31 @@
 
 Versions 0.1.x below were released before the Nookly name.
 
+## 0.7.0: A fuller taskbar, and a much lighter notch
+
+**Taskbar**
+
+- **See a window before you open it**: rest on a window in an app's pop-up and it shows on the screen, as Windows' own taskbar does. Move away and everything is as it was; click to open it for good.
+- **Right-click menus in the taskbar's own look**: for apps (new window, run as administrator, open file location, pin, close, end task), for the bar itself (settings, Task Manager, show desktop, auto-hide) and for collections. They stay open until you're done; Esc, the arrows and Enter work too.
+- **Drag to reorder**: move apps along the bar, out of the ⋯ tile onto the bar (the last one goes in), into it, or within it. Dropping on the middle of another app still makes a collection.
+- **Apps that want you**: an app that flashes glows red, and an auto-hidden taskbar comes out to show it.
+- **Administrator requests are never missed**: permission prompts that wait minimized show as a shield, first on the bar, until you answer.
+- **The bell counts**: how many notifications came since you last opened them. They're only counted, never read.
+- **Full width without auto-hide**: the bar takes all the width it can get, with its contents in the middle, and a click in the screen's far right corner shows the desktop.
+- **Hidden icons wait for their menus**: right-click one, and the icons and the taskbar stay until its menu is closed.
+
+**Fixed**
+
+- **Maximized windows stop above the taskbar** when auto-hide is off (they went under it), also after File Explorer restarts.
+- **The taskbar add-on updates with Nookly** by itself. (From 0.6.x, it does so once Nookly is updated.)
+- Clicks on the taskbar's buttons (notifications, keyboard language, Wi-Fi / sound / battery) are more reliable.
+- A wide gap between the pinned left end and the apps.
+
+**Much lighter on the GPU and CPU**
+
+- **The notch draws only when something you can see changes**, and only that part. Measured on a laptop with Intel graphics: open and still, from 24% of the GPU to 1.7% (and from 23% to 5% of one CPU core); closed, from 9.7% to 1.4%; open with Liquid Glass, from 28% to 10%. Memory is unchanged.
+- On fast displays (120 Hz and up) animations run at 60 to about 80 frames a second.
+
 ## 0.6.1: Taskbar fixes
 
 - **Auto-hide always hides again**: the taskbar could stay out (and its last pop-up open) when Windows didn't report the mouse leaving, for example when it left straight from a pop-up or a press went to the Start menu. It now checks where the mouse really is while it's out, and slides away as it should.

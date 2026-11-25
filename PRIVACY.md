@@ -38,6 +38,9 @@ to delete this folder too.
 - **Windows notifications** (off until you turn it on): the app name, icon
   and text of notifications in Windows' Notification Center, to show them in
   the notch. They are not stored or sent anywhere.
+- **The taskbar's bell** (only with the optional taskbar): how many
+  notifications came since you last opened them. They are only counted;
+  their app and text are not read.
 - **Mic and camera dots:** Windows' own record of which apps are using your
   microphone or camera. Nookly never accesses the microphone or camera
   itself.

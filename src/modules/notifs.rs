@@ -431,7 +431,7 @@ impl Module for Notifs {
             if row.b() < r.y || row.y > r.b() {
                 continue;
             }
-            let hov = ui.hovered(row) && r.contains(ui.mouse.0, ui.mouse.1);
+            let hov = ui.hovered(row) && ui.hovered(r);
             ui.fill_rr(row, 10.0, if hov { col::BTN_HOVER } else { col::BTN });
             let mut c = row.inset_xy(10.0, 3.0);
             let dot = c.cut_left(8.0, 8.0);

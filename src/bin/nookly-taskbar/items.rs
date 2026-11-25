@@ -60,6 +60,8 @@ pub const LANG: u32 = 6;
 pub const QUICK: u32 = 7;
 pub const CLOCK: u32 = 8;
 pub const OVERFLOW: u32 = 9;
+/// The screen's far corner (fixed bar): the desktop.
+pub const DESKTOP: u32 = 10;
 /// + index into `bar.apps.list`.
 pub const APP: u32 = 100;
 /// An app's pop-up: + index of the window in the app's list.
@@ -219,8 +221,10 @@ pub fn plan(bar: &mut Bar, g: &mut Gfx, max_w: f32) -> Plan {
     let last = shown.iter().rposition(|x| x.1 == Zone::Mid);
     let gap = |i: usize| -> f32 {
         let (a, b) = (&shown[i - 1], &shown[i]);
-        // The ends and the middle: a little more space between them.
-        gap_between(a.0, b.0) + if a.1 != b.1 { SPACE } else { 0.0 }
+        // Between an end and the middle: at least a little air (not added
+        // to the apps' own: that left a wide hole).
+        let g = gap_between(a.0, b.0);
+        if a.1 != b.1 { g.max(GAP + SPACE) } else { g }
     };
     // Everything but the apps.
     let others: f32 = shown.iter().filter(|x| x.0 != Item::Apps).map(|x| x.2).sum::<f32>() + PAD * 2.0 + (1..shown.len()).map(gap).sum::<f32>();
@@ -312,7 +316,7 @@ fn start_logo(ui: &mut Ui, r: Rect, c: Color) {
 }
 
 /// An app's icon (or its first letter while there's none).
-fn app_icon(bar_icons: &mut crate::Icons, ui: &mut Ui, app: &apps::App, r: Rect, list: &mut apps::Apps) {
+pub fn app_icon(bar_icons: &mut crate::Icons, ui: &mut Ui, app: &apps::App, r: Rect, list: &mut apps::Apps) {
     let px = (r.w * ui.scale).round().max(16.0) as u32;
     if let Some(bmp) = bar_icons.get(ui.g, list, app, px) {
         ui.image_rr(&bmp, r, 0.0);
@@ -370,6 +374,7 @@ pub fn draw(bar: &mut Bar, ui: &mut Ui, body: Rect, plan: &Plan) {
             Item::Notifs => {
                 highlight(ui, r, NOTIFS, down);
                 ui.icon(glyph::BELL, r, 15.0, col::TEXT);
+                badge(ui, r.centered(TILE, TILE), crate::unread::count() as usize);
                 ui.hit(r, NOTIFS);
             }
             Item::Lang | Item::Quick | Item::Clock => {
@@ -403,18 +408,25 @@ pub fn draw(bar: &mut Bar, ui: &mut Ui, body: Rect, plan: &Plan) {
         ui.fill_rr(Rect::new(body.x + x0, body.b() - 3.5, view, 2.0), 1.0, col::TEXT.with_a(0.08));
         ui.fill_rr(Rect::new(tx, body.b() - 3.5, thumb, 2.0), 1.0, col::TEXT.with_a(0.35));
     }
-    // An app being dragged onto another (to make a collection) follows the mouse.
-    if let Some(from) = bar.dragging() {
-        if let Some(app) = bar.apps.list.get(from).cloned() {
-            let (mx, my) = ui.mouse;
-            let r = Rect::new(mx - 14.0, my - 14.0, 28.0, 28.0);
-            let old = ui.alpha;
-            ui.alpha = 0.85;
-            ui.fill_rr(r.inset(-4.0), 10.0, col::BTN_HOVER);
-            app_icon(&mut bar.icons, ui, &app, r, &mut bar.apps);
-            ui.alpha = old;
-        }
-    }
+    draw_dragged(bar, ui);
+}
+
+/// The app being dragged follows the mouse (drawn by the bar and by the
+/// pop-up it came from: each shows its part).
+fn draw_dragged(bar: &mut Bar, ui: &mut Ui) {
+    let Some(app) = bar.dragging().and_then(|k| bar.apps.list.get(k)).cloned() else { return };
+    let (mx, my) = ui.mouse;
+    let r = Rect::new(mx - 14.0, my - 14.0, 28.0, 28.0);
+    let old = ui.alpha;
+    ui.alpha = 0.85;
+    ui.fill_rr(r.inset(-4.0), 10.0, col::BTN_HOVER);
+    app_icon(&mut bar.icons, ui, &app, r, &mut bar.apps);
+    ui.alpha = old;
+}
+
+/// A line where a dragged app would go (centre x, the tiles' row).
+fn drop_line(ui: &mut Ui, x: f32, y: f32) {
+    ui.fill_rr(Rect::new(x - 1.5, y + 5.0, 3.0, TILE - 10.0), 1.5, col::ACCENT);
 }
 
 /// The strip's end: stop clipping, and keep only the parts of its hits
@@ -451,7 +463,7 @@ fn draw_widget(bar: &mut Bar, ui: &mut Ui, pos: usize, x: f32, cy: f32, w: f32) 
 /// The app tile under a drag that it would be dropped on (to make or
 /// grow a collection).
 fn drop_target(bar: &Bar, id: u32) -> bool {
-    bar.dragging().is_some() && bar.drop_target() == Some(id)
+    matches!(bar.drop_at(), Some(crate::Drop::Onto(i)) if i == id)
 }
 
 fn tile_state(bar: &Bar, ui: &mut Ui, t: Rect, id: u32, open: bool) {
@@ -465,15 +477,56 @@ fn tile_state(bar: &Bar, ui: &mut Ui, t: Rect, id: u32, open: bool) {
     }
 }
 
+/// A number in a solid accent pill at a tile's top right (0: none).
+fn badge(ui: &mut Ui, t: Rect, n: usize) {
+    if n == 0 {
+        return;
+    }
+    let label = if n > 99 { "99+".to_string() } else { n.to_string() };
+    let bw = (ui.measure(&label, 9.5, Weight::Bold) + 8.0).max(15.0);
+    let b = Rect::new(t.r() - bw + 1.0, t.y + 1.0, bw, 15.0);
+    ui.fill_rr(b.inset(-1.5), 9.0, col::NOTCH.with_a(0.55));
+    ui.fill_rr(b, 7.5, col::ACCENT);
+    ui.text(&label, b, 9.5, hex(0x1A1A1A), Weight::Bold, Align::Center);
+}
+
+/// An app that wants to be looked at: a red glow behind its tile (a few
+/// beats, then steady), and its dot a red bar.
+fn attention_glow(bar: &Bar, ui: &mut Ui, t: Rect) {
+    ui.fill_rr(t, 10.0, col::RED.with_a(0.16 + 0.22 * bar.attention_beat()));
+}
+
+/// The line under an app's icon: a dot while it's open, an accent bar while
+/// it's in front, a red one when it wants to be looked at.
+fn app_mark(bar: &Bar, ui: &mut Ui, t: Rect, app: &apps::App) {
+    if app.windows.is_empty() {
+        return;
+    }
+    let front = app.windows.contains(&bar.apps.active);
+    let wants = bar.apps.wants(app);
+    let w = if front || wants { 14.0 } else { 5.0 };
+    let c = if wants {
+        col::RED
+    } else if front {
+        col::ACCENT
+    } else {
+        col::DIM
+    };
+    ui.fill_rr(Rect::new(t.cx() - w / 2.0, t.b() - 3.5, w, 3.0), 1.5, c);
+}
+
 fn draw_apps(bar: &mut Bar, ui: &mut Ui, r: Rect, fit: Fit) {
-    let active = bar.apps.active;
     let list = bar.apps.list.clone();
-    let accent = col::ACCENT;
     let dragging = bar.dragging();
+    // The app whose menu is open stays lit.
+    let menu_key = bar.menu_app();
     for (i, app) in list.iter().take(fit.shown).enumerate() {
         let t = Rect::new(r.x + i as f32 * (TILE + TILE_GAP), r.y, TILE, TILE);
         let id = APP + i as u32;
-        let open = matches!(bar.popup, Some(Pop::App(k, _)) if k == i);
+        let open = matches!(bar.popup, Some(Pop::App(k, _)) if k == i) || menu_key.as_deref() == Some(app.key.as_str());
+        if bar.apps.wants(app) {
+            attention_glow(bar, ui, t);
+        }
         tile_state(bar, ui, t, id, open);
         let old = ui.alpha;
         if dragging == Some(i) {
@@ -481,22 +534,24 @@ fn draw_apps(bar: &mut Bar, ui: &mut Ui, r: Rect, fit: Fit) {
         }
         app_icon(&mut bar.icons, ui, app, t.centered(ICON, ICON), &mut bar.apps);
         ui.alpha = old;
-        // Running: a dot; in front: a wider bar in the accent colour.
-        if !app.windows.is_empty() {
-            let front = app.windows.contains(&active);
-            let w = if front { 14.0 } else { 5.0 };
-            ui.fill_rr(Rect::new(t.cx() - w / 2.0, t.b() - 3.5, w, 3.0), 1.5, if front { accent } else { col::DIM });
-        }
+        app_mark(bar, ui, t, app);
         ui.alpha = old;
         ui.hit(t, id);
+    }
+    // Where a dragged app would go: a line between the tiles.
+    if let Some(crate::Drop::Between(k, true)) = bar.drop_at() {
+        drop_line(ui, r.x + k as f32 * (TILE + TILE_GAP) - TILE_GAP / 2.0, r.y);
     }
     let mut x = r.x + fit.shown as f32 * (TILE + TILE_GAP);
     if fit.overflow {
         let t = Rect::new(x, r.y, TILE, TILE);
         x += TILE + TILE_GAP;
         let open = matches!(bar.popup, Some(Pop::Overflow(_)));
-        tile_state(bar, ui, t, OVERFLOW, open);
         let rest = &list[fit.shown.min(list.len())..];
+        if rest.iter().any(|a| bar.apps.wants(a)) {
+            attention_glow(bar, ui, t);
+        }
+        tile_state(bar, ui, t, OVERFLOW, open);
         if bar.settings.extra.get("bar_overflow").is_some_and(|v| v == "stack") && !rest.is_empty() {
             // Up to three of the hidden apps' icons, stacked, the group
             // centred in the tile.
@@ -513,16 +568,8 @@ fn draw_apps(bar: &mut Bar, ui: &mut Ui, r: Rect, fit: Fit) {
                 ui.circle(t.cx() + k as f32 * 5.5, t.cy(), 1.9, col::TEXT);
             }
         }
-        let n = rest.len();
-        if n > 0 {
-            // How many are hidden: a solid accent pill at the top right.
-            let label = if n > 99 { "99+".to_string() } else { n.to_string() };
-            let bw = (ui.measure(&label, 9.5, Weight::Bold) + 8.0).max(15.0);
-            let b = Rect::new(t.r() - bw + 1.0, t.y + 1.0, bw, 15.0);
-            ui.fill_rr(b.inset(-1.5), 9.0, col::NOTCH.with_a(0.55));
-            ui.fill_rr(b, 7.5, col::ACCENT);
-            ui.text(&label, b, 9.5, hex(0x1A1A1A), Weight::Bold, Align::Center);
-        }
+        // How many are hidden.
+        badge(ui, t, rest.len());
         ui.hit(t, OVERFLOW);
     }
     // Collections, after the apps: a tile with up to four of their icons.
@@ -534,6 +581,7 @@ fn draw_apps(bar: &mut Bar, ui: &mut Ui, r: Rect, fit: Fit) {
         let t = Rect::new(x + g as f32 * (TILE + TILE_GAP), r.y, TILE, TILE);
         let id = GROUP + g as u32;
         let open = matches!(bar.popup, Some(Pop::Group(k, _)) if k == g);
+        // (Its open apps also have tiles of their own: they do the asking.)
         tile_state(bar, ui, t, id, open);
         let inner = t.centered(28.0, 28.0);
         ui.fill_rr(inner, 8.0, col::TEXT.with_a(0.10));
@@ -601,6 +649,7 @@ pub fn pop_size(bar: &Bar, pop: Pop) -> (f32, f32) {
             let (c, r) = grid(bar, list.len());
             ((c as f32 * CELL_W + 20.0).max(room_for_windows(bar, &list)), r as f32 * CELL_H + 20.0)
         }
+        Pop::Menu(_) => bar.menu.as_ref().map_or((228.0, 60.0), |m| m.size()),
         Pop::Tray(_) => {
             let n = crate::tray::icons().len();
             let (c, r) = tray_grid(n);
@@ -647,9 +696,13 @@ pub fn draw_windows(bar: &mut Bar, ui: &mut Ui, app: &apps::App, r: Rect, ids: I
     let mut head = c.cut_top(30.0, 4.0).inset_xy(4.0, 0.0);
     app_icon(&mut bar.icons, ui, app, head.cut_left(18.0, 10.0).centered(18.0, 18.0), &mut bar.apps);
     let name = if app.name.is_empty() { "App" } else { app.name.as_str() };
-    let open = head.cut_right(60.0, 0.0).centered(60.0, 24.0);
-    ui.text(name, head, 12.5, col::TEXT, Weight::Semi, Align::Left);
-    ui.button(open, "New", ids.open);
+    if app.launch.is_empty() {
+        ui.text(name, head, 12.5, col::TEXT, Weight::Semi, Align::Left);
+    } else {
+        let open = head.cut_right(60.0, 0.0).centered(60.0, 24.0);
+        ui.text(name, head, 12.5, col::TEXT, Weight::Semi, Align::Left);
+        ui.button(open, "New", ids.open);
+    }
     if app.windows.is_empty() {
         ui.text("Not open", c.cut_top(30.0, 0.0).inset_xy(6.0, 0.0), 12.0, col::DIM, Weight::Regular, Align::Left);
     } else if use_previews(bar, app) {
@@ -697,20 +750,36 @@ fn draw_grid(bar: &mut Bar, ui: &mut Ui, list: &[(u32, apps::App)], c: Rect) {
     let gw = cols as f32 * CELL_W;
     let c = Rect::new(c.x + ((c.w - gw) / 2.0).max(0.0), c.y, gw, c.h);
     let hot = bar.sub_app.as_ref().map(|(a, _)| a.key.clone());
-    let active = bar.apps.active;
+    let dragging = bar.dragging().map(|k| POP_APP + k as u32);
+    let drop = bar.drop_at();
     for (k, (id, app)) in list.iter().enumerate() {
         let (cx, cy) = ((k % cols) as f32, (k / cols) as f32);
         let t = Rect::new(c.x + cx * CELL_W, c.y + cy * CELL_H, CELL_W, CELL_H).centered(TILE, TILE);
-        if ui.hovered(t) || hot.as_deref() == Some(app.key.as_str()) {
+        if bar.apps.wants(app) {
+            attention_glow(bar, ui, t);
+        }
+        if drop == Some(crate::Drop::Onto(*id)) {
+            ui.fill_rr(t, 10.0, col::ACCENT.with_a(0.22));
+            ui.stroke_rr(t.inset(0.5), 9.5, col::ACCENT, 1.5);
+        } else if ui.hovered(t) || hot.as_deref() == Some(app.key.as_str()) {
             ui.fill_rr(t, 10.0, col::BTN_HOVER);
         }
-        app_icon(&mut bar.icons, ui, app, t.centered(ICON, ICON), &mut bar.apps);
-        // As on the bar: a dot while open, an accent bar while in front.
-        if !app.windows.is_empty() {
-            let front = app.windows.contains(&active);
-            let w = if front { 14.0 } else { 5.0 };
-            ui.fill_rr(Rect::new(t.cx() - w / 2.0, t.b() - 3.5, w, 3.0), 1.5, if front { col::ACCENT } else { col::DIM });
+        let old = ui.alpha;
+        if dragging == Some(*id) {
+            ui.alpha = old * 0.35;
         }
+        app_icon(&mut bar.icons, ui, app, t.centered(ICON, ICON), &mut bar.apps);
+        ui.alpha = old;
+        // Where a dragged app would go: a line on this cell's side.
+        if let Some(crate::Drop::Between(n, false)) = drop {
+            let here = *id == POP_APP + n as u32;
+            let after = *id + 1 == POP_APP + n as u32 && k + 1 == list.len();
+            if here || after {
+                let side = (CELL_W - TILE) / 2.0;
+                drop_line(ui, if here { t.x - side } else { t.r() + side }, t.y);
+            }
+        }
+        app_mark(bar, ui, t, app);
         ui.hit_tip(t, *id, "");
     }
 }
@@ -727,6 +796,7 @@ pub fn draw_pop(bar: &mut Bar, ui: &mut Ui, pop: Pop, r: Rect) {
         Pop::Overflow(_) => {
             let list: Vec<(u32, apps::App)> = more_apps(bar).into_iter().map(|(i, a)| (POP_APP + i as u32, a)).collect();
             draw_grid(bar, ui, &list, r.inset(10.0));
+            draw_dragged(bar, ui);
         }
         Pop::Group(g, _) => {
             let Some(grp) = bar.apps.groups.get(g).cloned() else { return };
@@ -736,6 +806,7 @@ pub fn draw_pop(bar: &mut Bar, ui: &mut Ui, pop: Pop, r: Rect) {
             draw_grid(bar, ui, &list, c);
         }
         Pop::Tray(_) => draw_tray(bar, ui, r),
+        Pop::Menu(_) => crate::menu::draw(bar, ui, r),
         Pop::Widget(..) => {
             // The full view the notch drew, on whole pixels.
             let Some(name) = full_face(bar) else { return };
@@ -804,7 +875,7 @@ fn click_app(bar: &mut Bar, i: usize, x: f32) {
 
 /// The window behind a row or close-button id (the app's pop-up, or the
 /// windows bubble grown out of a grid).
-fn pop_window(bar: &Bar, id: u32) -> Option<HWND> {
+pub fn pop_window(bar: &Bar, id: u32) -> Option<HWND> {
     let (app, base) = if (SUB_ROW..SUB_OPEN).contains(&id) {
         (bar.sub_app.as_ref()?.0.clone(), if id >= SUB_CLOSE { SUB_CLOSE } else { SUB_ROW })
     } else {
@@ -833,10 +904,18 @@ pub fn action(bar: &mut Bar, id: u32, x: f32) {
             }
         }
         i if (TRAY_ICON..TRAY_ICON + 200).contains(&i) => tray_click(bar, i, false),
-        NOTIFS => shell::open_notifications(),
+        NOTIFS => {
+            crate::unread::mark_seen();
+            shell::open_notifications();
+        }
         LANG => shell::press(&[windows::Win32::UI::Input::KeyboardAndMouse::VK_LWIN, windows::Win32::UI::Input::KeyboardAndMouse::VK_SPACE]),
         QUICK => shell::open_quick_settings(),
-        CLOCK => shell::open_notifications(),
+        CLOCK => {
+            crate::unread::mark_seen();
+            shell::open_notifications();
+        }
+        DESKTOP => crate::menu::show_desktop(),
+        i if (crate::menu::ID..crate::menu::ID + 100).contains(&i) => crate::menu::action(bar, i),
         OVERFLOW => bar.toggle_pop(Pop::Overflow(x)),
         POP_OPEN => {
             if let Some(Pop::App(i, _)) = bar.popup {
@@ -1000,20 +1079,20 @@ fn draw_tray(bar: &mut Bar, ui: &mut Ui, r: Rect) {
     ui.text(&tip, tip_r, 11.5, c, Weight::Semi, Align::Center);
 }
 
-/// A click on a hidden icon: to its app, as Windows sends it (the bubble
-/// closes; the app shows its window or menu).
+/// A click on a hidden icon: to its app, as Windows sends it (the app shows
+/// its window, or its menu).
 pub fn tray_click(bar: &mut Bar, id: u32, right: bool) {
     let list = crate::tray::icons();
     let Some(icon) = list.get((id - TRAY_ICON) as usize) else { return };
     // Where it is on the screen (apps put their menu there).
     let at = bar.hits.iter().find(|h| h.id == id).map(|h| bar.to_screen(h.rect.cx(), h.rect.y)).unwrap_or((0, 0));
+    // Its menu (or window) comes: the bar waits for it, and with a menu so
+    // do the icons.
+    bar.hold_for_tray(icon.pid);
     if !right {
         bar.set_pop(None);
     }
     crate::tray::click(icon, right, at);
-    if right {
-        bar.set_pop(None);
-    }
 }
 
 /// A click on a widget without a full view: what Windows has for it.
@@ -1021,7 +1100,10 @@ fn widget_click(id: &str) {
     use windows::Win32::UI::Input::KeyboardAndMouse::*;
     match id {
         "wifi" | "volume" | "battery" | "bluetooth" | "mic" => shell::open_quick_settings(),
-        "clock" | "date" | "datetime" | "dayprog" | "yearprog" => shell::open_notifications(),
+        "clock" | "date" | "datetime" | "dayprog" | "yearprog" => {
+            crate::unread::mark_seen();
+            shell::open_notifications();
+        }
         "media" => shell::press(&[VK_MEDIA_PLAY_PAUSE]),
         "lang" => shell::press(&[VK_LWIN, VK_SPACE]),
         "cpu" | "ram" | "net" | "disk" | "uptime" => shell::press(&[VK_CONTROL, VK_SHIFT, VK_ESCAPE]),

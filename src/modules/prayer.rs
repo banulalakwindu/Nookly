@@ -821,6 +821,10 @@ impl Module for Prayer {
         ui.digits(&format!("{}:{:02}", secs / 60, secs % 60), right, 13.0, ACCENT, Align::Right);
     }
 
+    fn frame_ms(&self) -> u32 {
+        250
+    }
+
     fn animating(&self) -> bool {
         // The countdown in the closed notch ticks every second.
         self.editing.is_some() || self.live().is_some()

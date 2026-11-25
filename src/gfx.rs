@@ -341,6 +341,59 @@ pub struct Gfx {
     layers: Vec<ID2D1Layer>,
     /// The colour theme every draw call goes through.
     pub theme: Theme,
+    /// The part of the surface drawn into (pixels: x, y, w, h). See `set_view`.
+    view: (i32, i32, i32, i32),
+    /// Drawn without the GPU.
+    soft: bool,
+    /// What's on the screen (the pixels last presented), where, and when.
+    shown: Vec<u8>,
+    shown_at: Option<(isize, i32, i32, std::time::Instant)>,
+}
+
+/// The rectangle that differs between two pictures `pw` pixels wide (its x
+/// in steps of 16 pixels), None when they're the same.
+fn changed(a: &[u8], b: &[u8], pw: usize) -> Option<RECT> {
+    let stride = pw * 4;
+    let rows = a.len() / stride.max(1);
+    let same = |y: usize| a[y * stride..(y + 1) * stride] == b[y * stride..(y + 1) * stride];
+    let top = (0..rows).find(|&y| !same(y))?;
+    let bottom = (top..rows).rev().find(|&y| !same(y)).unwrap_or(top) + 1;
+    const STEP: usize = 64;
+    let cols = stride.div_ceil(STEP);
+    let (mut l, mut r) = (cols, 0);
+    for y in top..bottom {
+        let (ra, rb) = (&a[y * stride..(y + 1) * stride], &b[y * stride..(y + 1) * stride]);
+        let part = |k: usize| k * STEP..((k + 1) * STEP).min(stride);
+        if let Some(k) = (0..l).find(|&k| ra[part(k)] != rb[part(k)]) {
+            l = k;
+        }
+        if let Some(k) = (r..cols).rev().find(|&k| ra[part(k)] != rb[part(k)]) {
+            r = k + 1;
+        }
+    }
+    Some(RECT { left: (l * STEP / 4) as i32, top: top as i32, right: (r * STEP / 4).min(pw) as i32, bottom: bottom as i32 })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn changed_part() {
+        let (w, h) = (100usize, 20usize);
+        let a = vec![0u8; w * h * 4];
+        assert!(changed(&a, &a, w).is_none());
+        let mut b = a.clone();
+        b[(5 * w + 40) * 4] = 1;
+        b[(9 * w + 70) * 4 + 3] = 1;
+        let r = changed(&b, &a, w).unwrap();
+        assert_eq!((r.left, r.top, r.right, r.bottom), (32, 5, 80, 10));
+        // The last, narrower step.
+        let mut c = a.clone();
+        c[(19 * w + 99) * 4] = 1;
+        let r = changed(&c, &a, w).unwrap();
+        assert_eq!((r.left, r.top, r.right, r.bottom), (96, 19, 100, 20));
+    }
 }
 
 fn d2c(c: Color, a: f32) -> D2D1_COLOR_F {
@@ -361,10 +414,20 @@ pub fn wide(s: &str) -> Vec<u16> {
 
 impl Gfx {
     pub fn new(pw: i32, ph: i32) -> Result<Gfx> {
+        Self::make(pw, ph, false)
+    }
+
+    /// One that draws without the GPU: for small pictures that's cheaper
+    /// than sending them there and back.
+    pub fn small(pw: i32, ph: i32) -> Result<Gfx> {
+        Self::make(pw, ph, true)
+    }
+
+    fn make(pw: i32, ph: i32, soft: bool) -> Result<Gfx> {
         unsafe {
             let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
-            let rt = Self::make_rt(&factory)?;
+            let rt = Self::make_rt(&factory, soft)?;
             let brush = rt.CreateSolidColorBrush(&d2c(col::TEXT, 1.0), None)?;
 
             // Win11 ships "Segoe Fluent Icons"; Win10 has "Segoe MDL2 Assets".
@@ -405,15 +468,19 @@ impl Gfx {
                 },
                 layers: Vec::new(),
                 theme: THEMES[0],
+                view: (0, 0, 0, 0),
+                soft,
+                shown: Vec::new(),
+                shown_at: None,
             };
             g.resize(pw, ph)?;
             Ok(g)
         }
     }
 
-    unsafe fn make_rt(factory: &ID2D1Factory) -> Result<ID2D1DCRenderTarget> { unsafe {
+    unsafe fn make_rt(factory: &ID2D1Factory, soft: bool) -> Result<ID2D1DCRenderTarget> { unsafe {
         let props = D2D1_RENDER_TARGET_PROPERTIES {
-            r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            r#type: if soft { D2D1_RENDER_TARGET_TYPE_SOFTWARE } else { D2D1_RENDER_TARGET_TYPE_DEFAULT },
             pixelFormat: D2D1_PIXEL_FORMAT {
                 format: DXGI_FORMAT_B8G8R8A8_UNORM,
                 alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
@@ -457,8 +524,40 @@ impl Gfx {
             self.ph = ph;
             let rc = RECT { left: 0, top: 0, right: pw, bottom: ph };
             self.rt.BindDC(self.mem_dc, &rc)?;
+            self.view = (0, 0, pw, ph);
+            self.shown_at = None;
         }
         Ok(())
+    }
+
+    /// Draw only into this part of the surface from now on (DIPs; None: all
+    /// of it). The rest is empty. What's drawn costs the GPU by its size:
+    /// the closed notch is a small part of its window.
+    pub fn set_view(&mut self, r: Option<Rect>, scale: f32) {
+        let v = match r {
+            Some(r) => {
+                // In steps of 16 pixels, so it isn't rebound for every pixel.
+                let x0 = ((r.x * scale).floor() as i32).clamp(0, self.pw) / 16 * 16;
+                let y0 = ((r.y * scale).floor() as i32).clamp(0, self.ph) / 16 * 16;
+                let x1 = (((r.r() * scale).ceil() as i32 + 15) / 16 * 16).clamp(x0 + 1, self.pw.max(x0 + 1));
+                let y1 = (((r.b() * scale).ceil() as i32 + 15) / 16 * 16).clamp(y0 + 1, self.ph.max(y0 + 1));
+                (x0, y0, x1 - x0, y1 - y0)
+            }
+            None => (0, 0, self.pw, self.ph),
+        };
+        if v == self.view || self.bits.is_null() {
+            return;
+        }
+        unsafe {
+            let rc = RECT { left: v.0, top: v.1, right: v.0 + v.2, bottom: v.1 + v.3 };
+            if self.rt.BindDC(self.mem_dc, &rc).is_err() {
+                return;
+            }
+            // Nothing stays from what was drawn outside it.
+            let _ = GdiFlush();
+            std::ptr::write_bytes(self.bits, 0, (self.pw * self.ph * 4) as usize);
+        }
+        self.view = v;
     }
 
     pub fn begin(&mut self, scale: f32) {
@@ -467,7 +566,7 @@ impl Gfx {
         unsafe {
             self.rt.BeginDraw();
             self.rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
-            let m = Matrix3x2 { M11: scale, M12: 0.0, M21: 0.0, M22: scale, M31: 0.0, M32: 0.0 };
+            let m = Matrix3x2 { M11: scale, M12: 0.0, M21: 0.0, M22: scale, M31: -self.view.0 as f32, M32: -self.view.1 as f32 };
             self.rt.SetTransform(&m);
         }
     }
@@ -483,7 +582,7 @@ impl Gfx {
         self.last_err = res.as_ref().err().map(|e| e.code());
         if let Err(e) = res {
             if e.code() == D2DERR_RECREATE_TARGET {
-                if let Ok(rt) = unsafe { Self::make_rt(&self.factory) } {
+                if let Ok(rt) = unsafe { Self::make_rt(&self.factory, self.soft) } {
                     self.rt = rt;
                     if let Ok(b) = unsafe { self.rt.CreateSolidColorBrush(&d2c(col::TEXT, 1.0), None) } {
                         self.brush = b;
@@ -507,7 +606,7 @@ impl Gfx {
             self.last_err = res.as_ref().err().map(|e| e.code());
             if let Err(e) = res {
                 if e.code() == D2DERR_RECREATE_TARGET {
-                    if let Ok(rt) = Self::make_rt(&self.factory) {
+                    if let Ok(rt) = Self::make_rt(&self.factory, self.soft) {
                         self.rt = rt;
                         if let Ok(b) = self.rt.CreateSolidColorBrush(&d2c(col::TEXT, 1.0), None) {
                             self.brush = b;
@@ -521,6 +620,32 @@ impl Gfx {
                 }
                 return;
             }
+            // Only what changed is sent to the screen: Windows puts that part
+            // together again and nothing else. The same picture: nothing is
+            // sent at all. (All of it when the window is elsewhere than it
+            // was left, and now and then anyway.)
+            let _ = GdiFlush();
+            let mut at = RECT::default();
+            let in_place = self
+                .shown_at
+                .is_some_and(|(h, sx, sy, since)| h == hwnd.0 as isize && (sx, sy) == (x, y) && since.elapsed().as_secs() < 30)
+                && GetWindowRect(hwnd, &mut at).is_ok()
+                && (at.left, at.top, at.right - at.left, at.bottom - at.top) == (x, y, self.pw, self.ph);
+            let len = (self.pw * self.ph * 4) as usize;
+            let mut dirty = RECT { left: 0, top: 0, right: self.pw, bottom: self.ph };
+            if !self.bits.is_null() {
+                let now = std::slice::from_raw_parts(self.bits, len);
+                if in_place && self.shown.len() == len {
+                    let Some(d) = changed(now, &self.shown, self.pw as usize) else { return };
+                    dirty = d;
+                    let stride = self.pw as usize * 4;
+                    let (a, b) = (dirty.top as usize * stride, dirty.bottom as usize * stride);
+                    self.shown[a..b].copy_from_slice(&now[a..b]);
+                } else {
+                    self.shown.clear();
+                    self.shown.extend_from_slice(now);
+                }
+            }
             let screen = GetDC(None);
             let pos = POINT { x, y };
             let size = SIZE { cx: self.pw, cy: self.ph };
@@ -531,17 +656,24 @@ impl Gfx {
                 SourceConstantAlpha: 255,
                 AlphaFormat: AC_SRC_ALPHA as u8,
             };
-            let _ = UpdateLayeredWindow(
-                hwnd,
-                Some(screen),
-                Some(&pos),
-                Some(&size),
-                Some(self.mem_dc),
-                Some(&src),
-                COLORREF(0),
-                Some(&blend),
-                ULW_ALPHA,
-            );
+            let info = UPDATELAYEREDWINDOWINFO {
+                cbSize: std::mem::size_of::<UPDATELAYEREDWINDOWINFO>() as u32,
+                hdcDst: screen,
+                pptDst: &pos,
+                psize: &size,
+                hdcSrc: self.mem_dc,
+                pptSrc: &src,
+                crKey: COLORREF(0),
+                pblend: &blend,
+                dwFlags: ULW_ALPHA,
+                prcDirty: &dirty,
+            };
+            let ok = UpdateLayeredWindowIndirect(hwnd, &info).as_bool();
+            let since = match self.shown_at {
+                Some((h, sx, sy, s)) if in_place && h == hwnd.0 as isize && (sx, sy) == (x, y) => s,
+                _ => std::time::Instant::now(),
+            };
+            self.shown_at = ok.then_some((hwnd.0 as isize, x, y, since));
             ReleaseDC(None, screen);
         }
     }

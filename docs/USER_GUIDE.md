@@ -452,7 +452,13 @@ A taskbar that replaces Windows' own, in the notch's shape and theme. It's a sep
 - **Layout** (Settings > Taskbar > Layout): everything on the bar in one list, in three parts: **Pinned left**, **In the middle** and **Pinned right**. Drag a row by its grip (also into another part) or use its **Left / Middle / Right** switch. The middle scrolls with the mouse wheel when it doesn't all fit; the ends stay put. If a pin wouldn't fit on your screen, Settings says so instead of pinning it. Items (Start, Search, Hidden icons, keyboard language, Wi-Fi / sound / battery, Date and time, Notifications) have an on / off switch; widgets have their sizes and an x to take them off.
 - **Widgets** (Settings > Taskbar > Add widgets): 33 in five groups; click one to add it, again to remove it. Sizes S, M, L and W: the bigger, the more it shows. Hover (or click, if **Open on hover** is off) to open its own view in a bubble; inside, buttons go to the right place (Task Manager, Wi-Fi settings, Storage settings, Timer...). World clock and Currency are set up in their bubbles: pick up to four cities, or the base and the currency the widget shows.
 - **Hidden icons**: the ^ opens every app's tray icon; left- and right-click them as usual.
-- **Apps** (Settings > Taskbar > Apps): previews or a list on hover, how many apps show before the ⋯ tile, and collections (drag an app onto another).
+- **Apps** (Settings > Taskbar > Apps): previews or a list on hover, how many apps show before the ⋯ tile, and collections (drag an app onto the middle of another).
+  - Rest on a window in an app's pop-up to see it on the screen; click to open it, or move away and everything is as it was.
+  - Drag an app between others to move it, into the ⋯ tile, out of it onto the bar, or within it.
+  - Right-click an app for its menu (new window, run as administrator, open file location, pin, close, end task), or an empty part of the bar for Taskbar settings, Task Manager, Show desktop and Auto-hide. Esc, the arrows and Enter work in a menu.
+  - An app that flashes glows red. Administrator requests that wait minimized show as a shield, first on the bar: click it to answer.
+- **Auto-hide off**: the bar takes the full width and maximized windows stop above it. Click the screen's far right corner to show the desktop.
+- **The bell** shows how many notifications came since you last opened them (they're only counted, never read).
 - **General**: Auto-hide (the Windows key brings it out with Start), Open on hover, centred or left, three sizes.
 - **Theme**: the same as the notch, or the taskbar's own: every theme, Liquid Glass and your own colours, just like the notch's.
 - A widget works even when its feature's notch panel is hidden: the notch and the taskbar are separate.

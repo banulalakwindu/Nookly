@@ -12,13 +12,19 @@
 //!   items.rs   what's in the bar, how each item draws and clicks, pop-ups
 //!   apps.rs    open and pinned apps, collections, their icons
 //!   bubble.rs  pop-ups that grow out of the bar like the notch
+//!   menu.rs    right-click menus (bubbles too)
+//!   peek.rs    showing a window while you rest on it in a pop-up
+//!   unread.rs  the number on the bell
 //!   layout.rs  fitting the bar to the screen (pure, tested)
 
 mod apps;
 mod bubble;
 mod items;
 mod layout;
+mod menu;
+mod peek;
 mod tray;
+mod unread;
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -50,6 +56,14 @@ const RAD: f32 = 16.0;
 pub const HOLD: f32 = 44.0;
 /// Hover this long on an app (or the overflow tile) to open its pop-up.
 const HOVER_OPEN: f32 = 0.45;
+/// Rest this long on a window in a pop-up to see it on the screen.
+const PEEK_WAIT: f32 = 0.35;
+/// An app asking to be looked at: its glow beats this long, and an
+/// auto-hidden bar stays out as long.
+const ATTENTION_BEATS: f32 = 3.2;
+/// A menu closes on a click elsewhere or Esc; left alone this long, also
+/// by itself (in case neither was heard).
+const MENU_LEAVE: f32 = 20.0;
 /// Our AppBar's callback message.
 const WM_APPBAR: u32 = WM_APP + 1;
 /// Re-check that the Windows taskbar stays hidden.
@@ -102,6 +116,17 @@ pub enum Pop {
     Widget(usize, f32),
     /// The hidden icons (the apps' tray icons).
     Tray(f32),
+    /// A right-click menu (`Bar::menu`).
+    Menu(f32),
+}
+
+/// Where a dragged app would go: onto an app or a collection (its hit id),
+/// or before the app at this place in the list (true: among the bar's
+/// tiles, false: in the "more apps" grid).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Drop {
+    Onto(u32),
+    Between(usize, bool),
 }
 
 impl Pop {
@@ -112,14 +137,79 @@ impl Pop {
             || matches!((a, b), (Some(Pop::Group(x, _)), Pop::Group(y, _)) if x == y)
             || matches!((a, b), (Some(Pop::Widget(x, _)), Pop::Widget(y, _)) if x == y)
             || matches!((a, b), (Some(Pop::Tray(_)), Pop::Tray(_)))
+            || matches!((a, b), (Some(Pop::Menu(_)), Pop::Menu(_)))
     }
 }
 
-/// An app tile pressed: dragged far enough, it's being dropped on another
-/// app (a new collection) or a collection (added to it).
-#[derive(Clone, Copy)]
+/// Waiting for a hidden icon's menu: its app, the pop-up windows it had
+/// before the click, when that was, and whether a menu has been seen.
+struct TrayHold {
+    pid: u32,
+    before: Vec<HWND>,
+    since: Instant,
+    looked: Instant,
+    open: bool,
+}
+
+/// How long an icon's app may take to show its menu.
+const TRAY_WAIT: f32 = 1.5;
+
+/// An app's windows that could be a menu: visible, without a caption, not
+/// big, no tooltip.
+fn menus_of(pid: u32) -> Vec<HWND> {
+    unsafe extern "system" fn each(h: HWND, l: LPARAM) -> BOOL {
+        unsafe {
+            let v = &mut *(l.0 as *mut (u32, Vec<HWND>));
+            let mut p = 0u32;
+            GetWindowThreadProcessId(h, Some(&mut p));
+            if p != v.0 || !IsWindowVisible(h).as_bool() || GetWindowLongW(h, GWL_STYLE) as u32 & WS_CAPTION.0 == WS_CAPTION.0 {
+                return TRUE;
+            }
+            let mut cloaked = 0u32;
+            let _ = windows::Win32::Graphics::Dwm::DwmGetWindowAttribute(h, windows::Win32::Graphics::Dwm::DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut _, 4);
+            let mut r = RECT::default();
+            let _ = GetWindowRect(h, &mut r);
+            let mut c = [0u16; 64];
+            let n = GetClassNameW(h, &mut c);
+            let class = String::from_utf16_lossy(&c[..n.max(0) as usize]).to_lowercase();
+            let (w, hh) = (r.right - r.left, r.bottom - r.top);
+            if cloaked == 0 && w > 30 && hh > 12 && w < 1000 && hh < 1400 && !class.contains("tooltip") {
+                v.1.push(h);
+            }
+            TRUE
+        }
+    }
+    let mut v: (u32, Vec<HWND>) = (pid, Vec::new());
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut v as *mut _ as isize));
+    }
+    v.1
+}
+
+/// Is an ordinary Windows menu open (anybody's)?
+fn menu_showing() -> bool {
+    let mut prev: Option<HWND> = None;
+    unsafe {
+        while let Ok(h) = FindWindowExW(None, prev, w!("#32768"), PCWSTR::null()) {
+            if h.is_invalid() {
+                break;
+            }
+            if IsWindowVisible(h).as_bool() {
+                return true;
+            }
+            prev = Some(h);
+        }
+    }
+    false
+}
+
+/// An app pressed (on the bar or in the "more apps" grid): dragged far
+/// enough, it's being moved, or dropped on another app (a new collection)
+/// or a collection (added to it).
+#[derive(Clone)]
 struct Drag {
-    from: usize,
+    /// Its key (the list can change meanwhile).
+    key: String,
     start: (f32, f32),
     active: bool,
 }
@@ -234,8 +324,24 @@ pub struct Bar {
     /// Just clicked: no hover pop-up for this tile until the mouse leaves it.
     pub hover_block: Option<u32>,
     drag: Option<Drag>,
+    /// The open right-click menu (kept while its bubble closes).
+    pub menu: Option<menu::Menu>,
+    /// The window in a pop-up the mouse rests on, the one shown on the
+    /// screen for it, and when the mouse went off one.
+    peek_hover: Option<(HWND, Instant)>,
+    peeked: Option<HWND>,
+    peek_left: Instant,
+    /// The open menu has the arrows and Enter.
+    menu_keys: bool,
+    /// A hidden icon was clicked: the bar stays while its app's menu is open.
+    tray_hold: Option<TrayHold>,
+    /// When an app last started asking to be looked at.
+    attention_at: Option<Instant>,
     /// The screen strip last reserved (fixed mode).
     appbar_rc: RECT,
+    /// When the strip was last looked at, and how often it was asked for again.
+    strip_at: Instant,
+    strip_tries: u32,
     /// The drawing surface (taken out while a frame is drawn).
     gfx: Option<Gfx>,
     pub settings: Settings,
@@ -302,7 +408,7 @@ pub struct Bar {
     /// pop-up (it closes a moment later).
     hover_hit: Option<u32>,
     hover_since: Instant,
-    pop_leave: Option<Instant>,
+    pub pop_leave: Option<Instant>,
 }
 
 impl Bar {
@@ -337,7 +443,8 @@ impl Bar {
         if !self.autohide() {
             return true;
         }
-        self.inside || self.popup.is_some() || self.left_at.is_some_and(|t| t.elapsed().as_secs_f32() < 0.7) || self.down.is_some() || self.shell_open
+        let asking = !self.apps.attention.is_empty() && self.attention_at.is_some_and(|t| t.elapsed().as_secs_f32() < ATTENTION_BEATS);
+        asking || self.tray_hold.is_some() || self.inside || self.popup.is_some() || self.left_at.is_some_and(|t| t.elapsed().as_secs_f32() < 0.7) || self.down.is_some() || self.shell_open
     }
 
     fn load_settings(&mut self) {
@@ -348,6 +455,9 @@ impl Bar {
         self.order = items::order(&self.settings);
         self.placed = nookly_core::barcfg::placed(&self.settings);
         self.apps.scan(&self.settings);
+        if !self.hwnd.is_invalid() {
+            unread::enable(self.hwnd, self.order.iter().any(|x| x.0 == items::Item::Notifs));
+        }
         // The hidden icons: Nookly's own tray, while the item is on.
         if self.order.iter().any(|x| x.0 == items::Item::Tray) {
             if !self.hwnd.is_invalid() {
@@ -407,15 +517,65 @@ impl Bar {
 
     /// The app being dragged (once it has moved far enough).
     pub fn dragging(&self) -> Option<usize> {
-        self.drag.filter(|d| d.active).map(|d| d.from)
+        let d = self.drag.as_ref().filter(|d| d.active)?;
+        self.apps.list.iter().position(|a| a.key == d.key)
     }
 
-    /// What a drag would drop on: another app or a collection.
-    pub fn drop_target(&self) -> Option<u32> {
+    /// Where a drag would drop: the middle of another app or a collection
+    /// (to put them together), beside a tile (to move it there; a bar tile
+    /// or one in the "more apps" grid), or on the "more apps" tile (into it).
+    pub fn drop_at(&self) -> Option<Drop> {
         let from = self.dragging()?;
-        self.hits.iter().rev().find(|h| h.rect.contains(self.mouse.0, self.mouse.1)).map(|h| h.id).filter(|&id| {
-            ((items::APP..items::APP + 900).contains(&id) && id != items::APP + from as u32) || (items::GROUP..items::GROUP + 100).contains(&id)
-        })
+        let (mx, my) = self.mouse;
+        // Over the open "more apps" grid: its cells.
+        let in_pop = matches!(self.popup, Some(Pop::Overflow(_))) && self.pop_b.as_ref().is_some_and(|b| b.goal.is_some() && b.shape().contains(mx, my));
+        if in_pop {
+            let cell = |id: u32| (items::POP_APP..items::POP_APP + 1000).contains(&id);
+            let h = self
+                .hits
+                .iter()
+                .filter(|h| cell(h.id))
+                .map(|h| (h, (mx - h.rect.cx()).powi(2) + (my - (h.rect.y + h.rect.h / 2.0)).powi(2)))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|x| x.0)?;
+            let k = (h.id - items::POP_APP) as usize;
+            if k == from {
+                return None;
+            }
+            if (mx - h.rect.cx()).abs() < 9.0 && h.rect.contains(mx, my) {
+                return Some(Drop::Onto(h.id));
+            }
+            let at = k + (mx > h.rect.cx()) as usize;
+            return (at != from && at != from + 1).then_some(Drop::Between(at, false));
+        }
+        if my < -24.0 || my > self.h + 24.0 {
+            return None;
+        }
+        let tile = |id: u32| (items::APP..items::APP + 900).contains(&id);
+        if from < self.plan_fit.shown && self.hits.iter().any(|h| h.id == items::OVERFLOW && mx >= h.rect.x && mx < h.rect.r()) {
+            return Some(Drop::Onto(items::OVERFLOW));
+        }
+        if let Some(h) = self.hits.iter().find(|h| (items::GROUP..items::GROUP + 100).contains(&h.id) && mx >= h.rect.x && mx < h.rect.r()) {
+            return Some(Drop::Onto(h.id));
+        }
+        // (A little past a tile's ends counts as its side.)
+        let h = self
+            .hits
+            .iter()
+            .filter(|h| tile(h.id))
+            .map(|h| (h, (mx - h.rect.cx()).abs()))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .filter(|(h, d)| *d < h.rect.w)
+            .map(|x| x.0)?;
+        let k = (h.id - items::APP) as usize;
+        if k == from {
+            return None;
+        }
+        if (mx - h.rect.cx()).abs() < 9.0 {
+            return Some(Drop::Onto(h.id));
+        }
+        let at = k + (mx > h.rect.cx()) as usize;
+        (at != from && at != from + 1).then_some(Drop::Between(at, true))
     }
 
     pub fn set_pop(&mut self, p: Option<Pop>) {
@@ -432,6 +592,16 @@ impl Bar {
         let was = self.popup;
         self.popup = p;
         self.pop_leave = None;
+        let is_menu = |p: Option<Pop>| matches!(p, Some(Pop::Menu(_)));
+        if is_menu(was) != is_menu(p) {
+            menu::listen(self.hwnd, is_menu(p));
+            if !is_menu(p) {
+                self.set_menu_keys(false);
+            }
+        }
+        if p.is_none() {
+            self.end_peek();
+        }
         let widget = |p: Option<Pop>| match p {
             Some(Pop::Widget(k, _)) => Some(k),
             _ => None,
@@ -450,16 +620,30 @@ impl Bar {
         }
     }
 
+    fn set_menu_keys(&mut self, on: bool) {
+        if self.menu_keys != on {
+            self.menu_keys = on;
+            menu::take_keys(self.hwnd, on);
+        }
+    }
+
     /// The widest the bar can get (the screen, less its flares and a margin).
     pub fn max_bar_w(&self) -> f32 {
         self.w - 2.0 * (BAR_H / 4.0 + 8.0)
     }
 
-    /// The bar's width: what it holds, and wide enough to hold an open
+    /// The bar's width with no pop-up open: what it holds (auto-hide), or
+    /// all it can get (it keeps its strip of the screen anyway; what it
+    /// holds stays in the middle).
+    fn rest_w(&self) -> f32 {
+        if self.autohide() { self.content_w() } else { self.max_bar_w() }
+    }
+
+    /// The bar's width: its own, and wide enough to hold an open
     /// bubble whole (both its flares land on the bar's flat top), so the
     /// bar and its bubbles always read as one shape.
     fn bar_target_w(&self) -> f32 {
-        let full = self.content_w();
+        let full = self.rest_w();
         match self.pop_b.as_ref().and_then(|b| b.goal) {
             Some(g) => full.max(g.w + 2.0 * HOLD).min(self.max_bar_w()),
             None => full,
@@ -482,9 +666,9 @@ impl Bar {
         let sub_w = self.sub_b.as_ref().and_then(|b| b.goal).map_or(0.0, |g| g.w + 2.0 * HOLD);
         let w = w.max(sub_w).min(self.max_bar_w() - 2.0 * HOLD);
         let ax = match p {
-            Pop::App(_, x) | Pop::Overflow(x) | Pop::Group(_, x) | Pop::Widget(_, x) | Pop::Tray(x) => x,
+            Pop::App(_, x) | Pop::Overflow(x) | Pop::Group(_, x) | Pop::Widget(_, x) | Pop::Tray(x) | Pop::Menu(x) => x,
         };
-        let bar_w = self.content_w().max(w + 2.0 * HOLD).min(self.max_bar_w());
+        let bar_w = self.rest_w().max(w + 2.0 * HOLD).min(self.max_bar_w());
         let (x0, x1) = self.bar_span(bar_w);
         let cx = ax.clamp(x0 + HOLD + w / 2.0, (x1 - HOLD - w / 2.0).max(x0 + HOLD + w / 2.0));
         let g = bubble::Goal { cx, w, h, base: self.content().y, from_w: items::TILE };
@@ -556,10 +740,11 @@ impl Bar {
         unsafe {
             let mut d = self.appbar_data();
             if want && !self.appbar {
-                SHAppBarMessage(ABM_NEW, &mut d);
+                let r = tray::step_aside(|| SHAppBarMessage(ABM_NEW, &mut d));
+                dbg_log(&format!("appbar new: {r}"));
                 self.appbar = true;
             } else if !want && self.appbar {
-                SHAppBarMessage(ABM_REMOVE, &mut d);
+                tray::step_aside(|| SHAppBarMessage(ABM_REMOVE, &mut d));
                 self.appbar = false;
                 self.appbar_rc = RECT::default();
                 return;
@@ -567,15 +752,33 @@ impl Bar {
             if self.appbar {
                 let hpx = (BAR_H * self.scale).round() as i32;
                 d.rc = RECT { left: self.mon.left, top: self.mon.bottom - hpx, right: self.mon.right, bottom: self.mon.bottom };
-                SHAppBarMessage(ABM_QUERYPOS, &mut d);
+                let r = tray::step_aside(|| SHAppBarMessage(ABM_QUERYPOS, &mut d));
+                dbg_log(&format!("appbar query: {r} {:?} (set {:?})", d.rc, self.appbar_rc));
                 d.rc.top = d.rc.bottom - hpx;
                 // Setting it again makes Windows tell every app bar (us
                 // included) and re-lay windows out: only when it changed.
                 if d.rc != self.appbar_rc {
                     self.appbar_rc = d.rc;
-                    SHAppBarMessage(ABM_SETPOS, &mut d);
+                    let r = tray::step_aside(|| SHAppBarMessage(ABM_SETPOS, &mut d));
+                    dbg_log(&format!("appbar set: {r} {:?}, area {}", d.rc, shell::work_bottom()));
                 }
             }
+        }
+    }
+
+    /// Windows can say yes to the strip and still not keep it free (it did
+    /// when asked while it was busy): ask again, a few times at most.
+    fn check_strip(&mut self) {
+        if !self.appbar || self.autohide() || self.strip_at.elapsed().as_secs_f32() < 1.0 {
+            return;
+        }
+        self.strip_at = Instant::now();
+        if shell::work_bottom() <= self.appbar_rc.top {
+            self.strip_tries = 0;
+        } else if self.strip_tries < 5 {
+            self.strip_tries += 1;
+            self.appbar_rc = RECT::default();
+            self.sync_appbar();
         }
     }
 
@@ -583,7 +786,7 @@ impl Bar {
         if self.appbar {
             let mut d = self.appbar_data();
             unsafe {
-                SHAppBarMessage(ABM_REMOVE, &mut d);
+                tray::step_aside(|| SHAppBarMessage(ABM_REMOVE, &mut d));
             }
             self.appbar = false;
             self.appbar_rc = RECT::default();
@@ -614,6 +817,9 @@ impl Bar {
         };
         if was != self.fullscreen {
             self.dirty = true;
+            if self.fullscreen && self.popup.is_some() {
+                self.set_pop(None);
+            }
             unsafe {
                 // Let the full-screen app sit on top.
                 let z = if self.fullscreen { HWND_NOTOPMOST } else { HWND_TOPMOST };
@@ -703,7 +909,7 @@ impl Bar {
                 }
             }
         }
-        let full = self.content_w();
+        let full = self.rest_w();
         // Hiding, it narrows as it sinks into the edge (like the notch
         // closing); coming out, it grows back with a bounce.
         // The pop-up follows what it shows (apps come and go), and the
@@ -724,7 +930,8 @@ impl Bar {
             self.width = Spring { pos: want_w, vel: 0.0 };
             self.depth = Spring { pos: want_d, vel: 0.0 };
             let before = self.popup;
-            return self.step_hover() || self.popup != before || bubbles;
+            let peek = self.step_peek();
+            return self.step_hover() || self.popup != before || bubbles || peek;
         }
         // First frame: start small, so the bar bubbles up out of the edge.
         if self.width.pos == 0.0 {
@@ -749,6 +956,11 @@ impl Bar {
         // A pop-up opening (or closing) here needs frames from now on.
         let before = self.popup;
         moving |= self.step_hover();
+        moving |= self.step_peek();
+        if self.attention_moving() {
+            self.dirty = true;
+            moving = true;
+        }
         moving || self.popup != before
     }
 
@@ -767,7 +979,13 @@ impl Bar {
             self.hover_block = None;
         }
         let mut waiting = false;
-        if self.hover_opens() && self.down.is_none() && self.drag.is_none() && self.hover_block.is_none() {
+        self.step_tray_hold();
+        let held = self.tray_hold.is_some();
+        let in_menu = matches!(self.popup, Some(Pop::Menu(_)));
+        if in_menu {
+            self.set_menu_keys(self.inside || in_pop);
+        }
+        if self.hover_opens() && !in_menu && !held && self.down.is_none() && self.drag.is_none() && self.hover_block.is_none() {
             let target = match id {
                 Some(i) if (items::APP..items::APP + 900).contains(&i) => Some(Pop::App((i - items::APP) as usize, self.mouse.0)),
                 Some(items::OVERFLOW) => Some(Pop::Overflow(self.mouse.0)),
@@ -787,6 +1005,7 @@ impl Bar {
                             Pop::Group(g, _) => Pop::Group(g, x),
                             Pop::Widget(k, _) => Pop::Widget(k, x),
                             Pop::Tray(_) => Pop::Tray(x),
+                            Pop::Menu(_) => Pop::Menu(x),
                         }));
                     } else {
                         waiting = true;
@@ -806,14 +1025,24 @@ impl Bar {
                 (Pop::Group(g, _), Some(h)) => h == items::GROUP + g as u32,
                 (Pop::Widget(k, _), Some(h)) => h == items::WIDGET + k as u32,
                 (Pop::Tray(_), Some(h)) => h == items::TRAY,
+                // A menu: anywhere on the bar.
+                (Pop::Menu(_), _) => self.inside,
                 _ => false,
             };
-            if on_pop || on_tile {
+            if on_pop || on_tile || held || self.drag.is_some() {
                 self.pop_leave = None;
             } else {
                 let t = *self.pop_leave.get_or_insert_with(Instant::now);
+                if in_menu {
+                    // A menu waits for a click, not for the mouse (but not
+                    // forever: it holds Esc, the arrows and Enter). The idle
+                    // loop's look every 250 ms is enough for this.
+                    if t.elapsed().as_secs_f32() > MENU_LEAVE {
+                        self.set_pop(None);
+                    }
+                }
                 // Click-opened pop-ups stay until a click elsewhere.
-                if self.hover_opens() && t.elapsed().as_secs_f32() > 0.35 {
+                else if self.hover_opens() && t.elapsed().as_secs_f32() > 0.35 {
                     self.set_pop(None);
                 } else if self.hover_opens() {
                     waiting = true;
@@ -827,7 +1056,7 @@ impl Bar {
     /// its windows out of the pop-up; move to another app to switch;
     /// leave both for a moment to close it.
     fn step_sub(&mut self, id: Option<u32>, in_sub: bool) -> bool {
-        if !matches!(self.popup, Some(Pop::Overflow(_)) | Some(Pop::Group(..))) || !self.hover_opens() {
+        if !matches!(self.popup, Some(Pop::Overflow(_)) | Some(Pop::Group(..))) || !self.hover_opens() || self.drag.is_some() {
             return false;
         }
         let cell = id.filter(|i| (items::POP_APP..items::POP_APP + 1000).contains(i) || (items::POP_MEMBER..items::POP_MEMBER + 100).contains(i));
@@ -878,6 +1107,7 @@ impl Bar {
             Pop::Group(g, _) => items::GROUP + g as u32,
             Pop::Widget(k, _) => items::WIDGET + k as u32,
             Pop::Tray(_) => items::TRAY,
+            Pop::Menu(_) => return None,
         };
         self.hits.iter().find(|h| h.id == id).map(|h| h.rect.cx())
     }
@@ -1000,6 +1230,17 @@ impl Bar {
             }
             self.plan = plan;
             g.pop_layer();
+            // The screen's far corner (a fixed bar; an auto-hidden one has
+            // windows there): a click shows the desktop.
+            if !self.autohide() {
+                let r = Rect::new(self.w - 8.0, 0.0, 8.0, self.h);
+                let hot = r.contains(mouse.0, mouse.1);
+                g.fill_rect(r, hex(0x000000).with_a(0.012));
+                if hot {
+                    g.fill_rr_raw(Rect::new(self.w - 4.0, self.h / 2.0 - 10.0, 2.0, 20.0), 1.0, hex(0xFFFFFF).with_a(0.7));
+                }
+                hits.push(Hit { rect: r, module: 0, id: items::DESKTOP, tip: "" });
+            }
         }
         self.hits = hits;
         let (x, y) = (self.mon.left, self.mon.bottom - g.ph);
@@ -1322,10 +1563,21 @@ impl Bar {
     fn on_down(&mut self, x: f32, y: f32) {
         self.dirty = true;
         self.down = self.hit_at(x, y);
+        self.press_closes_menu(self.down);
         dbg_log(&format!("down at {x:.0},{y:.0}: {:?}", self.down));
-        // An app tile can be dragged onto another (a collection).
-        if let Some(id) = self.down.filter(|id| (items::APP..items::APP + 900).contains(id)) {
-            self.drag = Some(Drag { from: (id - items::APP) as usize, start: (x, y), active: false });
+        self.start_drag(x, y);
+    }
+
+    /// An app pressed, on the bar or in the "more apps" grid, can be
+    /// dragged. (The bar gets the mouse until it's let go.)
+    fn start_drag(&mut self, x: f32, y: f32) {
+        let k = match self.down {
+            Some(id) if (items::APP..items::APP + 900).contains(&id) => id - items::APP,
+            Some(id) if (items::POP_APP..items::POP_APP + 1000).contains(&id) => id - items::POP_APP,
+            _ => return,
+        };
+        if let Some(a) = self.apps.list.get(k as usize) {
+            self.drag = Some(Drag { key: a.key.clone(), start: (x, y), active: false });
             unsafe {
                 SetCapture(self.hwnd);
             }
@@ -1337,7 +1589,13 @@ impl Bar {
             let (dx, dy) = (self.mouse.0 - d.start.0, self.mouse.1 - d.start.1);
             if !d.active && dx * dx + dy * dy > 36.0 {
                 d.active = true;
-                self.set_pop(None);
+                // From the "more apps" grid: it stays (to move within it).
+                if matches!(self.popup, Some(Pop::Overflow(_))) {
+                    self.close_sub();
+                } else {
+                    self.set_pop(None);
+                }
+                self.end_peek();
             }
         }
     }
@@ -1352,13 +1610,27 @@ impl Bar {
             if d.active {
                 self.mouse = (x, y);
                 self.drag = Some(d);
-                let target = self.drop_target();
+                let target = self.drop_at();
+                let from = self.dragging();
                 self.drag = None;
                 self.down = None;
-                if let (Some(app), Some(t)) = (self.apps.list.get(d.from).cloned(), target) {
+                let Some(from) = from else { return };
+                let shown = self.plan_fit.shown;
+                let to = match target {
+                    Some(Drop::Between(k, on_bar)) => Some(layout::landing(from, k, on_bar, shown)),
+                    // Onto the "more apps" tile: the first in it.
+                    Some(Drop::Onto(items::OVERFLOW)) => Some(layout::landing(from, shown, false, shown)),
+                    _ => None,
+                };
+                if let Some(to) = to {
+                    self.apps.move_to(from, to);
+                    return;
+                }
+                if let (Some(app), Some(Drop::Onto(t))) = (self.apps.list.get(from).cloned(), target) {
+                    let other = if t >= items::POP_APP && t < items::POP_APP + 1000 { t - items::POP_APP } else { t.wrapping_sub(items::APP) } as usize;
                     if (items::GROUP..items::GROUP + 100).contains(&t) {
                         apps::group_add(Some((t - items::GROUP) as usize), &app, None);
-                    } else if let Some(other) = self.apps.list.get((t - items::APP) as usize).cloned() {
+                    } else if let Some(other) = self.apps.list.get(other).filter(|o| !o.launch.is_empty() && !app.launch.is_empty()).cloned() {
                         apps::group_add(None, &app, Some(&other));
                     }
                     let st = self.settings.clone();
@@ -1392,87 +1664,137 @@ impl Bar {
         }
     }
 
-    /// Right-click on an app: pin or unpin it, a new window, close.
+    /// Right-click: the menu of what's under the mouse.
     fn on_right(&mut self, x: f32, y: f32) {
-        let Some(id) = self.hit_at(x, y) else { return };
-        if (items::TRAY_ICON..items::TRAY_ICON + 200).contains(&id) {
-            items::tray_click(self, id, true);
+        let id = self.hit_at(x, y);
+        if let Some(i) = id.filter(|i| (items::TRAY_ICON..items::TRAY_ICON + 200).contains(i)) {
+            items::tray_click(self, i, true);
             return;
         }
-        if (items::GROUP..items::GROUP + 100).contains(&id) || (items::POP_MEMBER..items::POP_MEMBER + 100).contains(&id) {
-            self.group_menu(id);
+        self.dirty = true;
+        menu::open(self, id, x);
+    }
+
+    /// The app whose menu is open.
+    pub fn menu_app(&self) -> Option<String> {
+        match self.popup {
+            Some(Pop::Menu(_)) => self.menu.as_ref()?.app.as_ref().map(|a| a.key.clone()),
+            _ => None,
+        }
+    }
+
+    /// A press: a menu closes unless it's on the menu.
+    fn press_closes_menu(&mut self, hit: Option<u32>) {
+        if matches!(self.popup, Some(Pop::Menu(_))) && !hit.is_some_and(|i| i == 0 || (menu::ID..menu::ID + 100).contains(&i)) {
+            self.set_pop(None);
+        }
+    }
+
+    /// A press anywhere on the screen while a menu is open: one outside our
+    /// windows closes it (ours see to it themselves).
+    fn pressed_anywhere(&mut self) {
+        if !matches!(self.popup, Some(Pop::Menu(_))) {
             return;
         }
-        let k = match id {
-            i if (items::APP..items::APP + 900).contains(&i) => (i - items::APP) as usize,
-            i if (items::POP_APP..items::POP_APP + 1000).contains(&i) => (i - items::POP_APP) as usize,
-            _ => return,
-        };
-        let Some(app) = self.apps.list.get(k).cloned() else { return };
         unsafe {
-            let Ok(menu) = CreatePopupMenu() else { return };
-            let _ = AppendMenuW(menu, MF_STRING, 1, w!("New window"));
-            let pin = if app.pinned { w!("Unpin from taskbar") } else { w!("Pin to taskbar") };
-            let _ = AppendMenuW(menu, MF_STRING, 2, pin);
-            if !app.windows.is_empty() {
-                let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-                let close = if app.windows.len() > 1 { w!("Close all windows") } else { w!("Close window") };
-                let _ = AppendMenuW(menu, MF_STRING, 3, close);
-            }
             let mut p = POINT::default();
-            let _ = GetCursorPos(&mut p);
-            let _ = SetForegroundWindow(self.hwnd);
-            let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_BOTTOMALIGN | TPM_CENTERALIGN | TPM_NONOTIFY, p.x, p.y, Some(0), self.hwnd, None);
-            let _ = DestroyMenu(menu);
-            match cmd.0 {
-                1 => apps::launch(&app.launch),
-                2 => {
-                    apps::set_pinned(&app, !app.pinned);
-                    self.apps.scan(&self.settings);
+            if GetCursorPos(&mut p).is_ok() {
+                let under = WindowFromPoint(p);
+                if under != self.hwnd && !self.is_pop(under) {
+                    self.set_pop(None);
                 }
-                3 => app.windows.iter().for_each(|&h| apps::close(h)),
-                _ => {}
             }
         }
     }
 
-    /// Right-click on a collection (undo it) or an app in one (take it out).
-    fn group_menu(&mut self, id: u32) {
-        let member = (items::POP_MEMBER..items::POP_MEMBER + 100).contains(&id);
-        let g = if member {
-            match self.popup {
-                Some(Pop::Group(g, _)) => g,
-                _ => return,
-            }
-        } else {
-            (id - items::GROUP) as usize
-        };
-        unsafe {
-            let Ok(menu) = CreatePopupMenu() else { return };
-            if member {
-                let _ = AppendMenuW(menu, MF_STRING, 1, w!("Take out of collection"));
-            } else {
-                let _ = AppendMenuW(menu, MF_STRING, 2, w!("Undo collection"));
-            }
-            let mut p = POINT::default();
-            let _ = GetCursorPos(&mut p);
-            let _ = SetForegroundWindow(self.hwnd);
-            let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_BOTTOMALIGN | TPM_CENTERALIGN | TPM_NONOTIFY, p.x, p.y, Some(0), self.hwnd, None);
-            let _ = DestroyMenu(menu);
-            match cmd.0 {
-                1 => {
-                    if let Some(key) = self.apps.groups.get(g).and_then(|grp| grp.members.get((id - items::POP_MEMBER) as usize)).map(|a| a.key.clone()) {
-                        apps::group_remove(g, &key);
-                    }
-                }
-                2 => apps::group_delete(g),
-                _ => return,
-            }
+    /// Rest on a window in a pop-up: show it on the screen (see peek.rs).
+    /// Already showing one, the next shows at once; off them, it ends.
+    /// Returns true while it waits.
+    fn step_peek(&mut self) -> bool {
+        let open = matches!(self.popup, Some(Pop::App(..))) || self.sub_app.is_some();
+        let want = self.hover_hit.filter(|_| open).and_then(|id| {
+            let row = (items::POP_ROW..items::POP_OPEN).contains(&id) || (items::SUB_ROW..items::SUB_OPEN).contains(&id);
+            if row { items::pop_window(self, id) } else { None }
+        });
+        let want = want.filter(|&h| unsafe { IsWindow(Some(h)).as_bool() && !IsIconic(h).as_bool() });
+        if want != self.peek_hover.map(|x| x.0) {
+            self.peek_hover = want.map(|h| (h, Instant::now()));
+            self.peek_left = Instant::now();
         }
-        self.set_pop(None);
-        let st = self.settings.clone();
-        self.apps.scan(&st);
-        self.dirty = true;
+        match (self.peek_hover, self.peeked) {
+            (Some((h, _)), Some(p)) if h == p => false,
+            (Some((h, since)), on) => {
+                if on.is_none() && since.elapsed().as_secs_f32() < PEEK_WAIT {
+                    return true;
+                }
+                crumb(format!("peek at window {:?}", h.0));
+                peek::start(h, self.hwnd);
+                self.peeked = Some(h);
+                false
+            }
+            (None, Some(_)) => {
+                // Between two previews: a moment's grace.
+                if open && self.peek_left.elapsed().as_secs_f32() < 0.12 {
+                    return true;
+                }
+                self.end_peek();
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn end_peek(&mut self) {
+        self.peeked = None;
+        self.peek_hover = None;
+        peek::stop();
+    }
+
+    /// How far into a beat the attention glow is (0..1): three beats when an
+    /// app starts asking, then steady.
+    pub fn attention_beat(&self) -> f32 {
+        let t = self.attention_at.map_or(99.0, |x| x.elapsed().as_secs_f32());
+        if t > ATTENTION_BEATS || self.reduce_motion() { 0.4 } else { (t * std::f32::consts::PI * 2.0 / 0.8).sin() * 0.5 + 0.5 }
+    }
+
+    fn attention_moving(&self) -> bool {
+        !self.apps.attention.is_empty() && !self.reduce_motion() && self.attention_at.is_some_and(|x| x.elapsed().as_secs_f32() <= ATTENTION_BEATS)
+    }
+
+    /// A window flashed (the shell told us).
+    fn on_flash(&mut self, h: HWND) {
+        // (It may be new: a permission prompt flashes as it comes.)
+        if !self.apps.list.iter().any(|a| a.windows.contains(&h)) {
+            let st = self.settings.clone();
+            self.apps.scan(&st);
+        }
+        if self.apps.flashed(h) {
+            self.attention_at = Some(Instant::now());
+            self.dirty = true;
+        }
+    }
+
+    /// A hidden icon is about to be clicked (its app may show a menu).
+    pub fn hold_for_tray(&mut self, pid: u32) {
+        let now = Instant::now();
+        self.tray_hold = Some(TrayHold { pid, before: menus_of(pid), since: now, looked: now, open: false });
+    }
+
+    /// Is the clicked icon's menu still open (or about to be)?
+    fn step_tray_hold(&mut self) {
+        let Some(h) = self.tray_hold.as_mut() else { return };
+        if h.looked.elapsed().as_secs_f32() < 0.1 {
+            return;
+        }
+        h.looked = Instant::now();
+        let open = menu_showing() || menus_of(h.pid).iter().any(|w| !h.before.contains(w));
+        h.open |= open;
+        if !open && (h.open || h.since.elapsed().as_secs_f32() > TRAY_WAIT) {
+            self.tray_hold = None;
+            self.dirty = true;
+            // The mouse may be back on the bar, or gone.
+            self.left_at = Some(Instant::now());
+        }
     }
 
     /// When to wake next with nothing moving: the clock's next minute,
@@ -1483,13 +1805,20 @@ impl Bar {
         if self.gfx.as_ref().is_some_and(|g| g.theme.glass) && self.shown() > 0.5 {
             ms = ms.min(500);
         }
+        if self.tray_hold.is_some() {
+            ms = ms.min(120);
+        }
+        // An app asking to be looked at keeps an auto-hidden bar out a while.
+        if self.autohide() && self.attention_at.is_some_and(|t| t.elapsed().as_secs_f32() < ATTENTION_BEATS + 0.5) {
+            ms = ms.min(250);
+        }
         // Auto-hide: watch for the cursor at the screen's bottom edge.
         if self.autohide() && (self.left_at.is_some() || self.shown() < 0.5) {
             ms = ms.min(100);
         }
         // Out (auto-hide) or a pop-up open: check where the mouse really is
         // now and then (see verify_mouse), so neither can get stuck.
-        if (self.autohide() && self.shown() > 0.5) || self.popup.is_some() || self.down.is_some() {
+        if (self.autohide() && self.shown() > 0.5) || self.popup.is_some() {
             ms = ms.min(250);
         }
         ms.max(15)
@@ -1503,6 +1832,10 @@ impl Bar {
         unsafe {
             let mut p = POINT::default();
             if GetCursorPos(&mut p).is_err() {
+                return;
+            }
+            // Dragging: the bar has the mouse, wherever it is.
+            if self.drag.is_some() {
                 return;
             }
             let under = WindowFromPoint(p);
@@ -1520,19 +1853,19 @@ impl Bar {
                         changed = true;
                     }
                 }
+                // A press that left the bar: its release went elsewhere.
+                if self.down.is_some() && self.drag.is_none() {
+                    self.down = None;
+                    changed = true;
+                }
                 if changed {
                     self.mouse = (-1e4, -1e4);
                     self.dirty = true;
                 }
             }
-            // A press whose release went elsewhere (Start took it): over.
-            if self.down.is_some() && self.drag.is_none() {
-                use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
-                if GetAsyncKeyState(VK_LBUTTON.0 as i32) >= 0 {
-                    self.down = None;
-                    self.dirty = true;
-                }
-            }
+            // (A press on the bar is left alone: Windows can answer "up" for
+            // the mouse button to a window that isn't in front, and clearing
+            // it here would lose the click.)
             if self.shell_open && !is_shell(GetForegroundWindow()) {
                 self.shell_open = false;
                 self.dirty = true;
@@ -1602,6 +1935,8 @@ static APPS_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool
 static FEED_CHANGED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 /// The notch posts this when the widget faces changed.
 static FACES_CHANGED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// The shell's messages (a window flashed).
+static SHELL_HOOK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static BAR_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -1613,8 +1948,21 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         hook_explorer();
         with_bar(|b| {
             b.appbar = false;
+            // The new Explorer knows no strip: set it again, even unchanged.
+            b.appbar_rc = RECT::default();
             b.sync_appbar();
         });
+        return LRESULT(0);
+    }
+    if msg == SHELL_HOOK.load(std::sync::atomic::Ordering::Relaxed) && msg != 0 {
+        // HSHELL_FLASH: a window wants to be looked at.
+        if wp.0 as u32 & 0xFFFF == 0x8006 {
+            with_bar(|b| b.on_flash(HWND(lp.0 as *mut _)));
+        }
+        return LRESULT(0);
+    }
+    if msg == unread::WM_UNREAD {
+        with_bar(|b| b.dirty = true);
         return LRESULT(0);
     }
     if msg == tray::WM_TRAY_CHANGED {
@@ -1679,7 +2027,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
                 let (x, y) = b.to_bar(hwnd, lp);
                 if b.is_pop(hwnd) {
                     b.down = b.hit_at(x, y);
+                    b.press_closes_menu(b.down);
                     b.forward(nookly_core::surfaces::INPUT_DOWN, x, y, 0);
+                    b.start_drag(x, y);
                 } else {
                     b.on_down(x, y);
                 }
@@ -1701,18 +2051,31 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             LRESULT(0)
         }
         WM_RBUTTONUP => {
-            // The menu runs its own loop: not inside the bar's borrow.
-            let at = with_bar(|b| b.to_bar(hwnd, lp));
-            if let Some((x, y)) = at {
-                BAR.with(|cell| {
-                    let taken = cell.borrow_mut().take();
-                    if let Some(mut b) = taken {
-                        b.on_right(x, y);
-                        *cell.borrow_mut() = Some(b);
-                    }
-                });
-            }
+            with_bar(|b| {
+                let (x, y) = b.to_bar(hwnd, lp);
+                b.on_right(x, y);
+            });
             LRESULT(0)
+        }
+        // Something else took the mouse in the middle of a drag: it's off.
+        WM_CAPTURECHANGED => {
+            with_bar(|b| {
+                if b.drag.take().is_some() {
+                    b.down = None;
+                    b.dirty = true;
+                }
+            });
+            LRESULT(0)
+        }
+        WM_HOTKEY => {
+            with_bar(|b| menu::key(b, wp.0 as i32));
+            LRESULT(0)
+        }
+        WM_INPUT => {
+            if menu::pressed(lp) {
+                with_bar(|b| b.pressed_anywhere());
+            }
+            unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
         }
         // The wheel over the bar scrolls the apps-and-widgets strip (when it
         // doesn't fit), sideways wheels too.
@@ -1766,6 +2129,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
 /// Leave cleanly: give the screen strip back and put the Windows taskbar back.
 fn quit() {
     crumb("quit: appbar");
+    peek::stop();
     with_bar(|b| b.remove_appbar());
     shell::restore_windows_taskbar();
     unsafe {
@@ -1812,7 +2176,13 @@ fn is_shell(hwnd: HWND) -> bool {
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
     }
     let exe = apps::exe_of(pid).unwrap_or_default().to_ascii_lowercase();
-    ["startmenuexperiencehost.exe", "searchhost.exe", "searchapp.exe", "shellexperiencehost.exe"].iter().any(|n| exe.ends_with(n))
+    if ["startmenuexperiencehost.exe", "searchhost.exe", "searchapp.exe", "shellexperiencehost.exe"].iter().any(|n| exe.ends_with(n)) {
+        return true;
+    }
+    // Wi-Fi / sound / battery on newer Windows.
+    let mut c = [0u16; 64];
+    let n = unsafe { GetClassNameW(hwnd, &mut c) };
+    exe.ends_with("shellhost.exe") && String::from_utf16_lossy(&c[..n.max(0) as usize]) == "ControlCenterWindow"
 }
 
 /// Top-level windows made, closed, shown, hidden, renamed, minimized or
@@ -1833,7 +2203,10 @@ unsafe extern "system" fn on_window(_: HWINEVENTHOOK, ev: u32, hwnd: HWND, id_ob
             if b.shell_open != shell {
                 b.shell_open = shell;
                 b.dirty = true;
-
+            }
+            // Another window came to the front: a menu is done.
+            if matches!(b.popup, Some(Pop::Menu(_))) {
+                b.set_pop(None);
             }
         });
     }
@@ -1875,6 +2248,9 @@ fn create() -> Result<()> {
             None,
         )?;
         BAR_HWND.store(hwnd.0 as isize, std::sync::atomic::Ordering::Relaxed);
+        shell::keep_in_peek(hwnd);
+        SHELL_HOOK.store(RegisterWindowMessageW(w!("SHELLHOOK")), std::sync::atomic::Ordering::Relaxed);
+        let _ = RegisterShellHookWindow(hwnd);
         let gfx = Gfx::new(10, 10)?;
         let now = Instant::now();
         let mut bar = Bar {
@@ -1887,7 +2263,16 @@ fn create() -> Result<()> {
             thumb_slots: Vec::new(),
             hover_block: None,
             drag: None,
+            menu: None,
+            peek_hover: None,
+            peeked: None,
+            peek_left: now,
+            menu_keys: false,
+            tray_hold: None,
+            attention_at: None,
             appbar_rc: RECT::default(),
+            strip_at: now,
+            strip_tries: 0,
             gfx: Some(gfx),
             settings: Settings::load(),
             mon: RECT::default(),
@@ -2012,6 +2397,7 @@ fn run_loop() {
                 MsgWaitForMultipleObjectsEx(None, wait, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
                 with_bar(|b| {
                     b.check_fullscreen();
+                    b.check_strip();
                     if b.inside || b.popup.is_some() || b.shell_open || b.down.is_some() {
                         b.verify_mouse();
                     }
@@ -2073,6 +2459,7 @@ fn main() {
         // puts it back if this process dies).
         windows::Win32::System::Diagnostics::Debug::SetUnhandledExceptionFilter(Some(on_crash));
         std::panic::set_hook(Box::new(|info| {
+            peek::stop();
             shell::restore_windows_taskbar();
             // What went wrong, for the next fix (taskbar_crash.txt).
             let at = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
@@ -2084,6 +2471,9 @@ fn main() {
         SETTINGS_CHANGED.store(RegisterWindowMessageW(w!("Nookly.SettingsChanged")), std::sync::atomic::Ordering::Relaxed);
         FEED_CHANGED.store(RegisterWindowMessageW(nookly_core::feed::FEED_MSG), std::sync::atomic::Ordering::Relaxed);
         FACES_CHANGED.store(RegisterWindowMessageW(nookly_core::surfaces::CHANGED_MSG), std::sync::atomic::Ordering::Relaxed);
+        // Which version this add-on is (the notch replaces one that doesn't
+        // match it, after an update).
+        nookly_core::store::write("taskbar_version.txt", env!("CARGO_PKG_VERSION"));
         if let Err(e) = create() {
             shell::restore_windows_taskbar();
             let msg = HSTRING::from(format!("Nookly Taskbar failed to start:\n{e}"));
