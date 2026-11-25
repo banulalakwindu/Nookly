@@ -428,6 +428,73 @@ pub fn draw(bar: &mut Bar, ui: &mut Ui, body: Rect, plan: &Plan) {
         ui.fill_rr(Rect::new(tx, body.b() - 3.5, thumb, 2.0), 1.0, col::TEXT.with_a(0.35));
     }
     draw_dragged(bar, ui);
+    draw_focus(bar, ui);
+}
+
+/// Used from the keyboard: a ring around the thing it's on.
+fn draw_focus(bar: &Bar, ui: &mut Ui) {
+    let Some(id) = bar.key_on() else { return };
+    if let Some(r) = ui.hits.iter().rev().find(|h| h.id == id).map(|h| h.rect) {
+        ui.stroke_rr(r.inset(1.0), 10.0, col::ACCENT, 2.0);
+    }
+}
+
+/// What a thing is called (read out when it's reached from the keyboard).
+pub fn name(bar: &Bar, id: u32) -> String {
+    let app = |a: &apps::App| match a.windows.len() {
+        0 => format!("{}, not open", a.name),
+        1 => format!("{}, open", a.name),
+        n => format!("{}, {n} windows", a.name),
+    };
+    let title = |id: u32| pop_window(bar, id).map(apps::title).unwrap_or_default();
+    match id {
+        START => "Start".into(),
+        SEARCH => "Search".into(),
+        TRAY => "Hidden icons".into(),
+        NOTIFS => match crate::unread::count() {
+            0 => "Notifications".into(),
+            n => format!("Notifications, {n} new"),
+        },
+        LANG => "Keyboard language".into(),
+        QUICK => "Wi-Fi, sound and battery".into(),
+        CLOCK => "Date and time".into(),
+        OVERFLOW => format!("More apps, {}", bar.apps.list.len().saturating_sub(bar.plan_fit.shown)),
+        i if (APP..APP + 900).contains(&i) => bar.apps.list.get((i - APP) as usize).map(app).unwrap_or_default(),
+        i if (POP_APP..POP_APP + 1000).contains(&i) || (POP_MEMBER..POP_MEMBER + 100).contains(&i) => grid_app(bar, i).as_ref().map(app).unwrap_or_default(),
+        i if (GROUP..GROUP + 100).contains(&i) => bar.apps.groups.get((i - GROUP) as usize).map(|g| format!("Collection {}", g.name)).unwrap_or_default(),
+        i if (WIDGET..WIDGET + 500).contains(&i) => bar.placed.get((i - WIDGET) as usize).and_then(|p| nookly_core::barcfg::def(&p.id)).map(|d| d.name.to_string()).unwrap_or_default(),
+        i if (TRAY_ICON..TRAY_ICON + 200).contains(&i) => crate::tray::icons().get((i - TRAY_ICON) as usize).map(|t| t.tip.clone()).unwrap_or_default(),
+        POP_OPEN | SUB_OPEN => "New window".into(),
+        i if (POP_CLOSE..POP_CLOSE + 100).contains(&i) || (SUB_CLOSE..SUB_CLOSE + 100).contains(&i) => format!("Close {}", title(i)),
+        i if (POP_ROW..POP_ROW + 100).contains(&i) || (SUB_ROW..SUB_ROW + 100).contains(&i) => title(i),
+        FULL_VIEW => "Widget".into(),
+        _ => String::new(),
+    }
+}
+
+/// Where the arrows go from `from` in a row of things (their rects): the
+/// next one along, or (up and down) the nearest in the next row.
+pub fn key_step(rects: &[(u32, Rect)], from: Option<u32>, dx: i32, dy: i32) -> Option<u32> {
+    if rects.is_empty() {
+        return None;
+    }
+    let mut v: Vec<(u32, Rect)> = rects.to_vec();
+    v.sort_by(|a, b| ((a.1.cy() / 12.0).round(), a.1.x).partial_cmp(&((b.1.cy() / 12.0).round(), b.1.x)).unwrap_or(std::cmp::Ordering::Equal));
+    let Some(k) = from.and_then(|f| v.iter().position(|x| x.0 == f)) else { return Some(v[0].0) };
+    if dy != 0 {
+        let c = v[k].1;
+        let next = v
+            .iter()
+            .filter(|x| (x.1.cy() - c.cy()) * dy as f32 > 8.0)
+            .min_by(|a, b| {
+                let d = |r: &Rect| (r.cy() - c.cy()).abs() * 4.0 + (r.cx() - c.cx()).abs();
+                d(&a.1).total_cmp(&d(&b.1))
+            })
+            .map(|x| x.0);
+        return next.or(Some(v[k].0));
+    }
+    let n = v.len() as i32;
+    Some(v[((k as i32 + dx).rem_euclid(n)) as usize].0)
 }
 
 /// The app being dragged follows the mouse (drawn by the bar and by the
@@ -530,7 +597,25 @@ fn app_mark(bar: &mut Bar, ui: &mut Ui, t: Rect, app: &apps::App) {
         }
     }
     // Its progress, in the place of the line.
-    if let Some((state, v)) = crate::band::progress(&app.windows) {
+    if draw_progress(ui, t, &app.windows) {
+        return;
+    }
+    let front = app.windows.contains(&bar.apps.active);
+    let wants = bar.apps.wants(app);
+    let w = if front || wants { 14.0 } else { 5.0 };
+    let c = if wants {
+        col::RED
+    } else if front {
+        col::ACCENT
+    } else {
+        col::DIM
+    };
+    ui.fill_rr(Rect::new(t.cx() - w / 2.0, t.b() - 3.5, w, 3.0), 1.5, c);
+}
+
+/// The progress of these windows along a tile's bottom, if there is any.
+fn draw_progress(ui: &mut Ui, t: Rect, windows: &[HWND]) -> bool {
+    if let Some((state, v)) = crate::band::progress(windows) {
         use crate::band::State;
         let track = Rect::new(t.x + 6.0, t.b() - 4.5, t.w - 12.0, 4.0);
         ui.fill_rr(track, 2.0, col::TEXT.with_a(0.18));
@@ -548,19 +633,9 @@ fn app_mark(bar: &mut Bar, ui: &mut Ui, t: Rect, app: &apps::App) {
             _ => Rect::new(track.x, track.y, (track.w * v).max(4.0), track.h),
         };
         ui.fill_rr(fill, 2.0, c);
-        return;
+        return true;
     }
-    let front = app.windows.contains(&bar.apps.active);
-    let wants = bar.apps.wants(app);
-    let w = if front || wants { 14.0 } else { 5.0 };
-    let c = if wants {
-        col::RED
-    } else if front {
-        col::ACCENT
-    } else {
-        col::DIM
-    };
-    ui.fill_rr(Rect::new(t.cx() - w / 2.0, t.b() - 3.5, w, 3.0), 1.5, c);
+    false
 }
 
 fn draw_apps(bar: &mut Bar, ui: &mut Ui, r: Rect, fit: Fit) {
@@ -616,8 +691,10 @@ fn draw_apps(bar: &mut Bar, ui: &mut Ui, r: Rect, fit: Fit) {
                 ui.circle(t.cx() + k as f32 * 5.5, t.cy(), 1.9, col::TEXT);
             }
         }
-        // How many are hidden.
+        // How many are hidden, and how far what they're doing is.
         badge(ui, t, rest.len());
+        let windows: Vec<HWND> = rest.iter().flat_map(|a| a.windows.iter().copied()).collect();
+        draw_progress(ui, t, &windows);
         ui.hit(t, OVERFLOW);
     }
     // Collections, after the apps: a tile with up to four of their icons.
@@ -871,6 +948,7 @@ pub fn draw_pop(bar: &mut Bar, ui: &mut Ui, pop: Pop, r: Rect) {
             }
         }
     }
+    draw_focus(bar, ui);
 }
 
 /// The app behind a grid cell id (the "more apps" grid or a collection).
@@ -1188,5 +1266,27 @@ pub fn middle(bar: &mut Bar, id: u32) {
     };
     if let Some(a) = app {
         apps::launch(&a.launch);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arrows_move_along_and_between_rows() {
+        let r = |x: f32, y: f32| Rect::new(x, y, 10.0, 10.0);
+        // Two rows: 1 2 3 / 4 5.
+        let v = [(2, r(20.0, 0.0)), (1, r(0.0, 0.0)), (3, r(40.0, 1.0)), (4, r(0.0, 40.0)), (5, r(22.0, 40.0))];
+        assert_eq!(key_step(&v, None, 1, 0), Some(1));
+        assert_eq!(key_step(&v, Some(1), 1, 0), Some(2));
+        assert_eq!(key_step(&v, Some(3), 1, 0), Some(4));
+        assert_eq!(key_step(&v, Some(1), -1, 0), Some(5));
+        assert_eq!(key_step(&v, Some(2), 0, 1), Some(5));
+        assert_eq!(key_step(&v, Some(5), 0, -1), Some(2));
+        assert_eq!(key_step(&v, Some(1), 0, -1), Some(1));
+        // Gone meanwhile: from the start.
+        assert_eq!(key_step(&v, Some(99), 1, 0), Some(1));
+        assert_eq!(key_step(&[], Some(1), 1, 0), None);
     }
 }

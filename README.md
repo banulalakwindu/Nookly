@@ -65,7 +65,7 @@ And more: **Downloads finished** (click to open), **Mirror** (a camera check bef
 
 ## Nookly Taskbar (optional add-on)
 
-A taskbar that replaces Windows' own, in the notch's bubble shape and theme (Liquid Glass included), that grows and shrinks to fit what's on it.
+A taskbar that replaces Windows' own, in the notch's bubble shape and theme (Liquid Glass included), that grows and shrinks to fit what's on it. **[See it and try a demo on its own page](https://banulalakwindu.github.io/Nookly/taskbar.html).**
 
 <img src="docs/images/taskbar-widgets.png" alt="Nookly Taskbar widgets: every widget at every size">
 
@@ -77,10 +77,11 @@ A taskbar that replaces Windows' own, in the notch's bubble shape and theme (Liq
 - **Start, Search, your apps** (pinned and running, with live window previews; rest on one to see that window on the screen), app **collections** (drag one app onto another), and a ⋯ tile for the apps that don't fit. Drag apps into any order, into and out of the ⋯ tile too.
 - **On every screen**: apps and widgets on your other screens' taskbars, with a switch for each thing there (Settings > Taskbar > Other screens).
 - **Right-click menus in its own look**, for apps and for the bar: recent files and the app's own tasks, run as administrator, open file location, end task, Task Manager, show desktop and more.
+- **From the keyboard**: Win+Alt+J puts the keyboard on it, with names for screen readers.
 - **Progress and badges** on app icons, and **files dragged onto an app** open with it (or bring its window forward).
 - **Nothing missed**: apps that want you glow, waiting administrator requests show as a shield, and the bell counts new notifications (counted only, never read).
 - **Like Windows on the right**: hidden icons (Nookly's own tray, with every app's tray icon; left- and right-clicks work as usual), keyboard language, Wi-Fi / sound / battery, the date and time, and notifications.
-- **33 widgets in five groups** (Time & date, System, Weather & sky, Media & money, Your day), each in up to four sizes (S, M, L, W); the bigger the size, the more it shows. Clock with a live dial and the sun's path, Date with your week, Date & Time, **World clock**, Day and Year progress, **CPU & memory** as two live graphs, CPU, Memory, Network, Free space, Battery, Wi-Fi, Volume, Microphone, Bluetooth, Keyboard language, Recycle Bin, Light / dark, **Weather** with the next hours, **Sunrise & sunset**, **Moon**, Now playing with dancing bars, **Currency** (today's rate and change), Tasks, Focus, Water, Screen time, Countdown, Next prayer and **Quote of the day**.
+- **32 widgets in five groups** (Time & date, System, Weather & sky, Media & money, Your day), each in up to four sizes (S, M, L, W); the bigger the size, the more it shows. Clock with a live dial and the sun's path, Date with your week, Date & Time, **World clock**, Day and Year progress, **CPU & memory** as two live graphs, CPU, Memory, Network, Free space, Battery, Wi-Fi, Volume, Microphone, Bluetooth, Keyboard language, Recycle Bin, Light / dark, **Weather** with the next hours, **Sunrise & sunset**, **Moon**, Now playing with dancing bars, **Currency** (today's rate and change), Tasks, Focus, Water, Screen time, Countdown, Next prayer and **Quote of the day**.
 - **Every widget opens its own view** in a bubble that grows out of it (hover or click): a big clock with sunrise and sunset, a month calendar, the day's sky, the year by month, graphs for a minute of CPU, memory and network, your drives, world cities you pick, the currency pairs, the moon's next phases, and the matching panel for music, weather, tasks and more. Buttons inside go straight to the right Windows settings page.
 - **Your layout**: one list in **Settings > Taskbar > Layout**. Pin anything (Start, the clock, a widget) at the left or right end, or let it sit in the middle, which scrolls with the mouse wheel when it doesn't all fit. Drag to reorder; if a pin wouldn't fit, Settings says so instead of hiding it.
 - **Auto-hide** (and it comes out with the Windows key), or always there at full width, with maximized windows stopping above it; **open on hover or click**, three sizes, centred or left, and the **same theme as the notch or one of its own**.

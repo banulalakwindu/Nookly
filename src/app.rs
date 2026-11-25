@@ -409,6 +409,8 @@ pub struct App {
     bar_updating: bool,
     /// The add-on update failed this session (it's tried at the next start).
     bar_update_tried: bool,
+    /// The taskbar was wanted when the shortcuts were last taken.
+    bar_keyed: bool,
     /// The taskbar is out (not slid away): moving faces move only then.
     bar_out: bool,
     /// The widgets in sight on the taskbar (a bit per place).
@@ -429,7 +431,7 @@ pub struct App {
     /// Recording a keyboard shortcut (index into features::HOTKEYS).
     recording: Option<usize>,
     /// Shortcuts Windows refused (another app has them).
-    hotkey_fail: [bool; 4],
+    hotkey_fail: [bool; 5],
     /// An import waiting for "Replace" (the files in it).
     import_pending: Option<Vec<(String, String)>>,
     /// Hovered feature on the Features page (its description shows).
@@ -676,6 +678,7 @@ impl App {
                 faces_fast: false,
                 bar_updating: false,
                 bar_update_tried: false,
+                bar_keyed: false,
                 bar_out: true,
                 bar_seen: u64::MAX,
                 full: None,
@@ -686,7 +689,7 @@ impl App {
                 dock_x: None,
                 more_open: false,
                 recording: None,
-                hotkey_fail: [false; 4],
+                hotkey_fail: [false; 5],
                 import_pending: None,
                 feature_hover: None,
                 front_cache: (0, String::new()),
@@ -853,6 +856,11 @@ impl App {
     /// Queue a toast. Its chime plays when it actually appears on screen
     /// (see `frame`), never while the notch is hidden behind a full-screen app.
     fn push_toast(&mut self, t: Toast) {
+        // (Its features can run for the taskbar with the notch off: they
+        // don't pile up alerts for when it's on again.)
+        if !self.notch_on() {
+            return;
+        }
         match self.settings.alert_mode(t.key) {
             AlertMode::Off => return,
             // Small: a few seconds inside the closed notch (not for alerts
@@ -947,10 +955,11 @@ impl App {
             }
         }
         // A panel switched off in Settings > Features does no work.
-        // With the notch switched off (Settings > Notch) nothing runs.
+        // With the notch switched off (Settings > Notch) nothing runs but
+        // what the taskbar shows.
         let on = self.notch_on();
         for i in 0..self.modules.len() {
-            if on && self.runs(i) {
+            if if on { self.runs(i) } else { self.bar_uses(i) } {
                 self.call(i, |m, c| m.tick(c));
             } else {
                 self.call(i, |m, c| m.tick_off(c));
@@ -1002,6 +1011,11 @@ impl App {
             return;
         }
         let want = self.bar_wanted();
+        // Its shortcut is taken only while it's on.
+        if want != self.bar_keyed {
+            self.bar_keyed = want;
+            self.sync_hotkeys();
+        }
         let t = self.t();
         if let Some(c) = self.bar.as_mut() {
             if let Ok(Some(_)) = c.try_wait() {
@@ -3535,6 +3549,18 @@ impl App {
     /// A shortcut was pressed anywhere in Windows.
     fn on_hotkey(&mut self, id: usize) {
         let t = self.t();
+        // The taskbar's: it takes the keyboard.
+        if id == 1 + crate::features::HOTKEY_BAR {
+            if let Some(h) = bar_window() {
+                unsafe {
+                    let mut pid = 0u32;
+                    GetWindowThreadProcessId(h, Some(&mut pid));
+                    let _ = AllowSetForegroundWindow(pid);
+                    let _ = PostMessageW(Some(h), RegisterWindowMessageW(crate::surfaces::KEYS_MSG), WPARAM(0), LPARAM(0));
+                }
+            }
+            return;
+        }
         // The notch is switched off (Settings > Notch): its shortcuts rest too.
         if !self.notch_on() {
             return;
@@ -7639,9 +7665,12 @@ pub fn render_docs(dir: &std::path::Path) -> String {
             a.glass_raw = None;
         }
         // The Settings window, at the same 2x scale.
-        for (name, tab, sec) in [("settings_general", 0u8, 0u8), ("settings_privacy", 0, SEC_PRIVACY), ("settings_look", 0, SEC_THEME), ("settings_features", 0, SEC_FEATURES), ("settings_shortcuts", 0, SEC_SHORTCUTS), ("settings_widgets", 0, SEC_WIDGETS), ("settings_panels", 0, SEC_PANELS), ("settings_location", 0, SEC_LOCATION), ("settings_taskbar", 1, 0)] {
+        for (name, tab, sec) in [("settings_general", 0u8, 0u8), ("settings_privacy", 0, SEC_PRIVACY), ("settings_look", 0, SEC_THEME), ("settings_features", 0, SEC_FEATURES), ("settings_shortcuts", 0, SEC_SHORTCUTS), ("settings_widgets", 0, SEC_WIDGETS), ("settings_panels", 0, SEC_PANELS), ("settings_location", 0, SEC_LOCATION), ("settings_taskbar", 1, 0), ("settings_bar_layout", 1, 1), ("settings_bar_widgets", 1, 4), ("settings_bar_screens", 1, 5)] {
             a.sw_view(tab, sec);
             if let Some(sw) = a.swin.as_mut() {
+                if tab == 1 {
+                    sw.bar_section = sec;
+                }
                 sw.set_scale(scale);
             }
             a.sw_render();
@@ -8608,13 +8637,13 @@ fn feature_tests(a: &mut App) -> String {
     let rows_fit = a.swin.as_ref().map_or(false, |sw| sw.room[SEC_FEATURES as usize] >= 0.0) && a.sw_hits().iter().filter(|h| (S_FEATURE..S_FEATURE + 64).contains(&h.id)).count() > 20;
     a.sw_view(0, SEC_SHORTCUTS);
     out += &a.sw_snap("shortcuts section");
-    let chips = a.sw_hits().iter().filter(|h| (S_HOTKEY..S_HOTKEY + 4).contains(&h.id)).count();
+    let chips = a.sw_hits().iter().filter(|h| (S_HOTKEY..S_HOTKEY + 5).contains(&h.id)).count();
     let mouse_chips = a.sw_hits().iter().filter(|h| (S_MOUSE..S_MOUSE + 30).contains(&h.id)).count();
     let in_panel = a.swin.as_ref().map_or(false, |sw| sw.room[SEC_SHORTCUTS as usize] >= 0.0);
     // Recording from the window: a click starts it, Esc cancels.
     let rec = a.sw_click_id(S_HOTKEY) && a.recording == Some(0);
     a.record_key(0x1B);
-    out += &format!("{:<4} Features section fits every switch; Shortcuts has {chips} keyboard and {mouse_chips} mouse choices and records\n", ok(rows_fit && in_panel && chips == 4 && mouse_chips == 9 && rec && a.recording.is_none()));
+    out += &format!("{:<4} Features section fits every switch; Shortcuts has {chips} keyboard and {mouse_chips} mouse choices and records\n", ok(rows_fit && in_panel && chips == 5 && mouse_chips == 9 && rec && a.recording.is_none()));
 
     // Export and import.
     let text = bundle();

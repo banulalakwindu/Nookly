@@ -68,6 +68,9 @@ pub const COMMAND_SETTINGS: usize = 1;
 /// Switch auto-hide.
 pub const COMMAND_AUTOHIDE: usize = 2;
 
+/// Notch -> taskbar: use it from the keyboard (its shortcut was pressed).
+pub const KEYS_MSG: PCWSTR = w!("Nookly.BarKeys");
+
 /// The face name of a widget's full view.
 pub fn full_face(id: &str) -> String {
     format!("full@{id}")

@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nookly Taskbar: a taskbar with live widgets for Windows</title>
+<meta name="description" content="Nookly Taskbar replaces the Windows taskbar with a bar in a bubble shape: your apps, live window previews, 32 widgets, a bar on every screen and your own layout. An optional, free add-on of under 1 MB.">
+<meta property="og:title" content="Nookly Taskbar: a taskbar with live widgets for Windows">
+<meta property="og:description" content="Your apps, live previews, 32 widgets and a bar on every screen. An optional, free add-on of under 1 MB for Nookly.">
+<meta property="og:image" content="https://banulalakwindu.github.io/Nookly/images/taskbar-widgets.png">
+<meta property="og:url" content="https://banulalakwindu.github.io/Nookly/taskbar.html">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" href="images/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="site.css">
+<style>
+  .hero { padding-bottom: 20px; }
+  .hero.tb { padding-top: 72px; }
+
+  /* The live demo: a small desktop with the bar on it. */
+  .demo { margin: 44px auto 0; max-width: 1060px; }
+  .desk {
+    --barbg: rgba(8, 8, 12, 0.94); --barline: transparent; --barink: #f5f5f7; --bardim: #9a9aa0; --acc: #ff9f0a; --tile: rgba(255,255,255,.14);
+    position: relative; height: 480px; border-radius: 24px; overflow: hidden; border: 1px solid var(--line);
+    box-shadow: 0 40px 120px rgba(0,0,0,.55); text-align: left; user-select: none; -webkit-user-select: none;
+    background:
+      radial-gradient(520px 360px at 12% 18%, rgba(92,225,210,.55), transparent 70%),
+      radial-gradient(620px 420px at 88% 12%, rgba(255,110,140,.45), transparent 70%),
+      radial-gradient(700px 500px at 60% 100%, rgba(139,108,255,.6), transparent 70%),
+      linear-gradient(160deg, #16204a, #2a1440 60%, #160d26);
+  }
+  .desk.glass { --barbg: rgba(20, 22, 40, 0.34); --barline: rgba(255,255,255,.28); }
+  .desk.rose { --barbg: #2a0f1a; --acc: #ff6f91; --barink: #ffe9ef; --bardim: #c08fa0; }
+  .desk.ocean { --barbg: #06202e; --acc: #45c4ff; --barink: #e6f6ff; --bardim: #7fa9bd; }
+  .desk.paper { --barbg: #f4f0e6; --acc: #b3541e; --barink: #2a251c; --bardim: #7d7463; --tile: rgba(0,0,0,.09); }
+  .win {
+    position: absolute; border-radius: 12px; overflow: hidden; background: #1b1b23; border: 1px solid rgba(255,255,255,.12);
+    box-shadow: 0 18px 50px rgba(0,0,0,.45); transition: opacity .25s ease, transform .25s ease, box-shadow .25s ease;
+  }
+  .win .bar { height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 10px; font-size: 11px; color: #b9b9c6; background: rgba(255,255,255,.05); }
+  .win .bar i { width: 10px; height: 10px; border-radius: 3px; }
+  .win .in { padding: 12px 14px; display: grid; gap: 8px; }
+  .win .in span { height: 8px; border-radius: 4px; background: rgba(255,255,255,.1); }
+  .desk.peeking .win { opacity: .06; }
+  .desk.peeking .win.peek { opacity: 1; z-index: 3; box-shadow: 0 0 0 2px rgba(255,255,255,.35), 0 28px 80px rgba(0,0,0,.6); }
+  #w-files { left: 7%; top: 12%; width: 40%; height: 210px; }
+  #w-web { left: 33%; top: 20%; width: 46%; height: 230px; }
+  #w-web2 { left: 50%; top: 8%; width: 38%; height: 190px; }
+  #w-code { left: 14%; top: 30%; width: 44%; height: 200px; }
+
+  .tbar {
+    position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); height: 56px; padding: 0 14px; display: flex; align-items: center; gap: 4px;
+    background: var(--barbg); color: var(--barink); border-radius: 18px 18px 0 0; white-space: nowrap; z-index: 6;
+    transition: transform .45s cubic-bezier(.3, 1.35, .5, 1), background .3s ease, color .3s ease, padding .45s cubic-bezier(.3, 1.35, .5, 1);
+    box-shadow: inset 0 1px 0 var(--barline);
+  }
+  .desk.glass .tbar, .desk.glass .pop { backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); }
+  .tbar::before, .tbar::after { content: ""; position: absolute; bottom: 0; width: 14px; height: 14px; }
+  .tbar::before { left: -14px; background: radial-gradient(circle at 0 0, transparent 13.5px, var(--barbg) 14px); }
+  .tbar::after { right: -14px; background: radial-gradient(circle at 100% 0, transparent 13.5px, var(--barbg) 14px); }
+  .desk.hide .tbar { transform: translate(-50%, 60px); }
+  .desk.hide:hover .tbar, .desk.hide.hold .tbar { transform: translateX(-50%); }
+  .tile {
+    position: relative; width: 42px; height: 42px; border: 0; border-radius: 11px; background: transparent; color: inherit; display: grid; place-items: center; cursor: pointer; padding: 0; font: inherit;
+  }
+  .tile:hover, .tile.on { background: var(--tile); }
+  .tile:focus-visible, .pop button:focus-visible, .wid:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+  .tile svg { width: 25px; height: 25px; }
+  .tile .run { position: absolute; left: 50%; bottom: 2px; width: 5px; height: 3px; margin-left: -2.5px; border-radius: 2px; background: var(--bardim); }
+  .tile.front .run { width: 14px; margin-left: -7px; background: var(--acc); }
+  .tile .prog { position: absolute; left: 7px; right: 7px; bottom: 2px; height: 4px; border-radius: 2px; background: rgba(127,127,140,.35); overflow: hidden; }
+  .tile .prog i { display: block; height: 100%; width: 0; background: #30d158; border-radius: 2px; animation: fill 7s linear infinite; }
+  @keyframes fill { to { width: 100%; } }
+  .tile.ask { animation: ask 1.1s ease-in-out infinite; }
+  .tile.ask .run { width: 14px; margin-left: -7px; background: #ff453a; }
+  @keyframes ask { 0%, 100% { background: rgba(255,69,58,.14); } 50% { background: rgba(255,69,58,.42); } }
+  .num { position: absolute; top: -1px; right: -1px; min-width: 16px; height: 16px; border-radius: 8px; padding: 0 4px; font-size: 10px; line-height: 16px; font-weight: 800; background: var(--acc); color: #1a1206; text-align: center; }
+  .wid { height: 40px; border-radius: 13px; padding: 0 12px; display: flex; align-items: center; gap: 9px; font-size: 12px; line-height: 1.15; border: 1px solid rgba(255,255,255,.14); background: linear-gradient(180deg, color-mix(in srgb, var(--c) 34%, transparent), color-mix(in srgb, var(--c) 18%, transparent)); color: inherit; font-family: inherit; cursor: pointer; text-align: left; }
+  .wid b { display: block; font-size: 14px; letter-spacing: -.01em; }
+  .wid small { color: var(--bardim); font-size: 10.5px; }
+  .desk.paper .wid { border-color: rgba(0,0,0,.12); }
+  .sep { width: 8px; }
+
+  .pop {
+    position: absolute; bottom: 55px; min-width: 120px; background: var(--barbg); color: var(--barink); border-radius: 16px 16px 0 0; padding: 12px; z-index: 5;
+    transform-origin: 50% 100%; transform: translateX(-50%) scale(.6, 0); opacity: 0; pointer-events: none;
+    transition: transform .32s cubic-bezier(.3, 1.4, .5, 1), opacity .16s ease, background .3s ease; box-shadow: inset 0 1px 0 var(--barline);
+  }
+  .pop::before, .pop::after { content: ""; position: absolute; bottom: 0; width: 12px; height: 12px; }
+  .pop::before { left: -12px; background: radial-gradient(circle at 0 0, transparent 11.5px, var(--barbg) 12px); }
+  .pop::after { right: -12px; background: radial-gradient(circle at 100% 0, transparent 11.5px, var(--barbg) 12px); }
+  .pop.open { transform: translateX(-50%) scale(1); opacity: 1; pointer-events: auto; }
+  .pop h5 { margin: 0 0 8px; font-size: 12.5px; display: flex; gap: 8px; align-items: center; }
+  .pop h5 svg { width: 17px; height: 17px; }
+  .cards { display: flex; gap: 8px; }
+  .pcard { width: 148px; border: 0; padding: 7px; border-radius: 11px; background: rgba(127,127,150,.14); color: inherit; font: 600 11px/1.3 Inter, sans-serif; text-align: left; cursor: pointer; }
+  .pcard:hover { background: var(--tile); }
+  .pcard i { display: block; height: 76px; border-radius: 7px; margin-top: 6px; }
+  .menu { display: grid; min-width: 206px; }
+  .menu em { font-style: normal; font-size: 10.5px; color: var(--bardim); font-weight: 700; padding: 5px 8px 3px; }
+  .menu button { border: 0; background: transparent; color: inherit; font: 500 12.5px Inter, sans-serif; text-align: left; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
+  .menu button:hover { background: var(--tile); }
+  .menu hr { border: 0; border-top: 1px solid rgba(127,127,150,.3); margin: 5px 8px; width: auto; }
+  .big { width: 250px; font-size: 12px; }
+  .big .t { font-size: 34px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+  .big .row { display: flex; justify-content: space-between; margin-top: 10px; color: var(--bardim); }
+  .big svg { width: 100%; height: 54px; margin-top: 8px; }
+  .hint { position: absolute; left: 16px; top: 14px; z-index: 4; font-size: 13px; font-weight: 600; color: #fff; background: rgba(0,0,0,.36); border: 1px solid rgba(255,255,255,.14); padding: 7px 14px; border-radius: 999px; }
+  .ctl { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 16px; }
+  .ctl button { border: 1px solid var(--line); background: rgba(255,255,255,.04); color: var(--dim); border-radius: 999px; padding: 8px 15px; font: 600 13px Inter, sans-serif; cursor: pointer; }
+  .ctl button:hover { color: var(--text); }
+  .ctl button.on { background: rgba(255,180,60,.16); border-color: rgba(255,180,60,.4); color: var(--amber); }
+
+  .feat { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .feat div { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px; }
+  .feat svg { width: 30px; height: 30px; color: var(--amber); margin-bottom: 12px; }
+  .feat b { display: block; font-size: 17px; margin-bottom: 6px; }
+  .feat span { color: var(--dim); font-size: 14.5px; }
+  .groups { display: grid; gap: 18px; margin-top: 10px; }
+  .groups h4 { margin: 0 0 8px; font-size: 14px; color: var(--amber); letter-spacing: .02em; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 10px 18px; align-items: center; margin-top: 18px; font-size: 15px; color: var(--dim); }
+  kbd { font: 600 13px Inter, sans-serif; background: rgba(255,255,255,.08); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 8px; padding: 4px 9px; color: var(--text); white-space: nowrap; }
+  details { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 4px 20px; margin-bottom: 10px; }
+  summary { cursor: pointer; font-weight: 600; padding: 14px 0; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; color: var(--amber); font-weight: 800; }
+  details[open] summary::after { content: "\2212"; }
+  details p { margin: 0 0 16px; color: var(--dim); font-size: 15px; }
+  .kbox { max-width: 720px; margin: 0 auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 28px 28px; }
+  .alt { background: linear-gradient(180deg, var(--bg2), var(--bg)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .faq { max-width: 820px; margin: 0 auto; }
+
+  @media (max-width: 900px) { .feat { grid-template-columns: repeat(2, 1fr); } .tbar .wid.opt { display: none; } }
+  @media (max-width: 640px) {
+    .feat { grid-template-columns: 1fr; }
+    .desk { height: 400px; }
+    .tbar { padding: 0 8px; gap: 1px; }
+    .tbar .wid, .tbar .sep { display: none; }
+    .tile { width: 38px; }
+    .pcard { width: 112px; }
+    .hint { font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="images/logo.png" alt="">Nookly</a>
+    <div class="links">
+      <a class="hide-sm" href="index.html">The notch</a>
+      <a href="taskbar.html" aria-current="page" style="color:var(--text)">Taskbar</a>
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="https://github.com/banulalakwindu/Nookly/blob/main/docs/USER_GUIDE.md#nookly-taskbar-optional-add-on">Guide</a>
+      <a class="hide-sm" href="https://github.com/banulalakwindu/Nookly">GitHub</a>
+      <a class="btn primary small" href="https://github.com/banulalakwindu/Nookly/releases/latest" data-dl>Download</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero tb">
+  <div class="wrap">
+    <div class="eyebrow">Nookly Taskbar · optional add-on</div>
+    <h1>Your taskbar,<br><span class="grad">in a bubble</span></h1>
+    <p class="lead">A whole new Windows taskbar in the notch's shape: your apps with live previews, 32 widgets that open into their own views, and a bar on every screen. Free, open source, and only on your PC if you want it.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/banulalakwindu/Nookly/releases/latest" data-dl><span>Get Nookly for Windows</span></a>
+      <a class="btn ghost" href="#get">Already have Nookly?</a>
+    </div>
+
+    <div class="demo">
+      <div class="desk glass" id="desk">
+        <div class="hint" id="hint">Hover an app, then a window. Right-click works too.</div>
+        <div class="win" id="w-files"><div class="bar"><i style="background:#ffd24a"></i>Holiday photos</div><div class="in"><span style="width:70%"></span><span style="width:55%"></span><span style="width:80%"></span><span style="width:40%"></span></div></div>
+        <div class="win" id="w-code"><div class="bar"><i style="background:#45c4ff"></i>hello.rs</div><div class="in"><span style="width:45%;background:rgba(139,108,255,.5)"></span><span style="width:62%"></span><span style="width:38%;background:rgba(92,225,210,.45)"></span><span style="width:52%"></span></div></div>
+        <div class="win" id="w-web"><div class="bar"><i style="background:#5ce1d2"></i>Trip to Ella</div><div class="in"><span style="height:70px;width:100%;background:linear-gradient(120deg,rgba(255,180,60,.5),rgba(255,110,140,.45))"></span><span style="width:75%"></span><span style="width:60%"></span></div></div>
+        <div class="win" id="w-web2"><div class="bar"><i style="background:#5ce1d2"></i>Recipes</div><div class="in"><span style="height:50px;width:100%;background:linear-gradient(120deg,rgba(92,225,210,.5),rgba(139,108,255,.45))"></span><span style="width:65%"></span></div></div>
+
+        <div class="pop" id="pop" role="dialog" aria-label="Pop-up"></div>
+        <div class="tbar" id="tbar" role="toolbar" aria-label="Taskbar demo">
+          <button class="tile" data-app="start" aria-label="Start"><svg viewBox="0 0 24 24"><g fill="#3aa0ff"><rect x="4" y="4" width="7.4" height="7.4" rx="1.4"/><rect x="12.6" y="4" width="7.4" height="7.4" rx="1.4"/><rect x="4" y="12.6" width="7.4" height="7.4" rx="1.4"/><rect x="12.6" y="12.6" width="7.4" height="7.4" rx="1.4"/></g></svg></button>
+          <span class="sep"></span>
+          <button class="tile front" data-app="web" aria-label="Browser, 2 windows"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#12a594"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" stroke="#d7fff8" stroke-width="1.4" fill="none"/></svg><span class="run"></span></button>
+          <button class="tile" data-app="files" aria-label="Files"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="#ffc53d"/><path d="M3 10h18v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="#ffd978"/></svg><span class="run"></span></button>
+          <button class="tile" data-app="code" aria-label="Code editor"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5" fill="#2f6bff"/><path d="m9.5 8.5-3.5 3.5 3.5 3.5m5-7 3.5 3.5-3.5 3.5" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="run"></span></button>
+          <button class="tile" data-app="chat" aria-label="Chat, wants your attention"><svg viewBox="0 0 24 24"><path d="M4 5h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 4v-4H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" fill="#8b6cff"/><g fill="#fff"><circle cx="8" cy="11" r="1.3"/><circle cx="12" cy="11" r="1.3"/><circle cx="16" cy="11" r="1.3"/></g></svg><span class="run"></span></button>
+          <button class="tile" data-app="down" aria-label="Downloader, in progress"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5" fill="#e5484d"/><path d="M12 7v7m0 0-3-3m3 3 3-3M8 17.5h8" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="prog"><i></i></span></button>
+          <span class="sep"></span>
+          <button class="wid" data-wid="weather" style="--c:#3b82f6"><span style="font-size:19px" aria-hidden="true">&#9925;</span><span><b>28&deg;</b><small>Cloudy</small></span></button>
+          <button class="wid opt" data-wid="system" style="--c:#8b6cff"><svg width="54" height="26" viewBox="0 0 54 26" aria-hidden="true"><path d="M1 9 10 6l9 3 9-5 9 4 8-2 8 1" stroke="#5cc8ff" stroke-width="1.8" fill="none"/><path d="M1 21h15l9-1 10 1 18-2" stroke="#bf5af2" stroke-width="1.8" fill="none"/></svg><span><b style="font-size:12px">19%</b><b style="font-size:12px">54%</b></span></button>
+          <button class="wid" data-wid="clock" style="--c:#e0475a"><span><b>4:20 PM</b><small>Fri 20 Nov</small></span></button>
+          <span class="sep"></span>
+          <button class="tile" data-app="bell" aria-label="Notifications, 3 new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6m4 9a2 2 0 0 0 4 0"/></svg><span class="num">3</span></button>
+        </div>
+      </div>
+      <div class="ctl" aria-label="Try it">
+        <button data-theme="black">Black</button>
+        <button data-theme="glass" class="on">Liquid Glass</button>
+        <button data-theme="rose">Rose</button>
+        <button data-theme="ocean">Ocean</button>
+        <button data-theme="paper">Paper</button>
+        <button id="b-hide">Auto-hide</button>
+        <button id="b-ask">An app wants you</button>
+      </div>
+      <p class="meta">A small demo of the idea, right in this page. The real one is drawn on your GPU.</p>
+    </div>
+  </div>
+</header>
+
+<section style="padding-top:56px">
+  <div class="wrap">
+    <div class="perf">
+      <div><b>0 MB</b><span>Until you add it. It isn't in the Nookly download: no space, no memory, no CPU.</span></div>
+      <div><b>&lt;1 MB</b><span>The add-on itself, fetched from inside Nookly and checked against its SHA-256. It updates with Nookly.</span></div>
+      <div><b>~0.2% CPU</b><span>At rest, in one small process for all your screens (about 25 to 45 MB of memory).</span></div>
+      <div><b>Always safe</b><span>Windows' own taskbar comes back when you switch it off, when it quits, and even if it crashes.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="features" style="padding-top:20px">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow">Your apps</div>
+      <h2>Everything you expect, and a bit more</h2>
+      <p class="sub">Pinned and running apps, the way you're used to them, with the little things that make a taskbar quick.</p>
+    </div>
+    <div class="feat">
+      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8"/></svg><b>Live previews and peek</b><span>Hover an app for its windows, live. Rest on one to see it on the screen; move away and everything is as it was.</span></div>
+      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg><b>Right-click menus</b><span>In the taskbar's own look: recent files, the app's own tasks, run as administrator, open file location, pin, close and end task.</span></div>
+      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/></svg><b>Drag into any order</b><span>Move apps along the bar, or in and out of the &#8943; tile. Drop one on another to make a collection.</span></div>
+      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 17h18M3 17h9" stroke-width="3"/><circle cx="12" cy="8" r="4"/></svg><b>Progress and badges</b><span>Downloads and copies fill a bar under the icon, red for an error and yellow when paused. An app's own badge shows too.</span></div>
+      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M12 18v-6m0 0-2.5 2.5M12 12l2.5 2.5"/></svg><b>Drop files on apps</b><span>Rest on an app, or a window in its pop-up, to bring it forward and go on into it. Or let go to open the file with it.</span></div>
+      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.500-1-8-4-8-9V6z"/></svg><b>Nothing missed</b><span>An app that wants you glows. Administrator requests waiting in the background show as a shield, first on the bar.</span></div>
+      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 15l6-6 6 6"/></svg><b>Hidden icons</b><span>Every app's tray icon in one bubble; left and right clicks work as usual, and it stays open while an icon's menu is.</span></div>
+      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6m4 9a2 2 0 0 0 4 0"/></svg><b>The bell counts</b><span>How many notifications came since you last looked. They're only counted, never read.</span></div>
+      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.500"/><rect x="13" y="4" width="7" height="7" rx="1.500"/><rect x="4" y="13" width="7" height="7" rx="1.500"/><path d="M16.500 13v7M13 16.500h7"/></svg><b>Like Windows, too</b><span>Start, Search, keyboard language, Wi-Fi, sound and battery, the clock, middle-click for a new window, Show desktop in the far corner.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="widgets" class="alt">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow">Widgets</div>
+      <h2>32 widgets, up to four sizes each</h2>
+      <p class="sub">The bigger the size, the more it shows. Every one opens into a view of its own: a month calendar, a minute of graphs, the moon's phases, today's rates, your tasks to type into.</p>
+    </div>
+    <div class="split">
+      <div class="text">
+        <div class="groups">
+          <div><h4>Time and date</h4><div class="chips" style="margin:0"><span class="chip">Clock</span><span class="chip">Date</span><span class="chip">Date &amp; Time</span><span class="chip">World clock</span><span class="chip">Day progress</span><span class="chip">Year progress</span><span class="chip">Uptime</span></div></div>
+          <div><h4>System</h4><div class="chips" style="margin:0"><span class="chip">CPU &amp; memory</span><span class="chip">CPU</span><span class="chip">Memory</span><span class="chip">Network speed</span><span class="chip">Free space</span><span class="chip">Battery</span><span class="chip">Wi-Fi</span><span class="chip">Volume</span><span class="chip">Microphone</span><span class="chip">Bluetooth</span><span class="chip">Keyboard language</span><span class="chip">Recycle Bin</span><span class="chip">Light / dark</span></div></div>
+          <div><h4>Weather and sky</h4><div class="chips" style="margin:0"><span class="chip">Weather</span><span class="chip">Sunrise &amp; sunset</span><span class="chip">Moon</span></div></div>
+          <div><h4>Media and money</h4><div class="chips" style="margin:0"><span class="chip">Now playing</span><span class="chip">Currency</span></div></div>
+          <div><h4>Your day</h4><div class="chips" style="margin:0"><span class="chip">Tasks</span><span class="chip">Focus</span><span class="chip">Water</span><span class="chip">Screen time</span><span class="chip">Countdown</span><span class="chip">Next prayer</span><span class="chip">Quote of the day</span></div></div>
+        </div>
+      </div>
+      <div class="shot"><img src="images/taskbar-widgets.png" alt="Nookly Taskbar widgets: a selection, at every size" loading="lazy"></div>
+    </div>
+  </div>
+</section>
+
+<section id="screens">
+  <div class="wrap split rev">
+    <div class="text">
+      <div class="eyebrow">Every screen</div>
+      <h2>A bar wherever you work</h2>
+      <p class="sub">Your other screens get a taskbar too, all in the same small process. To begin with it's just apps and widgets there, because that's what second screens are for.</p>
+      <ul class="ticks">
+        <li><b>You choose what's on it.</b> Start, Search, hidden icons, the clock, the bell and every widget has its own switch for the other screens.</li>
+        <li><b>The same apps and order</b> on every bar.</li>
+        <li><b>Plug in, unplug:</b> bars come and go with the screens.</li>
+      </ul>
+    </div>
+    <div class="shot"><img src="images/taskbar-screens.png" alt="Settings: what the taskbar shows on other screens" loading="lazy"></div>
+  </div>
+</section>
+
+<section id="layout" class="alt">
+  <div class="wrap split">
+    <div class="text">
+      <div class="eyebrow">Your layout</div>
+      <h2>One list, in your order</h2>
+      <p class="sub">Everything on the bar is one list you drag into place. Pin things at either end, or let them sit in the middle, which scrolls with the wheel when it's full.</p>
+      <ul class="ticks">
+        <li><b>It grows and shrinks</b> to fit what's on it, like the notch. With auto-hide off it takes the full width, and maximized windows stop above it.</li>
+        <li><b>Auto-hide</b> slides it away; the Windows key or the screen's edge brings it out.</li>
+        <li><b>Hover or click</b> to open things, three sizes, centred or left.</li>
+        <li><b>The notch's theme or its own:</b> Liquid Glass, every other theme, or your own colours.</li>
+      </ul>
+    </div>
+    <div class="shot"><img src="images/settings-taskbar.png" alt="Settings: the taskbar's layout" loading="lazy"></div>
+  </div>
+</section>
+
+<section id="keyboard">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow">Keyboard and screen readers</div>
+      <h2>Works without the mouse</h2>
+      <p class="sub">One shortcut puts the keyboard on the taskbar. What it's on is ringed in colour, and its name is given to screen readers.</p>
+    </div>
+    <div class="kbox">
+      <div class="keys">
+        <kbd>Win + Alt + J</kbd><span>To the taskbar, and back (change it in Settings &gt; Shortcuts)</span>
+        <kbd>&larr; &rarr;</kbd><span>Move along the bar, or through an open pop-up</span>
+        <kbd>Enter</kbd><span>Open it</span>
+        <kbd>&uarr;</kbd><span>An app's windows</span>
+        <kbd>Shift + F10</kbd><span>Its menu</span>
+        <kbd>1</kbd><span>to <kbd>9</kbd> &nbsp;straight to one of the first nine apps</span>
+        <kbd>Esc</kbd><span>Back to what you were doing</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="get" class="alt">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow">Get it</div>
+      <h2>Three clicks, and you can always go back</h2>
+      <p class="sub">The taskbar comes from inside Nookly, only when you ask for it.</p>
+    </div>
+    <div class="steps">
+      <div><b>Install Nookly</b><span>About 3 MB, no admin rights needed. <a href="https://github.com/banulalakwindu/Nookly/releases/latest" data-dl>Download the installer</a>.</span></div>
+      <div><b>Settings &gt; Taskbar</b><span>Click the gear in the notch, pick the Taskbar tab, then <b style="display:inline;font-size:inherit">Download taskbar</b>.</span></div>
+      <div><b>That's it</b><span>It switches on by itself. The switch turns it off and Windows' taskbar is back at once; <b style="display:inline;font-size:inherit">Remove taskbar</b> deletes it.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <div class="center"><h2>Good to know</h2><p class="sub">&nbsp;</p></div>
+    <div class="faq">
+      <details><summary>Do I need the notch to use the taskbar?</summary><p>The taskbar belongs to Nookly, but the notch has its own switch: turn it off in Settings &gt; Notch and use only the taskbar, or use both. A widget works on the taskbar even when its panel in the notch is hidden.</p></details>
+      <details><summary>Does it change Windows?</summary><p>No system files are touched. While it runs, Windows' own taskbar is hidden; switch it off, quit Nookly or uninstall it, and Windows' taskbar is as it was. If it ever crashes, Nookly puts Windows' taskbar back by itself.</p></details>
+      <details><summary>What about games and full-screen videos?</summary><p>The bar steps aside for full-screen apps, as Windows' taskbar does.</p></details>
+      <details><summary>Is it private?</summary><p>Yes. No account, no analytics, no ads. Widgets that need the internet (weather, currency, the quote) go online only once you add them. Recent files come from Windows' own list when you open a menu, and follow your Windows privacy setting. <a href="https://github.com/banulalakwindu/Nookly/blob/main/PRIVACY.md">Read the privacy policy</a>.</p></details>
+      <details><summary>Which Windows does it need?</summary><p>Windows 10 or 11, as the notch does.</p></details>
+    </div>
+  </div>
+</section>
+
+<section class="final" style="padding-top:20px">
+  <div class="wrap">
+    <img src="images/logo.png" alt="Nookly logo">
+    <h2>Give your taskbar a nook</h2>
+    <p class="sub" style="margin:0 auto 28px">Free forever, open source, made for Windows.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/banulalakwindu/Nookly/releases/latest" data-dl><span>Get Nookly for Windows</span></a>
+      <a class="btn ghost" href="index.html">See the notch</a>
+    </div>
+    <div class="meta" id="dl-meta">Windows 10 and 11</div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>Nookly by <a href="https://github.com/banulalakwindu">Banula Lakwindu</a>. Free and open source (MIT). Not affiliated with Apple or Microsoft.</div>
+    <div><a href="index.html">The notch</a> · <a href="https://github.com/banulalakwindu/Nookly">Source</a> · <a href="https://github.com/banulalakwindu/Nookly/blob/main/docs/USER_GUIDE.md">User guide</a> · <a href="https://github.com/banulalakwindu/Nookly/blob/main/CHANGELOG.md">Changelog</a> · <a href="https://github.com/banulalakwindu/Nookly/blob/main/PRIVACY.md">Privacy</a></div>
+  </div>
+</footer>
+
+<div class="lb" id="lb"><img alt=""></div>
+
+<script src="site.js"></script>
+<script>
+  (function () {
+    var desk = document.getElementById("desk"), bar = document.getElementById("tbar"), pop = document.getElementById("pop");
+    var hint = document.getElementById("hint"), touch = window.matchMedia("(hover: none)").matches;
+    var say = touch ? "Tap an app, then a window." : "Hover an app, then a window. Right-click works too.";
+    hint.textContent = say;
+    var APPS = {
+      web: { name: "Browser", wins: [["Trip to Ella", "w-web", "linear-gradient(120deg,#ffb43c,#ff6e8c)"], ["Recipes", "w-web2", "linear-gradient(120deg,#5ce1d2,#8b6cff)"]], recent: [], tasks: ["New window", "New private window"] },
+      files: { name: "Files", wins: [["Holiday photos", "w-files", "linear-gradient(120deg,#ffd24a,#ff8038)"]], recent: ["Downloads", "Documents", "Holiday photos"], tasks: [] },
+      code: { name: "Code", wins: [["hello.rs", "w-code", "linear-gradient(120deg,#2f6bff,#45c4ff)"]], recent: ["hello.rs", "notes.md"], tasks: ["New window"] },
+      chat: { name: "Chat", wins: [["Sam: are you coming?", "", "linear-gradient(120deg,#8b6cff,#5ce1d2)"]], recent: [], tasks: ["New message"] },
+      down: { name: "Downloader", wins: [["wallpapers.zip", "", "linear-gradient(120deg,#e5484d,#ff8038)"]], recent: [], tasks: [] }
+    };
+    var now = null, timer = 0, leave = 0, front = "web";
+    function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+    function place(el) {
+      var d = desk.getBoundingClientRect(), r = el.getBoundingClientRect(), b = bar.getBoundingClientRect();
+      var half = pop.offsetWidth / 2, x = r.left + r.width / 2 - d.left;
+      var lo = Math.max(b.left - d.left + half + 20, half + 14), hi = Math.min(b.right - d.left - half - 20, d.width - half - 14);
+      pop.style.left = (lo > hi ? d.width / 2 : Math.min(Math.max(x, lo), hi)) + "px";
+    }
+    function peek(id) {
+      desk.classList.toggle("peeking", !!id);
+      desk.querySelectorAll(".win").forEach(function (w) { w.classList.toggle("peek", w.id === id); });
+    }
+    function raise(id) {
+      var z = 1;
+      desk.querySelectorAll(".win").forEach(function (w) { w.style.zIndex = w.id === id ? 2 : z; });
+    }
+    function setFront(k) {
+      front = k;
+      bar.querySelectorAll("[data-app]").forEach(function (t) { t.classList.toggle("front", t.dataset.app === k); });
+    }
+    function close() {
+      pop.classList.remove("open"); peek(null); now = null; desk.classList.remove("hold");
+      bar.querySelectorAll(".on").forEach(function (t) { t.classList.remove("on"); });
+    }
+    function open(el, kind, html) {
+      if (now && now.el === el && now.kind === kind) return;
+      pop.innerHTML = html; now = { el: el, kind: kind };
+      bar.querySelectorAll(".on").forEach(function (t) { t.classList.remove("on"); });
+      el.classList.add("on"); desk.classList.add("hold"); place(el);
+      pop.classList.add("open");
+    }
+    function appPop(el) {
+      var k = el.dataset.app, a = APPS[k];
+      if (!a) { close(); return; }
+      var svg = el.querySelector("svg").outerHTML;
+      open(el, "app", "<h5>" + svg + esc(a.name) + '</h5><div class="cards">' + a.wins.map(function (w) {
+        return '<button class="pcard" data-win="' + w[1] + '">' + esc(w[0]) + '<i style="background:' + w[2] + '"></i></button>';
+      }).join("") + "</div>");
+    }
+    function menuPop(el) {
+      var k = el.dataset ? el.dataset.app : null, a = APPS[k], h = "";
+      if (a) {
+        h += "<h5>" + el.querySelector("svg").outerHTML + esc(a.name) + "</h5>";
+        if (a.recent.length) h += "<em>Recent</em>" + a.recent.map(function (r) { return "<button>" + esc(r) + "</button>"; }).join("");
+        if (a.tasks.length) h += "<em>Tasks</em>" + a.tasks.map(function (r) { return "<button>" + esc(r) + "</button>"; }).join("");
+        h += (a.recent.length || a.tasks.length ? "<hr>" : "") + "<button>Run as administrator</button><button>Unpin from taskbar</button><hr><button>Close window</button>";
+      } else {
+        h = "<button>Taskbar settings</button><button>Task Manager</button><button>Show desktop</button><hr><button data-do='hide'>Auto-hide</button>";
+      }
+      open(el, "menu", '<div class="menu">' + h + "</div>");
+    }
+    var WID = {
+      weather: '<div class="big"><div class="t">28&deg;</div>Cloudy, feels like 31&deg;<div class="row"><span>5 PM<br>27&deg;</span><span>6 PM<br>26&deg;</span><span>7 PM<br>26&deg;</span><span>8 PM<br>25&deg;</span></div></div>',
+      system: '<div class="big"><b>CPU</b> 19%<svg viewBox="0 0 250 54" preserveAspectRatio="none"><path d="M0 34 25 28l25 8 25-18 25 12 25-6 25 10 25-20 25 14 25-5 25 3" stroke="#5cc8ff" stroke-width="2" fill="none"/></svg><b>Memory</b> 8.6 GB of 16 GB<svg viewBox="0 0 250 54" preserveAspectRatio="none"><path d="M0 26h60l30-2 40 3 60-4 60 2" stroke="#bf5af2" stroke-width="2" fill="none"/></svg></div>',
+      clock: '<div class="big"><div class="t">4:20</div>Friday, 20 November<div class="row"><span>Sunrise<br>6:04 AM</span><span>Sunset<br>5:46 PM</span><span>Week<br>47</span></div></div>'
+    };
+    function widPop(el) { open(el, "wid", WID[el.dataset.wid]); }
+    function later(f, ms) { clearTimeout(timer); timer = setTimeout(f, ms); }
+    bar.addEventListener("mouseover", function (e) {
+      var t = e.target.closest("[data-app],[data-wid]");
+      clearTimeout(leave);
+      if (!t || (now && now.kind === "menu")) return;
+      var go = function () { t.dataset.wid ? widPop(t) : appPop(t); };
+      now ? go() : later(go, 280);
+    });
+    bar.addEventListener("mouseleave", function () { clearTimeout(timer); out(); });
+    pop.addEventListener("mouseenter", function () { clearTimeout(leave); });
+    pop.addEventListener("mouseleave", function () { peek(null); out(); });
+    function out() { clearTimeout(leave); if (now && now.kind !== "menu") leave = setTimeout(close, 350); }
+    pop.addEventListener("mouseover", function (e) {
+      var c = e.target.closest("[data-win]");
+      peek(c && c.dataset.win ? c.dataset.win : null);
+    });
+    pop.addEventListener("click", function (e) {
+      var c = e.target.closest("button");
+      if (!c) return;
+      if (c.dataset.win) { raise(c.dataset.win); setFront(now.el.dataset.app); }
+      if (c.dataset.do === "hide") document.getElementById("b-hide").click();
+      close();
+    });
+    bar.addEventListener("click", function (e) {
+      var t = e.target.closest("[data-app],[data-wid]");
+      if (!t) return;
+      clearTimeout(timer);
+      if (t.dataset.wid) { now && now.el === t ? close() : widPop(t); return; }
+      var a = APPS[t.dataset.app];
+      t.classList.remove("ask");
+      if (!a) { close(); return; }
+      // A finger has no hover: the first tap shows the windows.
+      if (e.detail === 0 || (touch && !(now && now.el === t))) { appPop(t); return; }
+      if (a.wins[0][1]) raise(a.wins[0][1]);
+      setFront(t.dataset.app); close();
+    });
+    desk.addEventListener("contextmenu", function (e) {
+      if (!bar.contains(e.target)) return;
+      e.preventDefault(); clearTimeout(timer); close();
+      menuPop(e.target.closest("[data-app]") || bar);
+    });
+    document.addEventListener("mousedown", function (e) { if (now && !pop.contains(e.target) && !bar.contains(e.target)) close(); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
+    document.querySelectorAll(".ctl [data-theme]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        document.querySelectorAll(".ctl [data-theme]").forEach(function (x) { x.classList.toggle("on", x === b); });
+        var hide = desk.classList.contains("hide");
+        desk.className = "desk " + b.dataset.theme + (hide ? " hide" : "");
+        close();
+      });
+    });
+    document.getElementById("b-hide").addEventListener("click", function () {
+      var on = desk.classList.toggle("hide");
+      this.classList.toggle("on", on);
+      hint.textContent = on ? "It slid away: " + (touch ? "tap" : "move onto") + " the desktop to bring it out." : say;
+    });
+    document.getElementById("b-ask").addEventListener("click", function () { bar.querySelector('[data-app="chat"]').classList.add("ask"); });
+    // A finger on the desktop brings a hidden bar out.
+    desk.addEventListener("click", function (e) { if (touch && !bar.contains(e.target) && !pop.contains(e.target)) desk.classList.toggle("hold"); });
+    window.addEventListener("resize", close);
+    raise("w-web");
+  })();
+</script>
+</body>
+</html>

@@ -153,12 +153,15 @@ pub fn current_preset(st: &Settings) -> Option<usize> {
 /// The keyboard shortcuts: (settings key, name, default).
 /// A shortcut is "mods:vk" (MOD_ALT 1, MOD_CONTROL 2, MOD_SHIFT 4,
 /// MOD_WIN 8); empty is none.
-pub const HOTKEYS: [(&str, &str, &str); 4] = [
+pub const HOTKEYS: [(&str, &str, &str); 5] = [
     ("hotkey_open", "Open or close the notch", "9:78"), // Win+Alt+N
     ("hotkey_clip", "Clipboard history", ""),
     ("hotkey_shot", "Screenshot", ""),
     ("hotkey_note", "Quick note", ""),
+    ("hotkey_bar", "Taskbar from the keyboard", "9:74"), // Win+Alt+J
 ];
+/// The one for the taskbar (taken only while it's on).
+pub const HOTKEY_BAR: usize = 4;
 
 /// Hotkey ids passed to RegisterHotKey are 1 + index.
 pub fn hotkey(st: &Settings, k: usize) -> Option<(u32, u32)> {
@@ -230,11 +233,14 @@ pub fn recorded(mods: u32, vk: u32) -> Option<(u32, u32)> {
 
 /// Register every shortcut; returns which ones Windows refused (taken by
 /// another app).
-pub fn register(hwnd: HWND, st: &Settings) -> [bool; 4] {
-    let mut fail = [false; 4];
+pub fn register(hwnd: HWND, st: &Settings) -> [bool; 5] {
+    let mut fail = [false; 5];
     for k in 0..HOTKEYS.len() {
         unsafe {
             let _ = UnregisterHotKey(Some(hwnd), 1 + k as i32);
+        }
+        if k == HOTKEY_BAR && !crate::barcfg::flag(st, "taskbar_on", false) {
+            continue;
         }
         if let Some((m, v)) = hotkey(st, k) {
             let ok = unsafe { RegisterHotKey(Some(hwnd), 1 + k as i32, HOT_KEY_MODIFIERS(m) | MOD_NOREPEAT, v) }.is_ok();

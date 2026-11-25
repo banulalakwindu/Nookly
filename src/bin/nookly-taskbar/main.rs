@@ -367,6 +367,11 @@ pub struct Bar {
     device: String,
     /// What can be seen of it (out, and which widgets).
     out_seen: (bool, u64),
+    /// Used from the keyboard: the thing it's on, and the window to go back
+    /// to.
+    keys: Option<(Option<u32>, HWND)>,
+    /// What it was on on the bar itself (to come back to from a pop-up).
+    key_home: Option<u32>,
     /// Files are being dragged over this (a hit id), since when, and it has
     /// been acted on.
     file_over: Option<(u32, Instant, bool)>,
@@ -503,7 +508,7 @@ impl Bar {
             return true;
         }
         let asking = !self.apps.attention.is_empty() && self.attention_at.is_some_and(|t| t.elapsed().as_secs_f32() < ATTENTION_BEATS);
-        asking || self.tray_hold.is_some() || self.inside || self.popup.is_some() || self.left_at.is_some_and(|t| t.elapsed().as_secs_f32() < 0.7) || self.down.is_some() || self.shell_open
+        asking || self.keys.is_some() || self.tray_hold.is_some() || self.inside || self.popup.is_some() || self.left_at.is_some_and(|t| t.elapsed().as_secs_f32() < 0.7) || self.down.is_some() || self.shell_open
     }
 
     fn load_settings(&mut self) {
@@ -1060,8 +1065,11 @@ impl Bar {
         }
         let mut waiting = false;
         self.step_tray_hold();
+        if self.keys.is_some() && self.shown() > 0.9 {
+            self.key_begin();
+        }
         // (Typing in a widget's view: it stays, wherever the mouse is.)
-        let held = self.tray_hold.is_some() || self.typing();
+        let held = self.tray_hold.is_some() || self.keys.is_some() || self.typing();
         let in_menu = matches!(self.popup, Some(Pop::Menu(_)));
         if in_menu {
             self.set_menu_keys(self.inside || in_pop);
@@ -1901,6 +1909,194 @@ impl Bar {
         }
     }
 
+    /// What the keyboard is on.
+    pub fn key_on(&self) -> Option<u32> {
+        self.keys.and_then(|k| k.0)
+    }
+
+    /// Use the bar from the keyboard (its shortcut): it takes the focus, so
+    /// keys come to it and a screen reader reads what they're on.
+    fn keys_start(&mut self) {
+        if self.keys.is_some() {
+            self.keys_end(true);
+            return;
+        }
+        self.dirty = true;
+        unsafe {
+            let back = GetForegroundWindow();
+            let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, ex & !(WS_EX_NOACTIVATE.0 as isize));
+            let _ = SetForegroundWindow(self.hwnd);
+            let _ = SetFocus(Some(self.hwnd));
+            self.keys = Some((None, back));
+        }
+        self.key_home = None;
+        self.key_begin();
+    }
+
+    /// On the first app (or the first thing there is), once there's anything
+    /// (an auto-hidden bar is still coming out).
+    fn key_begin(&mut self) {
+        if self.popup.is_some() || !matches!(self.keys, Some((None, _))) {
+            return;
+        }
+        let rects = self.key_rects();
+        if let Some(i) = rects.iter().map(|x| x.0).find(|i| (items::APP..items::APP + 900).contains(i)).or(rects.first().map(|x| x.0)) {
+            self.key_to(i);
+        }
+    }
+
+    /// Done with the keyboard: the focus goes back (unless something else
+    /// took it).
+    fn keys_end(&mut self, back: bool) {
+        let Some((_, was)) = self.keys.take() else { return };
+        self.dirty = true;
+        unsafe {
+            let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, ex | WS_EX_NOACTIVATE.0 as isize);
+            let _ = SetWindowTextW(self.hwnd, w!("Nookly Taskbar"));
+            if back && IsWindow(Some(was)).as_bool() {
+                let _ = SetForegroundWindow(was);
+            }
+        }
+        self.left_at = Some(Instant::now());
+    }
+
+    /// What the keyboard can reach: an open pop-up's things, else the bar's.
+    fn key_rects(&self) -> Vec<(u32, Rect)> {
+        let pop = self.popup.is_some() && !matches!(self.popup, Some(Pop::Menu(_)));
+        let mut v: Vec<(u32, Rect)> = Vec::new();
+        for h in &self.hits {
+            let ours = if pop { h.rect.y + h.rect.h / 2.0 < 0.0 } else { h.rect.y + h.rect.h / 2.0 >= 0.0 };
+            if ours && h.id != 0 && h.id != items::DESKTOP && h.id < menu::ID && !v.iter().any(|x| x.0 == h.id) {
+                v.push((h.id, h.rect));
+            }
+        }
+        v
+    }
+
+    fn key_to(&mut self, id: u32) {
+        if let Some(k) = self.keys.as_mut() {
+            k.0 = Some(id);
+        }
+        if self.popup.is_none() {
+            self.key_home = Some(id);
+        }
+        self.dirty = true;
+        // Read out: the window is called what it's on.
+        let name = items::name(self, id);
+        unsafe {
+            let _ = SetWindowTextW(self.hwnd, &HSTRING::from(name));
+            NotifyWinEvent(EVENT_OBJECT_NAMECHANGE, self.hwnd, OBJID_WINDOW.0, 0);
+            NotifyWinEvent(EVENT_OBJECT_FOCUS, self.hwnd, OBJID_CLIENT.0, 0);
+        }
+    }
+
+    fn key_move(&mut self, dx: i32, dy: i32) {
+        let rects = self.key_rects();
+        if let Some(id) = items::key_step(&rects, self.key_on(), dx, dy) {
+            self.key_to(id);
+        }
+        // Past what's in sight of a full strip: it scrolls along.
+        if self.popup.is_none() && self.plan.as_ref().is_some_and(|p| p.strip.is_some()) {
+            self.scroll_to += dx as f32 * 48.0;
+        }
+    }
+
+    /// A key while the bar has the keyboard. True: it was for us.
+    fn on_key(&mut self, vk: VIRTUAL_KEY, shift: bool) -> bool {
+        if self.keys.is_none() {
+            return false;
+        }
+        if matches!(self.popup, Some(Pop::Menu(_))) {
+            match vk {
+                VK_UP => menu::key(self, 2),
+                VK_DOWN | VK_TAB => menu::key(self, 3),
+                VK_RETURN | VK_SPACE => {
+                    menu::key(self, 4);
+                    if self.popup.is_none() {
+                        self.keys_end(false);
+                    }
+                }
+                VK_ESCAPE => self.set_pop(None),
+                _ => return false,
+            }
+            return true;
+        }
+        match vk {
+            VK_LEFT => self.key_move(-1, 0),
+            VK_RIGHT => self.key_move(1, 0),
+            VK_TAB => self.key_move(if shift { -1 } else { 1 }, 0),
+            VK_UP if self.popup.is_some() => self.key_move(0, -1),
+            VK_DOWN if self.popup.is_some() => self.key_move(0, 1),
+            VK_HOME | VK_END => {
+                if let Some(k) = self.keys.as_mut() {
+                    k.0 = None;
+                }
+                self.key_move(1, 0);
+                if vk == VK_END {
+                    self.key_move(-1, 0);
+                }
+            }
+            // Its windows (an app), or its menu.
+            VK_UP => {
+                if let Some(i) = self.key_on() {
+                    let x = self.hits.iter().find(|h| h.id == i).map_or(0.0, |h| h.rect.cx());
+                    if (items::APP..items::APP + 900).contains(&i) {
+                        let k = (i - items::APP) as usize;
+                        if self.apps.list.get(k).is_some_and(|a| !a.windows.is_empty()) {
+                            self.set_pop(Some(Pop::App(k, x)));
+                            // (Into it with the next key.)
+                            if let Some(k) = self.keys.as_mut() {
+                                k.0 = None;
+                            }
+                        }
+                    }
+                }
+            }
+            VK_APPS | VK_F10 if vk == VK_APPS || shift => {
+                let id = self.key_on();
+                let x = id.and_then(|i| self.hits.iter().find(|h| h.id == i)).map_or(0.0, |h| h.rect.cx());
+                menu::open(self, id, x);
+            }
+            VK_RETURN | VK_SPACE => {
+                if let Some(i) = self.key_on() {
+                    let x = self.hits.iter().find(|h| h.id == i).map_or(0.0, |h| h.rect.cx());
+                    let was = self.popup;
+                    items::action(self, i, x);
+                    // A pop-up opened: go on in it. Else it's done.
+                    if self.popup.is_some() && self.popup != was {
+                        if let Some(k) = self.keys.as_mut() {
+                            k.0 = None;
+                        }
+                    } else if self.popup.is_none() {
+                        self.keys_end(false);
+                    }
+                }
+            }
+            VK_ESCAPE | VK_DOWN => {
+                if self.popup.is_some() {
+                    self.set_pop(None);
+                    if let Some(i) = self.key_home {
+                        self.key_to(i);
+                    }
+                } else {
+                    self.keys_end(true);
+                }
+            }
+            // The first nine apps by number.
+            v if (VK_1.0..=VK_9.0).contains(&v.0) => {
+                let k = (v.0 - VK_1.0) as usize;
+                if k < self.apps.list.len() {
+                    self.keys_end(false);
+                    items::action(self, items::APP + k as u32, 0.0);
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
     /// A widget's view is open and the keys go to it (the notch, which
     /// draws it, is in front).
     fn typing(&self) -> bool {
@@ -2153,6 +2349,8 @@ static APPS_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool
 static FEED_CHANGED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 /// The notch posts this when the widget faces changed.
 static FACES_CHANGED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// The notch: the taskbar's shortcut was pressed.
+static KEYS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 /// The shell's messages (a window flashed).
 static SHELL_HOOK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static BAR_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
@@ -2178,6 +2376,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         if wp.0 as u32 & 0xFFFF == 0x8006 {
             flashed(HWND(lp.0 as *mut _));
         }
+        return LRESULT(0);
+    }
+    if msg == KEYS.load(std::sync::atomic::Ordering::Relaxed) && msg != 0 {
+        on_bar(me, |b| b.keys_start());
         return LRESULT(0);
     }
     if msg == unread::WM_UNREAD || msg == band::WM_BAND {
@@ -2293,6 +2495,17 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         }
         WM_HOTKEY => {
             on_bar(me, |b| menu::key(b, wp.0 as i32));
+            LRESULT(0)
+        }
+        WM_KEYDOWN | WM_SYSKEYDOWN => {
+            let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
+            if on_bar(me, |b| b.on_key(VIRTUAL_KEY(wp.0 as u16), shift)) == Some(true) {
+                return LRESULT(0);
+            }
+            unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
+        }
+        WM_KILLFOCUS => {
+            on_bar(me, |b| b.keys_end(false));
             LRESULT(0)
         }
         WM_INPUT => {
@@ -2583,6 +2796,8 @@ impl Bar {
                 hwnd,
                 device: device.to_string(),
                 out_seen: (false, 0),
+                keys: None,
+                key_home: None,
                 file_over: None,
                 pop_b: None,
                 sub_b: None,
@@ -2842,6 +3057,7 @@ fn main() {
         SETTINGS_CHANGED.store(RegisterWindowMessageW(w!("Nookly.SettingsChanged")), std::sync::atomic::Ordering::Relaxed);
         FEED_CHANGED.store(RegisterWindowMessageW(nookly_core::feed::FEED_MSG), std::sync::atomic::Ordering::Relaxed);
         FACES_CHANGED.store(RegisterWindowMessageW(nookly_core::surfaces::CHANGED_MSG), std::sync::atomic::Ordering::Relaxed);
+        KEYS.store(RegisterWindowMessageW(nookly_core::surfaces::KEYS_MSG), std::sync::atomic::Ordering::Relaxed);
         // Which version this add-on is (the notch replaces one that doesn't
         // match it, after an update).
         nookly_core::store::write("taskbar_version.txt", env!("CARGO_PKG_VERSION"));

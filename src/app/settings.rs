@@ -2491,7 +2491,7 @@ pub(super) fn settings_tip(id: u32) -> &'static str {
         72 => "Record text, files and pictures",
         i if (S_FEATURE..S_FEATURE + crate::features::FEATURES.len() as u32).contains(&i) => crate::features::FEATURES[(i - S_FEATURE) as usize].what,
         i if (S_PRESET..S_PRESET + crate::features::PRESETS.len() as u32).contains(&i) => crate::features::PRESETS[(i - S_PRESET) as usize].1,
-        i if (S_HOTKEY..S_HOTKEY + 4).contains(&i) => "Click, then press the keys (Backspace removes it, Esc cancels)",
+        i if (S_HOTKEY..S_HOTKEY + 5).contains(&i) => "Click, then press the keys (Backspace removes it, Esc cancels)",
         S_CUSTOM => "Your own theme: pick a background and a text colour",
         i if (S_CBG..S_CBG + 8).contains(&i) => "Background colour",
         i if (S_CTEXT..S_CTEXT + 8).contains(&i) => "Text colour",

@@ -2,6 +2,13 @@
 
 Versions 0.1.x below were released before the Nookly name.
 
+## 0.9.0: The taskbar from the keyboard, and on its own
+
+- **Use the taskbar from the keyboard**: **Win+Alt+J** (change it in Settings > Shortcuts) puts the keyboard on it. The arrows move, Enter opens, Up shows an app's windows, Shift+F10 its menu, 1 to 9 go straight to an app and Esc goes back. What it's on is ringed, and its name is given to screen readers.
+- **Only the taskbar, if you like**: with the notch switched off, the taskbar's widgets keep working (they stopped).
+- The ⋯ tile shows the progress of the apps in it.
+- **A page of its own on the website**: [Nookly Taskbar](https://banulalakwindu.github.io/Nookly/taskbar.html), with a demo to try.
+
 ## 0.8.0: A taskbar on every screen, recent files, progress and more
 
 **Taskbar**
@@ -55,7 +62,7 @@ Versions 0.1.x below were released before the Nookly name.
 - **Nookly Taskbar**: a taskbar that replaces Windows' own, in the notch's bubble shape and theme (Liquid Glass included), that grows and shrinks to fit what's on it. It's an **optional add-on** of under 1 MB: get it in **Settings > Taskbar > Download taskbar**. Nookly fetches the add-on of its own version from the release, checks its SHA-256 and installs it beside itself. Without it, nothing changes: no space, no memory, no CPU. It runs in its own small process, updates with Nookly, and Windows' taskbar always comes back (switched off, quit, or even a crash).
 - **Apps**: Start, Search, pinned and running apps with live window previews, app collections, and a ⋯ tile for the rest; the middle scrolls with the mouse wheel when it's full, with soft edges.
 - **Like Windows on the right**: Nookly's own hidden icons (every app's tray icon, clicks as usual), keyboard language, Wi-Fi / sound / battery, the date and time, and notifications.
-- **33 widgets in five groups**, each in up to four sizes, drawn by the notch so they always match it: Clock, Date, Date & Time, World clock, Day and Year progress, Uptime, CPU & memory (two live graphs), CPU, Memory, Network, Free space, Battery, Wi-Fi, Volume, Microphone, Bluetooth, Keyboard language, Recycle Bin, Light / dark, Weather, Sunrise & sunset, Moon, Now playing, Currency, Tasks, Focus, Water, Screen time, Countdown, Next prayer and Quote of the day.
+- **32 widgets in five groups**, each in up to four sizes, drawn by the notch so they always match it: Clock, Date, Date & Time, World clock, Day and Year progress, Uptime, CPU & memory (two live graphs), CPU, Memory, Network, Free space, Battery, Wi-Fi, Volume, Microphone, Bluetooth, Keyboard language, Recycle Bin, Light / dark, Weather, Sunrise & sunset, Moon, Now playing, Currency, Tasks, Focus, Water, Screen time, Countdown, Next prayer and Quote of the day.
 - **Every widget opens its own view** in a bubble that grows out of it, with live clicks and buttons to the right place; panels like Calendar, Weather and Now playing open as they are in the notch.
 - **One layout**: pin anything at the left or right end or let it scroll in the middle, drag to reorder; Settings won't pin what wouldn't fit.
 - **Auto-hide** (the Windows key brings it out), hover or click, three sizes, and the notch's theme or one of its own.
