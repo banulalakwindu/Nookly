@@ -100,6 +100,8 @@ unsafe fn run() {
         };
         let _ = SetPropW(h, MARK, Some(HANDLE(1 as *mut _)));
         WND.store(h.0 as isize, Ordering::Relaxed);
+        // What apps tell the taskbar (progress, badges) comes to us too.
+        crate::band::start(h, BAR.load(Ordering::Relaxed));
         on_top(h);
         SetTimer(Some(h), 1, 2000, None);
         // Apps add their icons again when they hear this (now to us).
@@ -182,6 +184,7 @@ unsafe extern "system" fn proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRE
                 LRESULT(0)
             }
             WM_CLOSE => {
+                crate::band::stop(h);
                 let _ = DestroyWindow(h);
                 LRESULT(0)
             }

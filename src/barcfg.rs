@@ -9,7 +9,7 @@ use crate::store::Settings;
 /// language, Wi-Fi / sound / battery and the date and time; each can be
 /// switched off, moved, and pinned or left to scroll like a widget.
 pub const ITEMS: [(&str, &str, &str); 8] = [
-    ("start", "Start", "\u{E782}"),
+    ("start", "Start", "\u{E80A}"),
     ("search", "Search", "\u{E721}"),
     ("apps", "Apps", "\u{ECAA}"),
     ("tray", "Hidden icons", "\u{E70E}"),
@@ -222,6 +222,41 @@ pub fn order(st: &Settings) -> Vec<(&'static str, bool)> {
             _ => None,
         })
         .collect()
+}
+
+/// What the bars on the other screens leave out unless you say otherwise:
+/// there it's the apps and the widgets that are used.
+const OTHER_HIDES: &str = "start,search,tray,lang,quick,clock,notifs";
+
+fn other_hidden(st: &Settings) -> Vec<String> {
+    st.extra.get("bar_other_hide").map_or(OTHER_HIDES, String::as_str).split(',').filter(|s| !s.is_empty()).map(String::from).collect()
+}
+
+/// Is there a bar on the other screens?
+pub fn other_screens(st: &Settings) -> bool {
+    flag(st, "bar_screens", true)
+}
+
+/// Do the bars on the other screens show this (an item's key, or "@" and a
+/// widget's id)? Whether the main one does doesn't matter for an item.
+pub fn other_shows(st: &Settings, key: &str) -> bool {
+    !other_hidden(st).iter().any(|k| k == key)
+}
+
+pub fn other_toggle(st: &mut Settings, key: &str) {
+    let mut v = other_hidden(st);
+    match v.iter().position(|k| k == key) {
+        Some(i) => {
+            v.remove(i);
+        }
+        None => v.push(key.to_string()),
+    }
+    st.extra.insert("bar_other_hide".into(), v.join(","));
+}
+
+/// Is an item on any bar?
+pub fn anywhere(st: &Settings, key: &str) -> bool {
+    order(st).iter().any(|&(k, on)| k == key && on) || (other_screens(st) && other_shows(st, key))
 }
 
 /// Switch an item on or off.
@@ -564,8 +599,7 @@ pub fn faces(st: &Settings) -> Vec<Placed> {
     if !flag(st, "taskbar_on", false) {
         return Vec::new();
     }
-    let items = order(st);
-    let on = |key: &str| items.iter().any(|&(k, on)| k == key && on);
+    let on = |key: &str| anywhere(st, key);
     let mut v = placed(st);
     // The right end's language, Wi-Fi / sound / battery and clock.
     for (item, id, _) in SYS {
@@ -651,6 +685,33 @@ mod tests {
         assert_eq!(ids(&s), ["system:m"]);
         set_shown(&mut s, "search", false);
         assert!(!order(&s).iter().find(|x| x.0 == "search").unwrap().1);
+    }
+
+    #[test]
+    fn other_screens_have_their_own() {
+        let mut s = st();
+        assert!(other_shows(&s, "apps") && other_shows(&s, "@system"));
+        assert!(!other_shows(&s, "start") && !other_shows(&s, "notifs"));
+        other_toggle(&mut s, "start");
+        other_toggle(&mut s, "@system");
+        assert!(other_shows(&s, "start") && !other_shows(&s, "@system") && !other_shows(&s, "search"));
+        other_toggle(&mut s, "start");
+        assert!(!other_shows(&s, "start"));
+        // Off on the main bar, on on the others: the notch draws it.
+        s.extra.insert("taskbar_on".into(), "1".into());
+        set_shown(&mut s, "clock", false);
+        assert!(!faces(&s).iter().any(|f| f.id == "sys_clock"));
+        other_toggle(&mut s, "clock");
+        assert!(faces(&s).iter().any(|f| f.id == "sys_clock"));
+        s.extra.insert("bar_screens".into(), "0".into());
+        assert!(!faces(&s).iter().any(|f| f.id == "sys_clock"));
+        // Everything shown: kept as that, not as the default again.
+        for k in ["search", "tray", "lang", "quick", "notifs", "start", "@system"] {
+            if !other_shows(&s, k) {
+                other_toggle(&mut s, k);
+            }
+        }
+        assert!(other_shows(&s, "start") && other_shows(&s, "tray"));
     }
 
     #[test]

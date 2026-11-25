@@ -2,6 +2,22 @@
 
 Versions 0.1.x below were released before the Nookly name.
 
+## 0.8.0: A taskbar on every screen, recent files, progress and more
+
+**Taskbar**
+
+- **On every screen**: your other screens get a taskbar too, all in one small process. They show the apps and your widgets; **Settings > Taskbar > Other screens** has a switch for each thing there (Start, Search, hidden icons, the clock, every widget...), or for all of it.
+- **Recent files and tasks**: right-click an app for its recent files or folders and its own tasks (a private window, a new chat...). If recent files are off in Windows, they stay off here.
+- **Progress and badges** on app icons: downloads and copies fill a bar (red for an error, yellow when paused), and an app's own badge shows on its icon.
+- **Drag files onto apps**: rest on an app, or on a window in its pop-up, to bring it forward and go on into it; or let go to open the files with it.
+- **Type in widgets**: a click into a field in a widget's view (a new task, say) types there, and the notch stays closed.
+
+**Fixed**
+
+- While Nookly's hidden icons were on, apps couldn't report progress to any taskbar, Windows' own included.
+- Windows' own taskbar no longer flashes over Nookly's on a second screen.
+- "100%" was cut short on the CPU & memory widget, and Start's symbol was missing in Settings.
+
 ## 0.7.0: A fuller taskbar, and a much lighter notch
 
 **Taskbar**

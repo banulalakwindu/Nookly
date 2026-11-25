@@ -423,7 +423,7 @@ impl Module for Monitor {
                 let lw = if size == Size::M { 22.0 } else { 26.0 };
                 ui.text(label, row.cut_left(lw, 4.0), 8.5, tint, Weight::Bold, Align::Left);
                 let pct = format!("{:.0}%", now * 100.0);
-                ui.text(&pct, row.cut_right(if size == Size::M { 26.0 } else { 30.0 }, 4.0), 10.5, col::TEXT, Weight::Bold, Align::Right);
+                ui.text(&pct, row.cut_right(if size == Size::M { 33.0 } else { 34.0 }, 3.0), 10.5, col::TEXT, Weight::Bold, Align::Right);
                 if size == Size::W {
                     crate::faces::bar(ui, Rect::new(row.r() - 40.0, row.cy() - 1.5, 40.0, 3.0), now, tint);
                     row.cut_right(46.0, 0.0);

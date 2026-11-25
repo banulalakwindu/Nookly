@@ -13,13 +13,19 @@
 //!   apps.rs    open and pinned apps, collections, their icons
 //!   bubble.rs  pop-ups that grow out of the bar like the notch
 //!   menu.rs    right-click menus (bubbles too)
+//!   jump.rs    an app's recent files and tasks, for its menu
+//!   band.rs    progress and badges apps report
+//!   drop.rs    files dragged onto the bar
 //!   peek.rs    showing a window while you rest on it in a pop-up
 //!   unread.rs  the number on the bell
 //!   layout.rs  fitting the bar to the screen (pure, tested)
 
 mod apps;
+mod band;
 mod bubble;
+mod drop;
 mod items;
+mod jump;
 mod layout;
 mod menu;
 mod peek;
@@ -48,6 +54,8 @@ use windows::core::*;
 
 /// Window class; the notch finds the bar by it.
 pub const CLASS: PCWSTR = w!("NooklyTaskbar");
+/// The bars on the other screens (the notch deals with the main one).
+pub const MORE_CLASS: PCWSTR = w!("NooklyTaskbarMore");
 /// Bar height (DIPs at 100%), corner radius.
 const BAR_H: f32 = 48.0;
 const RAD: f32 = 16.0;
@@ -73,12 +81,40 @@ const WM_APPS_CHANGED: u32 = WM_APP + 3;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
 thread_local! {
-    static BAR: std::cell::RefCell<Option<Bar>> = const { std::cell::RefCell::new(None) };
+    /// A bar for every screen; the first is the main screen's.
+    static BARS: std::cell::RefCell<Vec<Bar>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// What the notch was last told (see `tell_shown`).
+    static TOLD_OUT: std::cell::Cell<(bool, u64)> = const { std::cell::Cell::new((true, u64::MAX)) };
 }
 
+/// The main screen's bar.
 fn with_bar<R>(f: impl FnOnce(&mut Bar) -> R) -> Option<R> {
-    BAR.with(|b| b.try_borrow_mut().ok().and_then(|mut b| b.as_mut().map(f)))
+    on_bar(Some(0), f)
 }
+
+/// The bar at this place.
+pub fn on_bar<R>(k: Option<usize>, f: impl FnOnce(&mut Bar) -> R) -> Option<R> {
+    BARS.with(|b| b.try_borrow_mut().ok().and_then(|mut b| b.get_mut(k?).map(f)))
+}
+
+/// Every bar.
+fn each_bar(mut f: impl FnMut(&mut Bar)) {
+    BARS.with(|b| {
+        if let Ok(mut b) = b.try_borrow_mut() {
+            b.iter_mut().for_each(&mut f);
+        }
+    });
+}
+
+/// Which bar a window belongs to (its own, or one of its pop-ups).
+pub fn bar_of(hwnd: HWND) -> Option<usize> {
+    BARS.with(|b| b.try_borrow().ok().and_then(|b| b.iter().position(|x| x.hwnd == hwnd || x.is_pop(hwnd))))
+}
+
+/// The screens changed, or which of them have a bar.
+static SCREENS_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The apps' order was changed on one of the bars.
+pub static ORDER_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// A spring toward a target.
 #[derive(Clone, Copy, Default)]
@@ -234,6 +270,23 @@ impl Icons {
         self.map.insert(k, (g.generation, b.clone()));
         Some(b)
     }
+
+    /// A badge (its version makes it new).
+    pub fn badge(&mut self, g: &mut Gfx, ver: u32, icon: &apps::Icon) -> Option<ID2D1Bitmap> {
+        let k = format!("badge{ver}#{}", g.id);
+        if let Some((made, b)) = self.map.get(&k) {
+            if *made == g.generation {
+                return Some(b.clone());
+            }
+        }
+        let b = g.make_bitmap(icon.0, icon.0, &icon.1)?;
+        // (Few at a time: the older ones go.)
+        if self.map.keys().filter(|k| k.starts_with("badge")).count() > 24 {
+            self.map.retain(|k, _| !k.starts_with("badge"));
+        }
+        self.map.insert(k, (g.generation, b.clone()));
+        Some(b)
+    }
 }
 
 /// The widget faces the notch drew (see surfaces.rs), and their bitmaps on
@@ -309,6 +362,14 @@ fn want_faces(glass_light: bool, scale: f32) {
 
 pub struct Bar {
     pub hwnd: HWND,
+    /// The screen it's on (its device name; empty: the main one, whichever
+    /// that is).
+    device: String,
+    /// What can be seen of it (out, and which widgets).
+    out_seen: (bool, u64),
+    /// Files are being dragged over this (a hit id), since when, and it has
+    /// been acted on.
+    file_over: Option<(u32, Instant, bool)>,
     /// The pop-up bubble over the bar, and the windows bubble grown out of
     /// its grid (the "more apps" tile's or a collection's).
     pop_b: Option<bubble::Bubble>,
@@ -390,8 +451,6 @@ pub struct Bar {
     /// Start, Search or the notification centre is open (the Windows key):
     /// an auto-hidden bar comes out with it, as Windows' own does.
     shell_open: bool,
-    /// What the notch was last told: the bar is out.
-    told_out: (bool, u64),
     /// The strip's window while it's drawn (things half out of it fade).
     pub strip_clip: Option<Rect>,
     /// Something it shows changed: draw a frame (else, at rest, it draws
@@ -452,14 +511,17 @@ impl Bar {
         self.settings = Settings::load();
         time::H12.store(self.settings.clock12, std::sync::atomic::Ordering::Relaxed);
         time::SECONDS.store(false, std::sync::atomic::Ordering::Relaxed);
-        self.order = items::order(&self.settings);
+        self.order = if self.is_main() { items::order(&self.settings) } else { items::other_order(&self.settings) };
         self.placed = nookly_core::barcfg::placed(&self.settings);
+        if !self.is_main() {
+            return;
+        }
         self.apps.scan(&self.settings);
         if !self.hwnd.is_invalid() {
-            unread::enable(self.hwnd, self.order.iter().any(|x| x.0 == items::Item::Notifs));
+            unread::enable(self.hwnd, nookly_core::barcfg::anywhere(&self.settings, "notifs"));
         }
         // The hidden icons: Nookly's own tray, while the item is on.
-        if self.order.iter().any(|x| x.0 == items::Item::Tray) {
+        if nookly_core::barcfg::anywhere(&self.settings, "tray") {
             if !self.hwnd.is_invalid() {
                 tray::start(self.hwnd);
             }
@@ -468,12 +530,30 @@ impl Bar {
         }
     }
 
-    /// Size and place the window over the main screen's bottom edge, and
+    fn is_main(&self) -> bool {
+        self.device.is_empty()
+    }
+
+    /// Its screen.
+    fn monitor(&self) -> HMONITOR {
+        screens().into_iter().find(|s| !self.is_main() && s.1 == self.device).map_or_else(|| unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) }, |s| s.0)
+    }
+
+    /// Where its screen's usable area ends.
+    fn work_bottom(&self) -> i32 {
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        unsafe {
+            let _ = GetMonitorInfoW(self.monitor(), &mut mi);
+        }
+        mi.rcWork.bottom
+    }
+
+    /// Size and place the window over its screen's bottom edge, and
     /// reserve the bar's strip (fixed mode) so maximized windows stop above it.
     fn place(&mut self) {
         self.dirty = true;
         unsafe {
-            let hmon = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
+            let hmon = self.monitor();
             let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
             let _ = GetMonitorInfoW(hmon, &mut mi);
             self.mon = mi.rcMonitor;
@@ -483,7 +563,9 @@ impl Bar {
             if (scale - self.scale).abs() > 0.001 {
                 self.icons = Icons::default();
                 self.apps.forget_icons();
-                want_faces(self.glass_light, scale);
+                if self.is_main() {
+                    want_faces(self.glass_light, scale);
+                }
             }
             self.scale = scale;
         }
@@ -674,6 +756,9 @@ impl Bar {
         let g = bubble::Goal { cx, w, h, base: self.content().y, from_w: items::TILE };
         if self.pop_b.is_none() {
             self.pop_b = bubble::Bubble::new();
+            if let Some(b) = &self.pop_b {
+                drop::register(b.hwnd);
+            }
         }
         if let Some(b) = self.pop_b.as_mut() {
             if b.goal != Some(g) {
@@ -691,6 +776,9 @@ impl Bar {
         let w = w.min(self.max_bar_w() - 4.0 * HOLD);
         if self.sub_b.is_none() {
             self.sub_b = bubble::Bubble::new();
+            if let Some(b) = &self.sub_b {
+                drop::register(b.hwnd);
+            }
         }
         if let Some(b) = self.sub_b.as_mut() {
             b.open(bubble::Goal { cx: cell_x, w, h, base: 0.0, from_w: 60.0 });
@@ -760,7 +848,7 @@ impl Bar {
                 if d.rc != self.appbar_rc {
                     self.appbar_rc = d.rc;
                     let r = tray::step_aside(|| SHAppBarMessage(ABM_SETPOS, &mut d));
-                    dbg_log(&format!("appbar set: {r} {:?}, area {}", d.rc, shell::work_bottom()));
+                    dbg_log(&format!("appbar set: {r} {:?}, area {}", d.rc, self.work_bottom()));
                 }
             }
         }
@@ -773,7 +861,7 @@ impl Bar {
             return;
         }
         self.strip_at = Instant::now();
-        if shell::work_bottom() <= self.appbar_rc.top {
+        if self.work_bottom() <= self.appbar_rc.top {
             self.strip_tries = 0;
         } else if self.strip_tries < 5 {
             self.strip_tries += 1;
@@ -900,15 +988,7 @@ impl Bar {
                 }
             }
         }
-        if (out, seen) != self.told_out {
-            self.told_out = (out, seen);
-            unsafe {
-                if let Ok(notch) = FindWindowW(w!("NooklyNotch"), PCWSTR::null()) {
-                    let msg = RegisterWindowMessageW(nookly_core::surfaces::SHOWN_MSG);
-                    let _ = PostMessageW(Some(notch), msg, WPARAM(out as usize), LPARAM(seen as isize));
-                }
-            }
-        }
+        self.out_seen = (out, if out { seen } else { 0 });
         let full = self.rest_w();
         // Hiding, it narrows as it sinks into the edge (like the notch
         // closing); coming out, it grows back with a bounce.
@@ -980,7 +1060,8 @@ impl Bar {
         }
         let mut waiting = false;
         self.step_tray_hold();
-        let held = self.tray_hold.is_some();
+        // (Typing in a widget's view: it stays, wherever the mouse is.)
+        let held = self.tray_hold.is_some() || self.typing();
         let in_menu = matches!(self.popup, Some(Pop::Menu(_)));
         if in_menu {
             self.set_menu_keys(self.inside || in_pop);
@@ -1168,7 +1249,7 @@ impl Bar {
             } else if lum < 0.5 {
                 self.glass_light = false;
             }
-            if was != self.glass_light {
+            if was != self.glass_light && self.is_main() {
                 want_faces(self.glass_light, self.scale);
             }
             self.backdrop = self.g().make_bitmap(w, h, &px);
@@ -1422,6 +1503,12 @@ impl Bar {
         unsafe {
             if let Ok(notch) = FindWindowW(w!("NooklyNotch"), PCWSTR::null()) {
                 let msg = RegisterWindowMessageW(nookly_core::surfaces::INPUT_MSG);
+                // A click may be into a text field: the notch takes the keys.
+                if what == nookly_core::surfaces::INPUT_UP {
+                    let mut pid = 0u32;
+                    GetWindowThreadProcessId(notch, Some(&mut pid));
+                    let _ = AllowSetForegroundWindow(pid);
+                }
                 let _ = PostMessageW(Some(notch), msg, WPARAM(what | ((wheel as u16 as usize) << 16)), LPARAM(lx | (ly << 16)));
             }
         }
@@ -1762,15 +1849,32 @@ impl Bar {
     }
 
     /// A window flashed (the shell told us).
-    fn on_flash(&mut self, h: HWND) {
+    fn on_flash(&mut self, h: HWND) -> bool {
         // (It may be new: a permission prompt flashes as it comes.)
         if !self.apps.list.iter().any(|a| a.windows.contains(&h)) {
             let st = self.settings.clone();
             self.apps.scan(&st);
         }
-        if self.apps.flashed(h) {
+        let new = self.apps.flashed(h);
+        if new {
             self.attention_at = Some(Instant::now());
             self.dirty = true;
+        }
+        new
+    }
+
+    /// The app list was read again (`before`: its signature until then).
+    fn apps_read(&mut self, before: u64) {
+        if self.apps.signature() != before || self.popup.is_some() {
+            self.dirty = true;
+        }
+        let gone = match self.popup {
+            Some(Pop::App(i, _)) => i >= self.apps.list.len(),
+            Some(Pop::Group(g, _)) => g >= self.apps.groups.len(),
+            _ => false,
+        };
+        if gone {
+            self.set_pop(None);
         }
     }
 
@@ -1797,6 +1901,117 @@ impl Bar {
         }
     }
 
+    /// A widget's view is open and the keys go to it (the notch, which
+    /// draws it, is in front).
+    fn typing(&self) -> bool {
+        if !matches!(self.popup, Some(Pop::Widget(..))) {
+            return false;
+        }
+        unsafe {
+            let mut c = [0u16; 32];
+            let n = GetClassNameW(GetForegroundWindow(), &mut c);
+            String::from_utf16_lossy(&c[..n.max(0) as usize]) == "NooklyNotch"
+        }
+    }
+
+    /// Files are dragged over the bar or one of its pop-ups, at this point
+    /// of the screen (None: they left). Resting on an app brings it forward,
+    /// on a window in a pop-up that window. True where letting go opens
+    /// them with an app.
+    pub fn file_drag(&mut self, at: Option<(i32, i32)>, over: bool) -> bool {
+        self.dirty = true;
+        let Some((sx, sy)) = at else {
+            self.file_over = None;
+            self.inside = false;
+            self.mouse = (-1e4, -1e4);
+            self.left_at = Some(Instant::now());
+            return false;
+        };
+        let top = self.mon.bottom - (BAR_H * self.scale).ceil() as i32;
+        let (x, y) = ((sx - self.mon.left) as f32 / self.scale, (sy - top) as f32 / self.scale);
+        self.mouse = (x, y);
+        self.inside = over;
+        self.left_at = if over { None } else { Some(Instant::now()) };
+        let hit = self.hit_at(x, y);
+        match (hit, self.file_over) {
+            (Some(i), Some((o, since, done))) if i == o => {
+                if over && !done && since.elapsed().as_secs_f32() > 0.6 {
+                    self.file_over = Some((i, since, true));
+                    self.file_rest(i, x);
+                }
+            }
+            (Some(i), _) => self.file_over = Some((i, Instant::now(), false)),
+            (None, _) => self.file_over = None,
+        }
+        hit.and_then(|i| self.drop_app(i)).is_some()
+    }
+
+    /// The app that opens what's let go here.
+    fn drop_app(&self, id: u32) -> Option<apps::App> {
+        let k = match id {
+            i if (items::APP..items::APP + 900).contains(&i) => i - items::APP,
+            i if (items::POP_APP..items::POP_APP + 1000).contains(&i) => i - items::POP_APP,
+            _ => return None,
+        };
+        self.apps.list.get(k as usize).filter(|a| apps::opens_files(a)).cloned()
+    }
+
+    fn file_rest(&mut self, id: u32, x: f32) {
+        match id {
+            i if (items::APP..items::APP + 900).contains(&i) => {
+                let k = (i - items::APP) as usize;
+                match self.apps.list.get(k).map(|a| a.windows.clone()).unwrap_or_default().as_slice() {
+                    [] => {}
+                    [h] => {
+                        apps::activate(*h);
+                        self.hover_block = Some(id);
+                        self.set_pop(None);
+                    }
+                    _ => {
+                        let x = self.hits.iter().find(|h| h.id == id).map_or(x, |h| h.rect.cx());
+                        self.set_pop(Some(Pop::App(k, x)));
+                    }
+                }
+            }
+            i if (items::POP_ROW..items::POP_OPEN).contains(&i) || (items::SUB_ROW..items::SUB_OPEN).contains(&i) => {
+                if let Some(h) = items::pop_window(self, i) {
+                    apps::activate(h);
+                    self.end_peek();
+                }
+            }
+            i if (items::POP_APP..items::POP_APP + 1000).contains(&i) => {
+                if let Some(h) = items::grid_app(self, i).and_then(|a| a.front.or(a.windows.first().copied())) {
+                    apps::activate(h);
+                }
+            }
+            items::OVERFLOW => self.set_pop(Some(Pop::Overflow(x))),
+            i if (items::GROUP..items::GROUP + 100).contains(&i) => self.set_pop(Some(Pop::Group((i - items::GROUP) as usize, x))),
+            _ => {}
+        }
+    }
+
+    /// Files let go at this point of the screen.
+    pub fn file_drop(&mut self, at: (i32, i32), files: &[String]) {
+        let app = {
+            self.file_drag(Some(at), false);
+            self.hit_at(self.mouse.0, self.mouse.1).and_then(|i| self.drop_app(i))
+        };
+        self.file_drag(None, false);
+        if let Some(a) = app.filter(|_| !files.is_empty()) {
+            self.set_pop(None);
+            apps::open_with(&a, files);
+        }
+    }
+
+    /// The jump list for the open menu has been read.
+    fn on_jump(&mut self) {
+        let Some(key) = self.menu_app() else { return };
+        if let (Some(list), Some(m)) = (jump::take(&key), self.menu.as_mut()) {
+            m.add_jump(list);
+            self.dirty = true;
+        }
+    }
+
     /// When to wake next with nothing moving: the clock's next minute,
     /// the glass probe, and the auto-hide reveal.
     fn idle_wait(&self) -> u32 {
@@ -1807,6 +2022,9 @@ impl Bar {
         }
         if self.tray_hold.is_some() {
             ms = ms.min(120);
+        }
+        if self.shown() > 0.5 && band::busy() {
+            ms = ms.min(66);
         }
         // An app asking to be looked at keeps an auto-hidden bar out a while.
         if self.autohide() && self.attention_at.is_some_and(|t| t.elapsed().as_secs_f32() < ATTENTION_BEATS + 0.5) {
@@ -1942,11 +2160,12 @@ static BAR_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let tc = TASKBAR_CREATED.load(std::sync::atomic::Ordering::Relaxed);
     let sc = SETTINGS_CHANGED.load(std::sync::atomic::Ordering::Relaxed);
+    let me = bar_of(hwnd);
     if msg == tc && tc != 0 {
         // Explorer restarted: its taskbar is back. Hide it again, re-reserve.
         shell::hide_windows_taskbar();
         hook_explorer();
-        with_bar(|b| {
+        on_bar(me, |b| {
             b.appbar = false;
             // The new Explorer knows no strip: set it again, even unchanged.
             b.appbar_rc = RECT::default();
@@ -1957,16 +2176,20 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
     if msg == SHELL_HOOK.load(std::sync::atomic::Ordering::Relaxed) && msg != 0 {
         // HSHELL_FLASH: a window wants to be looked at.
         if wp.0 as u32 & 0xFFFF == 0x8006 {
-            with_bar(|b| b.on_flash(HWND(lp.0 as *mut _)));
+            flashed(HWND(lp.0 as *mut _));
         }
         return LRESULT(0);
     }
-    if msg == unread::WM_UNREAD {
-        with_bar(|b| b.dirty = true);
+    if msg == unread::WM_UNREAD || msg == band::WM_BAND {
+        each_bar(|b| b.dirty = true);
+        return LRESULT(0);
+    }
+    if msg == jump::WM_JUMP {
+        on_bar(me, |b| b.on_jump());
         return LRESULT(0);
     }
     if msg == tray::WM_TRAY_CHANGED {
-        with_bar(|b| {
+        each_bar(|b| {
             b.dirty = true;
             if let Some(p @ Pop::Tray(_)) = b.popup {
                 b.aim_pop(p);
@@ -1976,7 +2199,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
     }
     let xc = FACES_CHANGED.load(std::sync::atomic::Ordering::Relaxed);
     if msg == xc && xc != 0 {
-        with_bar(|b| {
+        each_bar(|b| {
             if b.faces.reload() {
                 b.dirty = true;
                 if let Some(p @ Pop::Widget(..)) = b.popup {
@@ -1988,7 +2211,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
     }
     let fc = FEED_CHANGED.load(std::sync::atomic::Ordering::Relaxed);
     if msg == fc && fc != 0 {
-        with_bar(|b| {
+        each_bar(|b| {
             if let Some(f) = nookly_core::feed::read() {
                 if f != b.feed {
                     b.feed = f;
@@ -1999,15 +2222,16 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         return LRESULT(0);
     }
     if msg == sc && sc != 0 {
-        with_bar(|b| {
+        each_bar(|b| {
             b.load_settings();
             b.place();
         });
+        SCREENS_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
         return LRESULT(0);
     }
     match msg {
         WM_MOUSEMOVE => {
-            with_bar(|b| {
+            on_bar(me, |b| {
                 let (x, y) = b.to_bar(hwnd, lp);
                 if b.is_pop(hwnd) {
                     b.on_pop_move(hwnd, x, y);
@@ -2019,11 +2243,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             LRESULT(0)
         }
         WM_MOUSELEAVE => {
-            with_bar(|b| if b.is_pop(hwnd) { b.on_pop_leave(hwnd) } else { b.on_leave() });
+            on_bar(me, |b| if b.is_pop(hwnd) { b.on_pop_leave(hwnd) } else { b.on_leave() });
             LRESULT(0)
         }
         WM_LBUTTONDOWN => {
-            with_bar(|b| {
+            on_bar(me, |b| {
                 let (x, y) = b.to_bar(hwnd, lp);
                 if b.is_pop(hwnd) {
                     b.down = b.hit_at(x, y);
@@ -2037,21 +2261,21 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             LRESULT(0)
         }
         WM_LBUTTONUP => {
-            with_bar(|b| {
+            on_bar(me, |b| {
                 let (x, y) = b.to_bar(hwnd, lp);
                 b.on_up(x, y);
             });
             LRESULT(0)
         }
         WM_MBUTTONUP => {
-            with_bar(|b| {
+            on_bar(me, |b| {
                 let (x, y) = b.to_bar(hwnd, lp);
                 b.on_middle(x, y);
             });
             LRESULT(0)
         }
         WM_RBUTTONUP => {
-            with_bar(|b| {
+            on_bar(me, |b| {
                 let (x, y) = b.to_bar(hwnd, lp);
                 b.on_right(x, y);
             });
@@ -2059,7 +2283,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         }
         // Something else took the mouse in the middle of a drag: it's off.
         WM_CAPTURECHANGED => {
-            with_bar(|b| {
+            on_bar(me, |b| {
                 if b.drag.take().is_some() {
                     b.down = None;
                     b.dirty = true;
@@ -2068,12 +2292,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             LRESULT(0)
         }
         WM_HOTKEY => {
-            with_bar(|b| menu::key(b, wp.0 as i32));
+            on_bar(me, |b| menu::key(b, wp.0 as i32));
             LRESULT(0)
         }
         WM_INPUT => {
             if menu::pressed(lp) {
-                with_bar(|b| b.pressed_anywhere());
+                on_bar(me, |b| b.pressed_anywhere());
             }
             unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
         }
@@ -2083,11 +2307,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             let d = ((wp.0 >> 16) & 0xFFFF) as i16 as f32 / 120.0;
             let d = if msg == WM_MOUSEHWHEEL { -d } else { d };
             let raw = ((wp.0 >> 16) & 0xFFFF) as i16;
-            let fwd = with_bar(|b| msg == WM_MOUSEWHEEL && b.forward(nookly_core::surfaces::INPUT_WHEEL, b.mouse.0, b.mouse.1, raw));
+            let fwd = on_bar(me, |b| msg == WM_MOUSEWHEEL && b.forward(nookly_core::surfaces::INPUT_WHEEL, b.mouse.0, b.mouse.1, raw));
             if fwd == Some(true) {
                 return LRESULT(0);
             }
-            with_bar(|b| {
+            on_bar(me, |b| {
                 if b.plan.as_ref().is_some_and(|p| p.strip.is_some()) {
                     b.scroll_to -= d * 64.0;
                     b.dirty = true;
@@ -2098,9 +2322,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_APPBAR => {
             if wp.0 as u32 == ABN_POSCHANGED {
-                with_bar(|b| b.sync_appbar());
+                on_bar(me, |b| b.sync_appbar());
             } else if wp.0 as u32 == ABN_FULLSCREENAPP {
-                with_bar(|b| b.check_fullscreen());
+                on_bar(me, |b| b.check_fullscreen());
             }
             LRESULT(0)
         }
@@ -2113,15 +2337,17 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         // answering it would loop.)
         WM_SETTINGCHANGE if wp.0 as u32 == SPI_SETWORKAREA.0 => LRESULT(0),
         WM_DISPLAYCHANGE | WM_DPICHANGED | WM_SETTINGCHANGE => {
-            if !with_bar(|b| b.is_pop(hwnd)).unwrap_or(false) {
-                with_bar(|b| b.place());
+            if !on_bar(me, |b| b.is_pop(hwnd)).unwrap_or(false) {
+                on_bar(me, |b| b.place());
+                SCREENS_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             LRESULT(0)
         }
-        WM_CLOSE if !with_bar(|b| b.is_pop(hwnd)).unwrap_or(false) => {
+        WM_CLOSE if me == Some(0) && !on_bar(me, |b| b.is_pop(hwnd)).unwrap_or(false) => {
             quit();
             LRESULT(0)
         }
+        WM_CLOSE => LRESULT(0),
         _ => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
     }
 }
@@ -2130,7 +2356,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
 fn quit() {
     crumb("quit: appbar");
     peek::stop();
-    with_bar(|b| b.remove_appbar());
+    each_bar(|b| b.remove_appbar());
     shell::restore_windows_taskbar();
     unsafe {
         PostQuitMessage(0);
@@ -2197,9 +2423,11 @@ unsafe extern "system" fn on_window(_: HWINEVENTHOOK, ev: u32, hwnd: HWND, id_ob
     if ev == EVENT_SYSTEM_FOREGROUND {
         // Start, Search or Windows' panels in front: an auto-hidden bar
         // comes out with them.
-        let shell = is_shell(hwnd);
-        with_bar(|b| {
+        let (shell, screen) = unsafe { (is_shell(hwnd), MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY)) };
+        each_bar(|b| {
             b.check_fullscreen();
+            // (The bar of the screen it opens on.)
+            let shell = shell && b.monitor() == screen;
             if b.shell_open != shell {
                 b.shell_open = shell;
                 b.dirty = true;
@@ -2212,11 +2440,212 @@ unsafe extern "system" fn on_window(_: HWINEVENTHOOK, ev: u32, hwnd: HWND, id_ob
     }
     // Titles show only in pop-ups: a renamed window (a page title, a
     // ticking timer) needs nothing while none is open.
-    if ev == EVENT_OBJECT_NAMECHANGE && !with_bar(|b| b.popup.is_some()).unwrap_or(true) {
-        return;
+    if ev == EVENT_OBJECT_NAMECHANGE {
+        let mut open = false;
+        each_bar(|b| open |= b.popup.is_some());
+        if !open {
+            return;
+        }
     }
     if !APPS_DIRTY.swap(true, std::sync::atomic::Ordering::Relaxed) {
         post_bar(WM_APPS_CHANGED);
+    }
+}
+
+/// A window flashed (the shell told us): every bar shows it.
+fn flashed(h: HWND) {
+    BARS.with(|b| {
+        let Ok(mut b) = b.try_borrow_mut() else { return };
+        let Some((main, more)) = b.split_first_mut() else { return };
+        if main.on_flash(h) {
+            for x in more {
+                x.apps.attention = main.apps.attention.clone();
+                x.attention_at = main.attention_at;
+                x.dirty = true;
+            }
+        }
+    });
+}
+
+/// The screens: (handle, device name, the main one).
+fn screens() -> Vec<(HMONITOR, String, bool)> {
+    unsafe extern "system" fn each(m: HMONITOR, _: HDC, _: *mut RECT, l: LPARAM) -> BOOL {
+        unsafe {
+            let v = &mut *(l.0 as *mut Vec<(HMONITOR, String, bool)>);
+            let mut mi = MONITORINFOEXW::default();
+            mi.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+            if GetMonitorInfoW(m, &mut mi as *mut _ as *mut MONITORINFO).as_bool() {
+                let n = mi.szDevice.iter().position(|&c| c == 0).unwrap_or(0);
+                v.push((m, String::from_utf16_lossy(&mi.szDevice[..n]), mi.monitorInfo.dwFlags & 1 != 0));
+            }
+            TRUE
+        }
+    }
+    let mut v: Vec<(HMONITOR, String, bool)> = Vec::new();
+    unsafe {
+        let _ = EnumDisplayMonitors(None, None, Some(each), LPARAM(&mut v as *mut _ as isize));
+    }
+    v
+}
+
+/// A bar for every other screen (Settings > Taskbar > On every screen), as
+/// screens come and go.
+fn sync_screens() {
+    let on = with_bar(|b| nookly_core::barcfg::other_screens(&b.settings)).unwrap_or(false);
+    let want: Vec<String> = if on { screens().into_iter().filter(|s| !s.2).map(|s| s.1).collect() } else { Vec::new() };
+    let mut gone = Vec::new();
+    BARS.with(|b| {
+        if let Ok(mut b) = b.try_borrow_mut() {
+            let mut k = 1;
+            while k < b.len() {
+                if want.contains(&b[k].device) {
+                    k += 1;
+                } else {
+                    gone.push(b.remove(k));
+                }
+            }
+        }
+    });
+    for mut b in gone {
+        b.end_peek();
+        b.remove_appbar();
+        unsafe {
+            for x in [b.pop_b.take(), b.sub_b.take()].into_iter().flatten() {
+                let _ = DestroyWindow(x.hwnd);
+            }
+            let _ = windows::Win32::System::Ole::RevokeDragDrop(b.hwnd);
+            let _ = DestroyWindow(b.hwnd);
+        }
+    }
+    let mut have = Vec::new();
+    each_bar(|b| have.push(b.device.clone()));
+    for d in want {
+        if !have.contains(&d) {
+            crumb(format!("bar on {d}"));
+            if let Ok(mut b) = Bar::new(&d) {
+                b.load_settings();
+                with_bar(|m| b.apps.copy_from(&m.apps));
+                b.faces.reload();
+                b.place();
+                b.check_fullscreen();
+                let hwnd = b.hwnd;
+                BARS.with(|v| {
+                    if let Ok(mut v) = v.try_borrow_mut() {
+                        v.push(b);
+                    }
+                });
+                unsafe {
+                    let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                }
+                drop::register(hwnd);
+            }
+        }
+    }
+}
+
+/// Tell the notch what can be seen of the taskbar (on any screen).
+fn tell_shown() {
+    let mut now = (false, 0u64);
+    each_bar(|b| now = (now.0 || b.out_seen.0, now.1 | b.out_seen.1));
+    if TOLD_OUT.replace(now) != now {
+        unsafe {
+            if let Ok(notch) = FindWindowW(w!("NooklyNotch"), PCWSTR::null()) {
+                let msg = RegisterWindowMessageW(nookly_core::surfaces::SHOWN_MSG);
+                let _ = PostMessageW(Some(notch), msg, WPARAM(now.0 as usize), LPARAM(now.1 as isize));
+            }
+        }
+    }
+}
+
+impl Bar {
+    /// A bar on a screen (its device name; empty: the main one).
+    fn new(device: &str) -> Result<Bar> {
+        unsafe {
+            let hinst = GetModuleHandleW(None)?;
+            let hwnd = CreateWindowExW(
+                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                if device.is_empty() { CLASS } else { MORE_CLASS },
+                w!("Nookly Taskbar"),
+                WS_POPUP,
+                0,
+                0,
+                100,
+                100,
+                None,
+                None,
+                Some(hinst.into()),
+                None,
+            )?;
+            shell::keep_in_peek(hwnd);
+            let gfx = Gfx::new(10, 10)?;
+            let now = Instant::now();
+            Ok(Bar {
+                hwnd,
+                device: device.to_string(),
+                out_seen: (false, 0),
+                file_over: None,
+                pop_b: None,
+                sub_b: None,
+                sub_app: None,
+                sub_hover: None,
+                sub_leave: None,
+                thumb_slots: Vec::new(),
+                hover_block: None,
+                drag: None,
+                menu: None,
+                peek_hover: None,
+                peeked: None,
+                peek_left: now,
+                menu_keys: false,
+                tray_hold: None,
+                attention_at: None,
+                appbar_rc: RECT::default(),
+                strip_at: now,
+                strip_tries: 0,
+                gfx: Some(gfx),
+                settings: Settings::load(),
+                mon: RECT::default(),
+                scale: 1.0,
+                w: 100.0,
+                h: 100.0,
+                hits: Vec::new(),
+                mouse: (-1e4, -1e4),
+                inside: false,
+                down: None,
+                width: Spring::default(),
+                depth: Spring::default(),
+                last_step: now,
+                start: now,
+                left_at: None,
+                fullscreen: false,
+                appbar: false,
+                backdrop: None,
+                backdrop_gen: 0,
+                glass_light: false,
+                probe: None,
+                next_probe: now,
+                next_grab: now,
+                order: Vec::new(),
+                placed: Vec::new(),
+                apps: apps::Apps::new(),
+                icons: Icons::default(),
+                feed: nookly_core::feed::read().unwrap_or_default(),
+                faces: Faces::default(),
+                scroll: 0.0,
+                scroll_to: 0.0,
+                shell_open: false,
+                strip_clip: None,
+                dirty: true,
+                drawn_minute: 99,
+                plan_fit: layout::Fit { shown: 0, overflow: false },
+                plan: None,
+                popup: None,
+                pop_since: now,
+                hover_hit: None,
+                hover_since: now,
+                pop_leave: None,
+            })
+        }
     }
 }
 
@@ -2233,96 +2662,20 @@ fn create() -> Result<()> {
         };
         RegisterClassExW(&wc);
         RegisterClassExW(&WNDCLASSEXW { lpszClassName: bubble::CLASS, ..wc });
-        let hwnd = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-            CLASS,
-            w!("Nookly Taskbar"),
-            WS_POPUP,
-            0,
-            0,
-            100,
-            100,
-            None,
-            None,
-            Some(hinst.into()),
-            None,
-        )?;
+        RegisterClassExW(&WNDCLASSEXW { lpszClassName: MORE_CLASS, ..wc });
+        let mut bar = Bar::new("")?;
+        let hwnd = bar.hwnd;
         BAR_HWND.store(hwnd.0 as isize, std::sync::atomic::Ordering::Relaxed);
-        shell::keep_in_peek(hwnd);
         SHELL_HOOK.store(RegisterWindowMessageW(w!("SHELLHOOK")), std::sync::atomic::Ordering::Relaxed);
         let _ = RegisterShellHookWindow(hwnd);
-        let gfx = Gfx::new(10, 10)?;
-        let now = Instant::now();
-        let mut bar = Bar {
-            hwnd,
-            pop_b: None,
-            sub_b: None,
-            sub_app: None,
-            sub_hover: None,
-            sub_leave: None,
-            thumb_slots: Vec::new(),
-            hover_block: None,
-            drag: None,
-            menu: None,
-            peek_hover: None,
-            peeked: None,
-            peek_left: now,
-            menu_keys: false,
-            tray_hold: None,
-            attention_at: None,
-            appbar_rc: RECT::default(),
-            strip_at: now,
-            strip_tries: 0,
-            gfx: Some(gfx),
-            settings: Settings::load(),
-            mon: RECT::default(),
-            scale: 1.0,
-            w: 100.0,
-            h: 100.0,
-            hits: Vec::new(),
-            mouse: (-1e4, -1e4),
-            inside: false,
-            down: None,
-            width: Spring::default(),
-            depth: Spring::default(),
-            last_step: now,
-            start: now,
-            left_at: None,
-            fullscreen: false,
-            appbar: false,
-            backdrop: None,
-            backdrop_gen: 0,
-            glass_light: false,
-            probe: None,
-            next_probe: now,
-            next_grab: now,
-            order: Vec::new(),
-            placed: Vec::new(),
-            apps: apps::Apps::new(),
-            icons: Icons::default(),
-            feed: nookly_core::feed::read().unwrap_or_default(),
-            faces: Faces::default(),
-            scroll: 0.0,
-            scroll_to: 0.0,
-            shell_open: false,
-            told_out: (true, u64::MAX),
-            strip_clip: None,
-            dirty: true,
-            drawn_minute: 99,
-            plan_fit: layout::Fit { shown: 0, overflow: false },
-            plan: None,
-            popup: None,
-            pop_since: now,
-            hover_hit: None,
-            hover_since: now,
-            pop_leave: None,
-        };
         bar.load_settings();
         shell::hide_windows_taskbar();
         bar.place();
         bar.check_fullscreen();
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-        BAR.with(|b| *b.borrow_mut() = Some(bar));
+        BARS.with(|b| b.borrow_mut().push(bar));
+        drop::register(hwnd);
+        SCREENS_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
         hook_explorer();
         let flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
         SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, Some(on_window), 0, 0, flags);
@@ -2349,53 +2702,61 @@ fn run_loop() {
                 DispatchMessageW(&msg);
             }
         }
+        if SCREENS_DIRTY.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            shell::keep_hidden();
+            sync_screens();
+        }
         // Window events come in bursts: read the list at most every 50 ms.
-        if APPS_DIRTY.load(std::sync::atomic::Ordering::Relaxed) && last_scan.elapsed().as_millis() >= 50 {
+        // (The main bar reads it, the others take it over.)
+        let order = ORDER_DIRTY.swap(false, std::sync::atomic::Ordering::Relaxed);
+        if order || (APPS_DIRTY.load(std::sync::atomic::Ordering::Relaxed) && last_scan.elapsed().as_millis() >= 50) {
             APPS_DIRTY.store(false, std::sync::atomic::Ordering::Relaxed);
             last_scan = Instant::now();
-            with_bar(|b| {
-                let st = b.settings.clone();
-                crumb("scan");
-                let before = b.apps.signature();
-                b.apps.scan(&st);
-                if b.apps.signature() != before || b.popup.is_some() {
-                    b.dirty = true;
+            crumb("scan");
+            BARS.with(|b| {
+                let Ok(mut b) = b.try_borrow_mut() else { return };
+                let Some((main, more)) = b.split_first_mut() else { return };
+                let st = main.settings.clone();
+                if order {
+                    main.apps.read_order();
                 }
-                let gone = match b.popup {
-                    Some(Pop::App(i, _)) => i >= b.apps.list.len(),
-                    Some(Pop::Group(g, _)) => g >= b.apps.groups.len(),
-                    _ => false,
-                };
-                if gone {
-                    b.set_pop(None);
+                let before = main.apps.signature();
+                main.apps.scan(&st);
+                main.apps_read(before);
+                for x in more {
+                    let before = x.apps.signature();
+                    x.apps.copy_from(&main.apps);
+                    x.apps_read(before);
                 }
             });
         }
-        let moving = with_bar(|b| {
+        let mut moving = false;
+        each_bar(|b| {
             crumb("step");
             let m = b.step();
             b.tick_glass();
             if time::Now::get().min != b.drawn_minute {
                 b.dirty = true;
             }
-            if m || b.dirty {
+            if m || b.dirty || (b.shown() > 0.5 && band::busy()) {
                 crumb("render");
                 b.render();
             }
             crumb("idle");
-            m
-        })
-        .unwrap_or(false);
+            moving |= m;
+        });
+        tell_shown();
         unsafe {
             if moving {
                 time::wait_refresh();
             } else {
-                let mut wait = with_bar(|b| b.idle_wait()).unwrap_or(1000);
+                let mut wait = 1000;
+                each_bar(|b| wait = wait.min(b.idle_wait()));
                 if APPS_DIRTY.load(std::sync::atomic::Ordering::Relaxed) {
                     wait = wait.min(50);
                 }
                 MsgWaitForMultipleObjectsEx(None, wait, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
-                with_bar(|b| {
+                each_bar(|b| {
                     b.check_fullscreen();
                     b.check_strip();
                     if b.inside || b.popup.is_some() || b.shell_open || b.down.is_some() {
@@ -2406,7 +2767,7 @@ fn run_loop() {
                     if b.autohide() && !b.inside {
                         let mut p = POINT::default();
                         let _ = GetCursorPos(&mut p);
-                        if p.y >= b.mon.bottom - 2 && p.x >= b.mon.left && p.x < b.mon.right {
+                        if p.y >= b.mon.bottom - 2 && p.y <= b.mon.bottom && p.x >= b.mon.left && p.x < b.mon.right {
                             b.left_at = Some(Instant::now());
                         }
                     }
@@ -2437,6 +2798,15 @@ fn main() {
             let _ = std::fs::write("icon-test.txt", out);
             return;
         }
+        // `--dump-jump <file>`: the jump lists of the apps open now.
+        if let Some(i) = args.iter().position(|a| a == "--dump-jump") {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let mut a = apps::Apps::new();
+            a.scan(&Settings::load());
+            let out: String = a.list.iter().map(|x| format!("{}\n{}", x.key, jump::dump(&x.key, &x.launch, x.target.as_deref()))).collect();
+            let _ = std::fs::write(args.get(i + 1).cloned().unwrap_or_else(|| "jump.txt".into()), out);
+            return;
+        }
         // `--dump-apps <file>`: write the app list (keys, windows) for checking.
         if let Some(i) = args.iter().position(|a| a == "--dump-apps") {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
@@ -2454,7 +2824,8 @@ fn main() {
         if GetLastError() == ERROR_ALREADY_EXISTS {
             return;
         }
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        // (With drag and drop.)
+        let _ = windows::Win32::System::Ole::OleInitialize(None);
         // Whatever happens, the Windows taskbar comes back (the notch also
         // puts it back if this process dies).
         windows::Win32::System::Diagnostics::Debug::SetUnhandledExceptionFilter(Some(on_crash));
@@ -2486,7 +2857,7 @@ fn main() {
         });
         run_loop();
         crumb("exit: appbar");
-        with_bar(|b| b.remove_appbar());
+        each_bar(|b| b.remove_appbar());
         crumb("exit: restore");
         shell::restore_windows_taskbar();
         crumb("exit: mutex");

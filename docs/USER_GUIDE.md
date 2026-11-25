@@ -455,10 +455,14 @@ A taskbar that replaces Windows' own, in the notch's shape and theme. It's a sep
 - **Apps** (Settings > Taskbar > Apps): previews or a list on hover, how many apps show before the ⋯ tile, and collections (drag an app onto the middle of another).
   - Rest on a window in an app's pop-up to see it on the screen; click to open it, or move away and everything is as it was.
   - Drag an app between others to move it, into the ⋯ tile, out of it onto the bar, or within it.
-  - Right-click an app for its menu (new window, run as administrator, open file location, pin, close, end task), or an empty part of the bar for Taskbar settings, Task Manager, Show desktop and Auto-hide. Esc, the arrows and Enter work in a menu.
+  - Right-click an app for its menu (its recent files and own tasks on top, new window, run as administrator, open file location, pin, close, end task), or an empty part of the bar for Taskbar settings, Task Manager, Show desktop and Auto-hide. Esc, the arrows and Enter work in a menu.
+  - Drag a file onto an app and rest there to bring it forward (or onto a window in its pop-up), or let go to open the file with it.
+  - A download's or copy's progress fills a bar under the app's icon: green, red for an error, yellow when paused; an app's badge shows on its icon.
   - An app that flashes glows red. Administrator requests that wait minimized show as a shield, first on the bar: click it to answer.
 - **Auto-hide off**: the bar takes the full width and maximized windows stop above it. Click the screen's far right corner to show the desktop.
 - **The bell** shows how many notifications came since you last opened them (they're only counted, never read).
+- **Other screens** (Settings > Taskbar > Other screens): a taskbar on your other screens, and a switch for each thing it shows there. To begin with that's the apps and your widgets. The order and sizes are the main taskbar's.
+- **Typing**: click into a field in a widget's view (a new task, say) and type; the notch stays closed. Click elsewhere to go back.
 - **General**: Auto-hide (the Windows key brings it out with Start), Open on hover, centred or left, three sizes.
 - **Theme**: the same as the notch, or the taskbar's own: every theme, Liquid Glass and your own colours, just like the notch's.
 - A widget works even when its feature's notch panel is hidden: the notch and the taskbar are separate.

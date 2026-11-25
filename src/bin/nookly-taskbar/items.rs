@@ -117,6 +117,23 @@ pub fn order(st: &Settings) -> Vec<(Item, Zone)> {
         .collect()
 }
 
+/// What a bar on another screen shows (Settings > Taskbar > Other screens),
+/// in the same order.
+pub fn other_order(st: &Settings) -> Vec<(Item, Zone)> {
+    use nookly_core::barcfg::{layout, other_shows};
+    let mut w = 0;
+    layout(st)
+        .into_iter()
+        .filter_map(|e| match e.thing {
+            Thing::Item(k) => Item::from_key(k).filter(|_| other_shows(st, k)).map(|it| (it, e.zone)),
+            Thing::Widget(id, _) => {
+                w += 1;
+                other_shows(st, &format!("@{id}")).then_some((Item::Widget(w - 1), e.zone))
+            }
+        })
+        .collect()
+}
+
 /// Settings > Taskbar > Apps > most apps to show (0 = as many as fit).
 fn max_apps(st: &Settings) -> usize {
     st.extra.get("bar_max_apps").and_then(|v| v.parse().ok()).unwrap_or(0)
@@ -284,8 +301,10 @@ fn face(ui: &mut Ui, bmp: &ID2D1Bitmap, x: f32, cy: f32, w: f32) {
     let px = (x * s).round() / s;
     let py = ((cy - h / 2.0) * s).round() / s;
     let sz = unsafe { bmp.GetPixelSize() };
-    ui.image_rr(bmp, Rect::new(px, py, sz.width as f32 / s, sz.height as f32 / s), 0.0);
-    let _ = w;
+    let own = (sz.width as f32 / s, sz.height as f32 / s);
+    // (Drawn for the main screen's scale: on a screen with another, at its size.)
+    let (bw, bh) = if (own.0 - w).abs() > 1.0 && w > 0.0 { (w, h) } else { own };
+    ui.image_rr(bmp, Rect::new(px, py, bw, bh), 0.0);
 }
 
 /// A face as the notch drew it last (a change shows at once).
@@ -498,8 +517,37 @@ fn attention_glow(bar: &Bar, ui: &mut Ui, t: Rect) {
 
 /// The line under an app's icon: a dot while it's open, an accent bar while
 /// it's in front, a red one when it wants to be looked at.
-fn app_mark(bar: &Bar, ui: &mut Ui, t: Rect, app: &apps::App) {
+fn app_mark(bar: &mut Bar, ui: &mut Ui, t: Rect, app: &apps::App) {
     if app.windows.is_empty() {
+        return;
+    }
+    // A badge the app put on its icon.
+    if let Some((ver, icon)) = crate::band::badge(&app.windows) {
+        if let Some(b) = bar.icons.badge(ui.g, ver, &icon) {
+            let z = 15.0;
+            let r = Rect::new(t.cx() + 4.0, t.cy() + 2.0, z, z);
+            ui.image_rr(&b, r, 0.0);
+        }
+    }
+    // Its progress, in the place of the line.
+    if let Some((state, v)) = crate::band::progress(&app.windows) {
+        use crate::band::State;
+        let track = Rect::new(t.x + 6.0, t.b() - 4.5, t.w - 12.0, 4.0);
+        ui.fill_rr(track, 2.0, col::TEXT.with_a(0.18));
+        let c = match state {
+            State::Error => col::RED,
+            State::Paused => col::YELLOW,
+            _ => col::GREEN,
+        };
+        let fill = match state {
+            State::Busy => {
+                // Not known how much: a part of it goes to and fro.
+                let k = ((ui.t * 2.4).sin() * 0.5 + 0.5) as f32;
+                Rect::new(track.x + k * (track.w - 10.0), track.y, 10.0, track.h)
+            }
+            _ => Rect::new(track.x, track.y, (track.w * v).max(4.0), track.h),
+        };
+        ui.fill_rr(fill, 2.0, c);
         return;
     }
     let front = app.windows.contains(&bar.apps.active);
@@ -985,6 +1033,14 @@ pub fn widget_panel(bar: &Bar, pos: usize) -> bool {
 
 /// Tell the notch which widget's full view is open (None: none).
 pub fn tell_full(bar: &Bar, pos: Option<usize>) {
+    // (Of several bars, the one that opened it closes it.)
+    static OWNER: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+    let me = bar.hwnd.0 as isize;
+    if pos.is_some() {
+        OWNER.store(me, std::sync::atomic::Ordering::Relaxed);
+    } else if OWNER.load(std::sync::atomic::Ordering::Relaxed) != me {
+        return;
+    }
     let k = pos
         .and_then(|p| nookly_core::barcfg::placed(&bar.settings).get(p).cloned())
         .and_then(|p| nookly_core::barcfg::CATALOG.iter().position(|d| d.id == p.id))

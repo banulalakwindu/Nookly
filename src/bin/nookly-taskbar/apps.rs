@@ -318,7 +318,7 @@ fn windows_pins() -> Vec<App> {
 }
 
 /// A shortcut's target path and AppUserModelID.
-fn read_link(path: &str) -> (Option<String>, Option<String>) {
+pub fn read_link(path: &str) -> (Option<String>, Option<String>) {
     unsafe {
         let Ok(link) = CoCreateInstance::<_, IShellLinkW>(&ShellLink, None, CLSCTX_INPROC_SERVER) else { return (None, None) };
         let Ok(file) = link.cast::<IPersistFile>() else { return (None, None) };
@@ -575,6 +575,21 @@ impl Apps {
         let hidden: Vec<String> = self.order.iter().filter(|k| !self.list.iter().any(|a| a.key == **k)).cloned().collect();
         self.order = self.list.iter().map(|a| a.key.clone()).chain(hidden).collect();
         nookly_core::store::write(ORDER, &(self.order.join("\n") + "\n"));
+        crate::ORDER_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The order as it was saved (another screen's bar changed it).
+    pub fn read_order(&mut self) {
+        self.order = nookly_core::store::read(ORDER).lines().filter(|l| !l.is_empty()).map(String::from).collect();
+    }
+
+    /// Take another bar's list over (the same apps on every screen).
+    pub fn copy_from(&mut self, o: &Apps) {
+        self.list = o.list.clone();
+        self.groups = o.groups.clone();
+        self.active = o.active;
+        self.order = o.order.clone();
+        self.attention = o.attention.clone();
     }
 
     /// The app's icon (made once, then kept).
@@ -648,6 +663,19 @@ pub fn exe(a: &App) -> Option<String> {
         return None;
     }
     a.target.clone().filter(|t| t.ends_with(".exe") && Path::new(t).exists())
+}
+
+/// Can files be opened with it (by letting go of them on its icon)?
+pub fn opens_files(a: &App) -> bool {
+    exe(a).is_some() && a.key != "microsoft.windows.explorer"
+}
+
+/// Open files with it.
+pub fn open_with(a: &App, files: &[String]) {
+    let args = files.iter().map(|f| format!("\"{f}\"")).collect::<Vec<_>>().join(" ");
+    unsafe {
+        ShellExecuteW(None, w!("open"), &HSTRING::from(&a.launch), &HSTRING::from(args), PCWSTR::null(), SW_SHOWNORMAL);
+    }
 }
 
 /// Start it as administrator (Windows asks first).

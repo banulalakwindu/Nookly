@@ -41,6 +41,9 @@ to delete this folder too.
 - **The taskbar's bell** (only with the optional taskbar): how many
   notifications came since you last opened them. They are only counted;
   their app and text are not read.
+- **An app's recent files and tasks** (only with the optional taskbar): read
+  from Windows' own lists when you open the app's menu, and not kept. If
+  recent files are off in Windows, there are none here either.
 - **Mic and camera dots:** Windows' own record of which apps are using your
   microphone or camera. Nookly never accesses the microphone or camera
   itself.

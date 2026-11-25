@@ -19,7 +19,7 @@ use windows::Win32::UI::Input::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::*;
 
-use crate::{Bar, Pop, apps, items};
+use crate::{Bar, Pop, apps, items, jump};
 
 /// A menu row: + its index.
 pub const ID: u32 = 9000;
@@ -40,24 +40,30 @@ pub enum Cmd {
     TaskManager,
     Desktop,
     AutoHide,
+    /// One of the app's recent files or tasks.
+    Jump(usize),
 }
 
 #[derive(Clone)]
 pub struct Row {
     icon: &'static str,
-    label: &'static str,
-    /// None: a line between groups.
+    label: String,
+    /// None: a line between groups, or (with a label) a heading.
     cmd: Option<Cmd>,
     /// A switch, on or off (a tick).
     on: Option<bool>,
 }
 
-fn row(icon: &'static str, label: &'static str, cmd: Cmd) -> Row {
-    Row { icon, label, cmd: Some(cmd), on: None }
+fn row(icon: &'static str, label: &str, cmd: Cmd) -> Row {
+    Row { icon, label: label.to_string(), cmd: Some(cmd), on: None }
 }
 
 fn line() -> Row {
-    Row { icon: "", label: "", cmd: None, on: None }
+    Row { icon: "", label: String::new(), cmd: None, on: None }
+}
+
+fn heading(label: &str) -> Row {
+    Row { icon: "", label: label.to_string(), cmd: None, on: None }
 }
 
 #[derive(Clone)]
@@ -69,6 +75,8 @@ pub struct Menu {
     rows: Vec<Row>,
     /// The row the arrow keys are on.
     sel: Option<usize>,
+    /// The app's recent files and tasks (once they're read).
+    jump: Vec<jump::Entry>,
 }
 
 const W: f32 = 228.0;
@@ -76,13 +84,26 @@ const PAD: f32 = 8.0;
 const HEAD: f32 = 34.0;
 const ROW: f32 = 32.0;
 const LINE: f32 = 9.0;
+/// A heading, and the width with files in it.
+const TITLE: f32 = 24.0;
+const WIDE: f32 = 290.0;
+
+impl Row {
+    fn height(&self) -> f32 {
+        match self.cmd {
+            Some(_) => ROW,
+            None if self.label.is_empty() => LINE,
+            None => TITLE,
+        }
+    }
+}
 
 impl Menu {
     fn for_app(app: apps::App, group: Option<usize>) -> Menu {
         // A permission prompt (or another window Nookly can't look into):
         // only to be shown.
         if app.launch.is_empty() {
-            return Menu { app: Some(app), group: None, rows: vec![row("\u{E8A7}", "Show", Cmd::Show)], sel: None };
+            return Menu { app: Some(app), group: None, rows: vec![row("\u{E8A7}", "Show", Cmd::Show)], sel: None, jump: Vec::new() };
         }
         let mut rows = vec![row("\u{E8A7}", if app.windows.is_empty() { "Open" } else { "New window" }, Cmd::New)];
         if apps::exe(&app).is_some() {
@@ -100,11 +121,41 @@ impl Menu {
                 rows.push(row("\u{E7E8}", "End task", Cmd::End));
             }
         }
-        Menu { app: Some(app), group, rows, sel: None }
+        Menu { app: Some(app), group, rows, sel: None, jump: Vec::new() }
+    }
+
+    /// The app's recent files and tasks come on top (the menu grows up: what
+    /// it had stays where it was).
+    pub fn add_jump(&mut self, list: Vec<jump::Entry>) {
+        if list.is_empty() || !self.jump.is_empty() {
+            return;
+        }
+        let mut rows = Vec::new();
+        for recent in [true, false] {
+            let mut first = true;
+            for (i, e) in list.iter().enumerate().filter(|(_, e)| e.recent == recent) {
+                if std::mem::take(&mut first) {
+                    rows.push(heading(if recent { "Recent" } else { "Tasks" }));
+                }
+                let icon = match (recent, e.folder) {
+                    (true, true) => glyph::FOLDER,
+                    (true, false) => glyph::FILE,
+                    _ => "\u{E8A7}",
+                };
+                rows.push(row(icon, &e.label, Cmd::Jump(i)));
+            }
+        }
+        rows.push(line());
+        if let Some(s) = self.sel.as_mut() {
+            *s += rows.len();
+        }
+        rows.append(&mut self.rows);
+        self.rows = rows;
+        self.jump = list;
     }
 
     fn for_group(g: usize) -> Menu {
-        Menu { app: None, group: Some(g), rows: vec![row("\u{E7A7}", "Undo collection", Cmd::Undo)], sel: None }
+        Menu { app: None, group: Some(g), rows: vec![row("\u{E7A7}", "Undo collection", Cmd::Undo)], sel: None, jump: Vec::new() }
     }
 
     fn for_bar(autohide: bool) -> Menu {
@@ -117,12 +168,12 @@ impl Menu {
             line(),
             hide,
         ];
-        Menu { app: None, group: None, rows, sel: None }
+        Menu { app: None, group: None, rows, sel: None, jump: Vec::new() }
     }
 
     pub fn size(&self) -> (f32, f32) {
-        let rows: f32 = self.rows.iter().map(|r| if r.cmd.is_some() { ROW } else { LINE }).sum();
-        (W, PAD * 2.0 + if self.app.is_some() { HEAD } else { 0.0 } + rows)
+        let rows: f32 = self.rows.iter().map(Row::height).sum();
+        (if self.jump.is_empty() { W } else { WIDE }, PAD * 2.0 + if self.app.is_some() { HEAD } else { 0.0 } + rows)
     }
 
     /// The next row the arrows land on (they skip the lines, and go round).
@@ -177,6 +228,9 @@ pub fn open(bar: &mut Bar, id: Option<u32>, x: f32) {
     // Over its tile, when it's a tile's.
     let tile = id.is_some_and(|i| i >= items::APP && !(items::WIDGET..items::WIDGET + 500).contains(&i));
     let x = id.filter(|_| tile).and_then(|i| bar.hits.iter().find(|h| h.id == i)).map_or(x, |h| h.rect.cx());
+    if let Some(a) = m.app.as_ref().filter(|a| !a.launch.is_empty()) {
+        jump::read(a, bar.hwnd);
+    }
     bar.menu = Some(m);
     bar.set_pop(Some(Pop::Menu(x)));
 }
@@ -193,7 +247,11 @@ pub fn draw(bar: &mut Bar, ui: &mut Ui, r: Rect) {
     }
     for (i, row) in m.rows.iter().enumerate() {
         let Some(cmd) = row.cmd else {
-            let l = c.cut_top(LINE, 0.0);
+            let l = c.cut_top(row.height(), 0.0);
+            if !row.label.is_empty() {
+                ui.text(&row.label, l.inset_xy(8.0, 0.0), 10.5, col::FAINT, Weight::Semi, Align::Left);
+                continue;
+            }
             ui.fill_rr(Rect::new(l.x + 8.0, l.cy() - 0.5, l.w - 16.0, 1.0), 0.5, col::TEXT.with_a(0.10));
             continue;
         };
@@ -219,7 +277,7 @@ pub fn draw(bar: &mut Bar, ui: &mut Ui, r: Rect) {
             let t = inner.cut_right(16.0, 4.0);
             ui.icon(glyph::CHECK, t, 11.0, col::ACCENT);
         }
-        ui.text(row.label, inner, 12.0, if hot { col::RED } else { col::TEXT }, Weight::Regular, Align::Left);
+        ui.text(&row.label, inner, 12.0, if hot { col::RED } else { col::TEXT }, Weight::Regular, Align::Left);
         ui.hit(cell, id);
     }
 }
@@ -268,6 +326,11 @@ fn pick(bar: &mut Bar, i: usize) {
         }
         (Cmd::Close, Some(a)) => a.windows.iter().for_each(|&h| apps::close(h)),
         (Cmd::EndNow, Some(a)) => apps::end(a),
+        (Cmd::Jump(i), _) => {
+            if let Some(e) = m.jump.get(i) {
+                jump::open(e);
+            }
+        }
         (Cmd::Settings, _) => command(COMMAND_SETTINGS),
         (Cmd::AutoHide, _) => command(COMMAND_AUTOHIDE),
         (Cmd::TaskManager, _) => apps::launch("taskmgr.exe"),

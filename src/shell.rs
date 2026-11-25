@@ -2,8 +2,10 @@
 //! always put it back, plus Windows' own Start, Search, notification and
 //! tray flyouts, opened from our buttons.
 //!
-//! Hiding is two steps: the Windows taskbar is set to auto-hide (so it gives
-//! up its strip of the screen) and its windows are hidden. What it was
+//! Hiding is three steps: the Windows taskbar is set to auto-hide (so it
+//! gives up its strip of the screen), its windows are hidden, and made fully
+//! see-through: Windows shows them again now and then, for the tenth of a
+//! second until we hear of it, and they'd flash over ours. What it was
 //! before is written to `taskbar_state.txt` first, so whoever finds the file
 //! (the add-on on exit, the notch when the add-on dies, either one at the
 //! next start, the uninstaller) can put it back exactly.
@@ -76,6 +78,36 @@ pub fn hidden_by_us() -> bool {
     crate::store::parse_kv(&crate::store::read(STATE)).get("hidden").is_some_and(|v| v == "1")
 }
 
+/// The window property on Windows' taskbars that we made see-through (and
+/// that weren't layered windows before).
+const GHOST: PCWSTR = w!("Nookly.Ghost");
+
+/// Make one of Windows' taskbars fully see-through (clicks go through it
+/// then too), or as it was.
+fn ghost(h: HWND, on: bool) {
+    unsafe {
+        let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+        let layered = WS_EX_LAYERED.0 as isize;
+        if on {
+            let (mut alpha, mut flags) = (0u8, LAYERED_WINDOW_ATTRIBUTES_FLAGS(0));
+            if ex & layered != 0 && GetLayeredWindowAttributes(h, None, Some(&mut alpha), Some(&mut flags)).is_ok() && flags.0 & LWA_ALPHA.0 != 0 && alpha == 0 {
+                return;
+            }
+            if ex & layered == 0 {
+                SetWindowLongPtrW(h, GWL_EXSTYLE, ex | layered);
+                let _ = SetPropW(h, GHOST, Some(HANDLE(1 as *mut _)));
+            }
+            let _ = SetLayeredWindowAttributes(h, COLORREF(0), 0, LWA_ALPHA);
+        } else if ex & layered != 0 {
+            let _ = SetLayeredWindowAttributes(h, COLORREF(0), 255, LWA_ALPHA);
+            if !GetPropW(h, GHOST).is_invalid() {
+                let _ = RemovePropW(h, GHOST);
+                SetWindowLongPtrW(h, GWL_EXSTYLE, GetWindowLongPtrW(h, GWL_EXSTYLE) & !layered);
+            }
+        }
+    }
+}
+
 /// Hide the Windows taskbar, remembering how it was. Safe to call again
 /// (Explorer restarted, or it showed itself): the first state is kept.
 pub fn hide_windows_taskbar() {
@@ -84,6 +116,9 @@ pub fn hide_windows_taskbar() {
         kv.insert("hidden".to_string(), "1".to_string());
         kv.insert("autohide".to_string(), if autohide() { "1" } else { "0" }.to_string());
         crate::store::write(STATE, &crate::store::write_kv(&kv));
+    }
+    for h in trays() {
+        ghost(h, true);
     }
     if !autohide() {
         set_autohide(true);
@@ -102,21 +137,14 @@ pub fn keep_hidden() {
         return;
     }
     for h in trays() {
+        // (A taskbar Windows just made, for a screen plugged in, too.)
+        ghost(h, true);
         unsafe {
             if IsWindowVisible(h).as_bool() {
                 let _ = ShowWindow(h, SW_HIDE);
             }
         }
     }
-}
-
-/// Where the main screen's usable area ends.
-pub fn work_bottom() -> i32 {
-    let mut r = RECT::default();
-    unsafe {
-        let _ = SystemParametersInfoW(SPI_GETWORKAREA, 0, Some(&mut r as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
-    }
-    r.bottom
 }
 
 /// Nookly's own windows stay in sight while the taskbar peeks at a window
@@ -140,6 +168,7 @@ pub fn restore_windows_taskbar() {
         set_autohide(was_autohide);
     }
     for h in trays() {
+        ghost(h, false);
         unsafe {
             let _ = ShowWindow(h, SW_SHOWNA);
         }

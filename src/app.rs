@@ -253,6 +253,10 @@ pub struct App {
     pub dragging_out: bool,
     leave_at: Option<f64>,
     keyboard: Option<usize>,
+    /// The keyboard is for a widget's view on the taskbar; a call from there
+    /// is running.
+    bar_keyboard: bool,
+    full_call: bool,
     queue: VecDeque<Toast>,
     toast: Option<(Toast, f64)>,
     cur: (f32, f32, f32),
@@ -586,6 +590,8 @@ impl App {
                 dragging_out: false,
                 leave_at: None,
                 keyboard: None,
+                bar_keyboard: false,
+                full_call: false,
                 queue: VecDeque::new(),
                 toast: None,
                 cur: (200.0, 32.0, 12.0),
@@ -825,6 +831,9 @@ impl App {
             // The Widgets panel inside the Settings window types there.
             Some(true) if self.sw_hosts(i) => self.sw_keyboard = Some(i),
             Some(false) if self.sw_keyboard == Some(i) => self.sw_keyboard = None,
+            // In a widget's view on the taskbar: typed there, the notch
+            // stays closed.
+            Some(true) if self.full_call => self.grab_keyboard_for_bar(i),
             Some(true) => self.grab_keyboard(i),
             Some(false) => self.release_keyboard(),
             None => {}
@@ -886,7 +895,15 @@ impl App {
         }
     }
 
+    fn grab_keyboard_for_bar(&mut self, i: usize) {
+        let open = self.expanded;
+        self.grab_keyboard(i);
+        self.expanded = open;
+        self.bar_keyboard = true;
+    }
+
     fn release_keyboard(&mut self) {
+        self.bar_keyboard = false;
         if self.keyboard.take().is_some() {
             unsafe {
                 let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
@@ -1277,6 +1294,9 @@ impl App {
                 if self.full.as_ref().is_some_and(|f| f.id == id) {
                     return;
                 }
+                if self.bar_keyboard {
+                    self.on_blur();
+                }
                 self.full = Some(FullView { id, src, module, mouse: (-1e4, -1e4), down: None, hits: Vec::new(), face: None, gfx: None });
                 // It runs now (even with its notch panel hidden).
                 if src != FullSrc::BuiltIn {
@@ -1288,6 +1308,9 @@ impl App {
                 self.push_full();
             }
             None => {
+                if self.bar_keyboard {
+                    self.on_blur();
+                }
                 if self.full.take().is_some() {
                     unsafe {
                         let _ = KillTimer(Some(self.hwnd), TIMER_FULL);
@@ -1377,6 +1400,7 @@ impl App {
                 f.mouse = (x, y);
                 if let Some(h) = f.down.take().filter(|h| h.rect.contains(x, y)) {
                     let rel = ((x - h.rect.x) / h.rect.w.max(1.0), (y - h.rect.y) / h.rect.h.max(1.0));
+                    self.full_call = true;
                     match src {
                         FullSrc::Panel => self.call(m, |md, c| md.action(h.id, rel, c)),
                         FullSrc::Module => self.call(m, |md, c| md.full_action(&id, h.id, c)),
@@ -1402,6 +1426,7 @@ impl App {
                             self.face_info.stale();
                         }
                     }
+                    self.full_call = false;
                 }
             }
             crate::surfaces::INPUT_WHEEL => {
@@ -2649,7 +2674,7 @@ impl App {
     }
 
     fn mode(&self) -> Mode {
-        if self.expanded || self.keyboard.is_some() || self.drag_files || self.onboarding.is_some() {
+        if self.expanded || (self.keyboard.is_some() && !self.bar_keyboard) || self.drag_files || self.onboarding.is_some() {
             Mode::Expanded
         } else if self.toast.is_some() {
             Mode::Toast
@@ -4855,6 +4880,29 @@ pub fn selftest() -> String {
             });
             out += &format!("{:<4} todo saved to disk with due time\n", if ok { "OK" } else { "FAIL" });
             out += &snap(a, "todo list with task");
+            // Typing in its view on the taskbar: the keys come here, the
+            // notch stays closed; closing the view gives them back.
+            a.expanded = false;
+            a.full_call = true;
+            a.call(i, |m, c| m.action(1, (0.0, 0.0), c));
+            a.full_call = false;
+            let closed = a.mode() == Mode::Collapsed && a.keyboard == Some(i) && a.bar_keyboard;
+            for ch in "From the bar".chars() {
+                a.on_char(ch);
+            }
+            a.on_key(0x0D);
+            let typed = crate::store::read("todo.txt").contains("From the bar");
+            a.full_call = true;
+            a.call(i, |m, c| m.action(1, (0.0, 0.0), c));
+            a.full_call = false;
+            a.open_full(0);
+            let back = a.keyboard.is_none() && !a.bar_keyboard;
+            out += &format!("{:<4} typing in a widget's view on the taskbar\n", if closed && typed && back { "OK" } else { "FAIL" });
+            if !(closed && typed && back) {
+                out += &format!("INFO closed {closed} typed {typed} back {back}\n");
+            }
+            a.toast = None;
+            a.queue.clear();
         }
         // Water: drink + settings page.
         if let Some(i) = find(a, "Water Reminder") {
@@ -5724,6 +5772,22 @@ pub fn selftest() -> String {
                     sw.bar_section = 0;
                 }
                 out += &format!("{:<4} Taskbar > Layout moves and hides items\n", if moved && hid { "OK" } else { "FAIL" });
+                // Other screens: Start comes and goes there, not on the main one.
+                if let Some(sw) = a.swin.as_mut() {
+                    sw.bar_section = BAR_OTHER;
+                }
+                a.sw_render();
+                out += &a.sw_snap("settings: taskbar, other screens");
+                let start = crate::barcfg::ITEMS.iter().position(|x| x.0 == "start").unwrap() as u32;
+                let was = crate::barcfg::other_shows(&a.settings, "start");
+                let shown = a.sw_click_id(S_BAR_OTHER + start) && crate::barcfg::other_shows(&a.settings, "start") && crate::barcfg::order(&a.settings).iter().any(|x| x.0 == "start" && x.1);
+                a.sw_render();
+                let hidden = a.sw_click_id(S_BAR_OTHER + start) && !crate::barcfg::other_shows(&a.settings, "start");
+                a.settings.extra.remove("bar_other_hide");
+                if let Some(sw) = a.swin.as_mut() {
+                    sw.bar_section = 0;
+                }
+                out += &format!("{:<4} Taskbar > Other screens has its own choices\n", if !was && shown && hidden { "OK" } else { "FAIL" });
             }
             let ok = a.sw_click_id(S_TOUR) && a.swin.is_none() && a.onboarding == Some(0);
             a.onboarding = None;

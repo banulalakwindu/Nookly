@@ -65,6 +65,7 @@ pub(super) const S_BAR_AUTOHIDE: u32 = 712;
 pub(super) const S_BAR_HOVER: u32 = 713;
 pub(super) const S_BAR_FOLLOW: u32 = 714;
 pub(super) const S_BAR_ALIGN: u32 = 715; // + 0 centre, 1 left
+pub(super) const S_BAR_SCREENS: u32 = 718;
 pub(super) const S_BAR_SIZE: u32 = 720; // + 0 smaller, 1 normal, 2 larger
 pub(super) const S_BAR_UP: u32 = 730; // + index into barcfg::ITEMS
 pub(super) const S_BAR_DOWN: u32 = 740; // + index into barcfg::ITEMS
@@ -94,12 +95,17 @@ pub(super) const S_WID_GRIP: u32 = 4800;
 const BAR_MAX_START: usize = 8;
 const BAR_MAX_TOP: usize = 60;
 /// The Taskbar tab's sections.
-pub(super) const BAR_SECTIONS: [(&str, &str, &str); 5] = [
+/// Settings > Taskbar > Other screens: + index into barcfg::ITEMS, and (from
+/// 20) + a widget's place.
+pub(super) const S_BAR_OTHER: u32 = 5400;
+pub(super) const BAR_OTHER: u8 = 5;
+pub(super) const BAR_SECTIONS: [(&str, &str, &str); 6] = [
     ("\u{E771}", "General", "How the taskbar shows and behaves"),
     ("\u{E8FD}", "Layout", "Everything on the taskbar, in order: pin it at an end or let it scroll in the middle"),
     ("\u{ECAA}", "Apps", "Hovering an app, how many show, and collections"),
     ("\u{E790}", "Theme", "The same as the notch, or a theme of the taskbar's own"),
     ("\u{E710}", "Add widgets", "Every widget there is: click one to put it on the taskbar, again to take it off"),
+    ("\u{E7F4}", "Other screens", "A taskbar on your other screens, and what it shows there"),
 ];
 /// Settings > Taskbar > Theme: Yours, its colours, and making them readable.
 pub(super) const S_BAR_CUSTOM: u32 = 3900;
@@ -753,7 +759,7 @@ impl App {
             WM_MOUSEWHEEL => {
                 let d = ((wp.0 >> 16) & 0xffff) as i16 as f32 / 120.0;
                 // Settings > Taskbar > Widgets: its list scrolls.
-                if sw.tab == 1 && sw.bar_section == 1 && sw.list_max > 0.0 {
+                if sw.tab == 1 && matches!(sw.bar_section, 1 | BAR_OTHER) && sw.list_max > 0.0 {
                     sw.list_scroll = (sw.list_scroll - d * 82.0).clamp(0.0, sw.list_max);
                     self.sw_render();
                     return Some(LRESULT(0));
@@ -1505,8 +1511,12 @@ impl App {
                     self.bar_retry = 0.0;
                 }
             }
-            S_BAR_AUTOHIDE | S_BAR_HOVER => {
-                let (key, default) = if id == S_BAR_AUTOHIDE { ("bar_autohide", false) } else { ("bar_hover", true) };
+            S_BAR_AUTOHIDE | S_BAR_HOVER | S_BAR_SCREENS => {
+                let (key, default) = match id {
+                    S_BAR_AUTOHIDE => ("bar_autohide", false),
+                    S_BAR_HOVER => ("bar_hover", true),
+                    _ => ("bar_screens", true),
+                };
                 let on = crate::barcfg::flag(&self.settings, key, default);
                 self.settings.extra.insert(key.into(), if on { "0" } else { "1" }.into());
             }
@@ -1605,6 +1615,16 @@ impl App {
                 let key = crate::barcfg::ITEMS[(i - S_BAR_SHOW) as usize].0;
                 let on = crate::barcfg::order(&self.settings).iter().any(|x| x.0 == key && x.1);
                 crate::barcfg::set_shown(&mut self.settings, key, !on);
+            }
+            i if (S_BAR_OTHER..S_BAR_OTHER + 20).contains(&i) => {
+                if let Some(x) = crate::barcfg::ITEMS.get((i - S_BAR_OTHER) as usize) {
+                    crate::barcfg::other_toggle(&mut self.settings, x.0);
+                }
+            }
+            i if (S_BAR_OTHER + 20..S_BAR_OTHER + 100).contains(&i) => {
+                if let Some(p) = crate::barcfg::placed(&self.settings).get((i - S_BAR_OTHER - 20) as usize).cloned() {
+                    crate::barcfg::other_toggle(&mut self.settings, &format!("@{}", p.id));
+                }
             }
             S_BAR_GET => self.get_bar(),
             S_BAR_REMOVE => self.remove_bar(),
@@ -2052,6 +2072,72 @@ fn draw_taskbar_tab(ui: &mut Ui, tight: &mut Tight, body: Rect, st: &Settings, s
                 }
             }
         }
+        BAR_OTHER => {
+            use crate::barcfg::{ITEMS, def, other_screens, other_shows, placed};
+            let on = other_screens(st);
+            switch_row(ui, tight, c.cut_top(ROW_H, 12.0), "Taskbar on other screens", "Off: only on the main screen", on, S_BAR_SCREENS);
+            let foot = c.cut_bottom(32.0, 8.0);
+            let view = c;
+            // Two columns of switches: the taskbar's own things, the widgets.
+            let w = placed(st);
+            let row_h = 40.0;
+            let n_items = ITEMS.len().div_ceil(2) as f32;
+            let content = 22.0 + n_items * row_h + 8.0 + 22.0 + (w.len().div_ceil(2).max(1)) as f32 * row_h;
+            *scroll.1 = (content - view.h).max(0.0);
+            *scroll.0 = scroll.0.clamp(0.0, *scroll.1);
+            let hits_from = ui.hits.len();
+            ui.push_clip(Rect::new(view.x - 4.0, view.y, view.w + 8.0, view.h));
+            let mut y = Rect::new(view.x, view.y - *scroll.0, view.w - 10.0, content);
+            let cell = |ui: &mut Ui, r: Rect, icon: &str, name: &str, sel: bool, id: u32| {
+                let sel = sel && on;
+                let bg = if sel {
+                    accent.with_a(0.13)
+                } else if ui.hovered(r) {
+                    col::BTN_HOVER
+                } else {
+                    col::BTN
+                };
+                ui.fill_rr(r, 11.0, bg);
+                let mut i = r.inset_xy(12.0, 0.0);
+                ui.icon(icon, i.cut_left(20.0, 10.0), 13.0, if sel { accent } else { col::FAINT });
+                let s = i.cut_right(36.0, 8.0).centered(36.0, 20.0);
+                switch(ui, s, sel, on);
+                ui.text(name, i, 12.0, if sel { col::TEXT } else { col::DIM }, Weight::Semi, Align::Left);
+                if on {
+                    ui.hit_tip(r, id, "");
+                }
+            };
+            group(ui, &mut y, "From the taskbar");
+            for (k, chunk) in ITEMS.chunks(2).enumerate() {
+                for (j, (r, it)) in y.cut_top(row_h - 6.0, 6.0).columns(2, 6.0).into_iter().zip(chunk).enumerate() {
+                    cell(ui, r, it.2, it.1, other_shows(st, it.0), S_BAR_OTHER + (k * 2 + j) as u32);
+                }
+            }
+            y.cut_top(8.0, 0.0);
+            group(ui, &mut y, "Widgets on the taskbar");
+            if w.is_empty() {
+                ui.text("None yet: pick some in Add widgets.", y.cut_top(row_h - 6.0, 6.0), 11.5, col::FAINT, Weight::Regular, Align::Left);
+            }
+            for (k, chunk) in w.chunks(2).enumerate() {
+                for (j, (r, p)) in y.cut_top(row_h - 6.0, 6.0).columns(2, 6.0).into_iter().zip(chunk).enumerate() {
+                    let (icon, name) = def(&p.id).map_or(("", ""), |d| (d.icon, d.name));
+                    cell(ui, r, icon, name, other_shows(st, &format!("@{}", p.id)), S_BAR_OTHER + 20 + (k * 2 + j) as u32);
+                }
+            }
+            ui.pop_clip();
+            for h in ui.hits[hits_from..].iter_mut() {
+                let (y0, y1) = (h.rect.y.max(view.y), h.rect.b().min(view.b()));
+                h.rect = Rect::new(h.rect.x, y0, h.rect.w, (y1 - y0).max(0.0));
+            }
+            if *scroll.1 > 0.0 {
+                let track = Rect::new(view.r() - 4.0, view.y, 3.0, view.h);
+                let th = (view.h * view.h / content).max(24.0);
+                let ty = track.y + (*scroll.0 / *scroll.1) * (track.h - th);
+                ui.fill_rr(track, 1.5, col::TEXT.with_a(0.06));
+                ui.fill_rr(Rect::new(track.x, ty, 3.0, th), 1.5, col::TEXT.with_a(0.3));
+            }
+            ui.text_wrap("The order and sizes are the main taskbar's (Layout). Start, hidden icons and the rest can be off on the main one and on here, or the other way round.", foot, 11.0, col::FAINT, Weight::Regular, Align::Left);
+        }
         4 => {
             // Every widget there is, by kind: click to add.
             use crate::barcfg::{CATALOG, GROUPS};
@@ -2333,6 +2419,8 @@ pub(super) fn settings_tip(id: u32) -> &'static str {
         S_BAR_REMOVE => "Turn the taskbar off and delete the add-on from this PC",
         S_BAR_AUTOHIDE => "Slide the taskbar away; touch the bottom edge of the screen to bring it back",
         S_BAR_HOVER => "Off: lists and pop-ups open only when you click",
+        S_BAR_SCREENS => "A taskbar on every screen, or only on the main one",
+        i if (S_BAR_OTHER..S_BAR_OTHER + 100).contains(&i) => "Show it on your other screens' taskbars, or not",
         S_BAR_FOLLOW => "Use the same theme as the notch",
         i if (S_BAR_THEME..S_BAR_THEME + 10).contains(&i) => "Use this theme for the taskbar",
         S_BAR_CUSTOM => "The taskbar's own colours: pick a background and a text colour",
