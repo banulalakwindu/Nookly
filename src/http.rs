@@ -10,7 +10,7 @@ pub struct Response {
     pub location: Option<String>,
 }
 
-/// Largest body read (the installer download is the biggest, ~2.5 MB).
+/// Largest body read (the installer download is the biggest, a few MB).
 const MAX_BODY: usize = 64 * 1024 * 1024;
 
 struct H(*mut core::ffi::c_void);
@@ -36,7 +36,7 @@ pub fn get_no_redirect(host: &str, path: &str) -> Option<Response> {
 fn request(host: &str, path: &str, follow: bool) -> Option<Response> {
     unsafe {
         let session = H(WinHttpOpen(
-            w!("Nookly/0.1 (https://github.com/banulalakwindu/Nookly)"),
+            &HSTRING::from(concat!("Nookly/", env!("CARGO_PKG_VERSION"), " (https://github.com/banulalakwindu/Nookly)")),
             WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
             PCWSTR::null(),
             PCWSTR::null(),
@@ -96,19 +96,18 @@ fn request(host: &str, path: &str, follow: bool) -> Option<Response> {
         let mut body = Vec::new();
         loop {
             let mut avail = 0u32;
-            if WinHttpQueryDataAvailable(req.0, &mut avail).is_err() || avail == 0 {
+            // The connection broke off: not a reply (never half of one).
+            WinHttpQueryDataAvailable(req.0, &mut avail).ok()?;
+            if avail == 0 {
                 break;
             }
             let start = body.len();
             body.resize(start + avail as usize, 0);
             let mut read = 0u32;
-            if WinHttpReadData(req.0, body[start..].as_mut_ptr() as _, avail, &mut read).is_err() {
-                body.truncate(start);
-                break;
-            }
+            WinHttpReadData(req.0, body[start..].as_mut_ptr() as _, avail, &mut read).ok()?;
             body.truncate(start + read as usize);
             if body.len() > MAX_BODY {
-                break;
+                return None;
             }
         }
         Some(Response { status, body, location })

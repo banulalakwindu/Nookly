@@ -1,13 +1,13 @@
 //! Background watcher (no tab): pops toasts for battery/charger, network,
 //! Caps Lock, keyboard-language switches, volume and Bluetooth devices.
 
-use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use windows::core::*;
 use windows::Devices::Bluetooth::{BluetoothConnectionStatus, BluetoothDevice};
-use windows::Devices::Enumeration::DeviceInformation;
+use windows::Devices::Enumeration::{DeviceInformation, DeviceInformationUpdate, DeviceWatcher};
+use windows::Foundation::TypedEventHandler;
 use windows::Win32::Foundation::*;
 use windows::Win32::Globalization::*;
 use windows::Win32::Media::Audio::Endpoints::*;
@@ -16,6 +16,7 @@ use windows::Win32::Networking::NetworkListManager::*;
 use windows::Win32::System::Com::*;
 use windows::Win32::System::Power::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
+use windows::Win32::UI::Input::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::app::WM_APP_WAKE;
@@ -23,7 +24,6 @@ use crate::gfx::*;
 use crate::modules::{Ctx, Module, Toast};
 use crate::time::unix_now;
 
-static HOOK_HWND: AtomicIsize = AtomicIsize::new(0);
 
 fn wake(h: isize) {
     unsafe {
@@ -31,19 +31,42 @@ fn wake(h: isize) {
     }
 }
 
-/// Low-level keyboard hook: wakes the app right after Caps Lock or a
-/// language-switch chord so the toast appears instantly instead of on the
-/// next 1 s tick.
-unsafe extern "system" fn kb_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT { unsafe {
-    if code >= 0 && (wp.0 as u32 == WM_KEYUP || wp.0 as u32 == WM_SYSKEYUP) {
-        let k = &*(lp.0 as *const KBDLLHOOKSTRUCT);
-        let vk = VIRTUAL_KEY(k.vkCode as u16);
-        if matches!(vk, VK_CAPITAL | VK_SPACE | VK_LSHIFT | VK_RSHIFT | VK_SHIFT | VK_LMENU | VK_RMENU | VK_MENU) {
-            wake(HOOK_HWND.load(Ordering::Relaxed));
-        }
+/// Hear when Caps Lock or a language-switch chord is let go, so the toast
+/// appears at once instead of on the next 1 s tick. Windows only tells
+/// (afterwards): nothing typed ever waits for Nookly, as it would with a
+/// keyboard hook.
+fn hear_keys(hwnd: HWND) {
+    let dev = RAWINPUTDEVICE { usUsagePage: 1, usUsage: 6, dwFlags: RIDEV_INPUTSINK, hwndTarget: hwnd };
+    unsafe {
+        let _ = RegisterRawInputDevices(&[dev], std::mem::size_of::<RAWINPUTDEVICE>() as u32);
     }
-    CallNextHookEx(None, code, wp, lp)
-}}
+}
+
+/// WM_INPUT: was it one of those keys? (Which other keys are pressed isn't
+/// looked at or kept.)
+pub fn is_switch_key(lp: LPARAM) -> bool {
+    let mut raw = RAWINPUT::default();
+    let mut n = std::mem::size_of::<RAWINPUT>() as u32;
+    let k = unsafe {
+        let got = GetRawInputData(HRAWINPUT(lp.0 as *mut _), RID_INPUT, Some(&mut raw as *mut _ as *mut _), &mut n, std::mem::size_of::<RAWINPUTHEADER>() as u32);
+        if got == u32::MAX || got == 0 || raw.header.dwType != RIM_TYPEKEYBOARD.0 {
+            return false;
+        }
+        raw.data.keyboard
+    };
+    if k.Flags as u32 & RI_KEY_BREAK == 0 {
+        return false;
+    }
+    let down = |vk: VIRTUAL_KEY| unsafe { GetAsyncKeyState(vk.0 as i32) } < 0;
+    match VIRTUAL_KEY(k.VKey) {
+        VK_CAPITAL => true,
+        // Win+Space; Alt+Shift, Ctrl+Shift.
+        VK_SPACE => down(VK_LWIN) || down(VK_RWIN),
+        VK_SHIFT | VK_LSHIFT | VK_RSHIFT => down(VK_MENU) || down(VK_CONTROL),
+        VK_MENU | VK_LMENU | VK_RMENU | VK_CONTROL | VK_LCONTROL | VK_RCONTROL => down(VK_SHIFT),
+        _ => false,
+    }
+}
 
 #[implement(IAudioEndpointVolumeCallback)]
 struct VolCb {
@@ -104,9 +127,8 @@ pub struct System {
 impl System {
     pub fn new(hwnd: HWND) -> System {
         let h = hwnd.0 as isize;
-        HOOK_HWND.store(h, Ordering::Relaxed);
-        unsafe {
-            let _ = SetWindowsHookExW(WH_KEYBOARD_LL, Some(kb_hook), None, 0);
+        if !crate::modules::agents::ISOLATED.load(Ordering::Relaxed) {
+            hear_keys(hwnd);
         }
         let nlm: Option<INetworkListManager> = unsafe { CoCreateInstance(&NetworkListManager, None, CLSCTX_ALL).ok() };
         let vol_shared = Arc::new(Mutex::new(None));
@@ -296,46 +318,70 @@ fn lang_name(langid: u32) -> (String, String) {
     }
 }
 
-/// Poll connected Bluetooth (classic) devices every 4 s on a worker thread.
+/// Connected Bluetooth (classic) devices coming and going: Windows says so
+/// (nothing is polled).
 fn spawn_bt_watcher(shared: Arc<Mutex<BtShared>>, hwnd: isize) {
-    std::thread::spawn(move || unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        let Ok(selector) = BluetoothDevice::GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus::Connected) else {
-            return;
-        };
-        let mut known: Option<BTreeSet<String>> = None;
+    std::thread::spawn(move || {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        }
+        let Ok(_watcher) = bt_watcher(shared, hwnd) else { return };
+        // (It works as long as it's held.)
         loop {
-            let mut now = BTreeSet::new();
-            if let Ok(op) = DeviceInformation::FindAllAsyncAqsFilter(&selector) {
-                if let Ok(list) = op.join() {
-                    if let Ok(n) = list.Size() {
-                        for i in 0..n {
-                            if let Ok(d) = list.GetAt(i) {
-                                if let Ok(name) = d.Name() {
-                                    now.insert(name.to_string());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if let Some(prev) = &known {
-                let mut ev = Vec::new();
-                for n in now.difference(prev) {
-                    ev.push((n.clone(), true));
-                }
-                for n in prev.difference(&now) {
-                    ev.push((n.clone(), false));
-                }
-                if !ev.is_empty() {
-                    shared.lock().unwrap().events.extend(ev);
-                    wake(hwnd);
-                }
-            }
-            known = Some(now);
-            std::thread::sleep(std::time::Duration::from_secs(4));
+            std::thread::sleep(std::time::Duration::from_secs(3600));
         }
     });
+}
+
+fn bt_watcher(shared: Arc<Mutex<BtShared>>, hwnd: isize) -> Result<DeviceWatcher> {
+    let selector = BluetoothDevice::GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus::Connected)?;
+    let watcher = DeviceInformation::CreateWatcherAqsFilter(&selector)?;
+    // The ones connected now (id, name); the ones there at the start are no news.
+    let known: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+    let started = Arc::new(AtomicBool::new(false));
+    let tell = move |name: String, connected: bool| {
+        shared.lock().unwrap().events.push((name, connected));
+        wake(hwnd);
+    };
+    let tell = Arc::new(tell);
+    let (k, st, t) = (known.clone(), started.clone(), tell.clone());
+    watcher.Added(&TypedEventHandler::new(move |_w: Ref<DeviceWatcher>, d: Ref<DeviceInformation>| {
+        if let Some(d) = d.as_ref() {
+            let (id, name) = (d.Id()?.to_string(), d.Name()?.to_string());
+            let mut k = k.lock().unwrap();
+            // A headset can be there more than once, under one name.
+            let new = !k.iter().any(|x| x.1 == name);
+            k.push((id, name.clone()));
+            drop(k);
+            if new && st.load(Ordering::Relaxed) {
+                t(name, true);
+            }
+        }
+        Ok(())
+    }))?;
+    let (k, t) = (known.clone(), tell.clone());
+    watcher.Removed(&TypedEventHandler::new(move |_w: Ref<DeviceWatcher>, d: Ref<DeviceInformationUpdate>| {
+        if let Some(d) = d.as_ref() {
+            let id = d.Id()?.to_string();
+            let mut k = k.lock().unwrap();
+            let name = k.iter().position(|x| x.0 == id).map(|i| k.remove(i).1);
+            let name = name.filter(|n| !k.iter().any(|x| x.1 == *n));
+            drop(k);
+            if let Some(n) = name {
+                t(n, false);
+            }
+        }
+        Ok(())
+    }))?;
+    // (Windows tells about the others only when this one is listened for too.)
+    watcher.Updated(&TypedEventHandler::new(|_w: Ref<DeviceWatcher>, _d: Ref<DeviceInformationUpdate>| Ok(())))?;
+    let st = started;
+    watcher.EnumerationCompleted(&TypedEventHandler::new(move |_w: Ref<DeviceWatcher>, _x: Ref<IInspectable>| {
+        st.store(true, Ordering::Relaxed);
+        Ok(())
+    }))?;
+    watcher.Start()?;
+    Ok(watcher)
 }
 
 impl Module for System {

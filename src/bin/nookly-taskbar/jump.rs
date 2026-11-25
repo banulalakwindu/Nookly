@@ -129,7 +129,7 @@ fn path_id(path: &str) -> String {
         }
     }
     match best {
-        Some((n, guid)) => format!("{guid}\\{}", &path[n..]),
+        Some((n, guid)) => format!("{guid}\\{}", path.get(n..).unwrap_or(path)),
         None => path.to_string(),
     }
 }

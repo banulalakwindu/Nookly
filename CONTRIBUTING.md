@@ -24,7 +24,8 @@ when your default is GNU.
 
 ```powershell
 cargo build --release                       # target\release\nookly.exe
-.\target\release\nookly.exe --selftest     # headless checks (writes selftest.txt)
+cargo test --release                        # unit tests
+cargo run --release --features selftest --bin nookly -- --selftest   # headless checks (writes selftest.txt)
 .\build.ps1                                 # build + icon + version info + self-test + installer
 ```
 
@@ -32,7 +33,7 @@ The self-test runs against a throwaway data folder when you set
 `NOOKLY_DATA_DIR`, so it never touches your own settings:
 
 ```powershell
-$env:NOOKLY_DATA_DIR = "$env:TEMP\nookly-test"; .\target\release\nookly.exe --selftest
+$env:NOOKLY_DATA_DIR = "$env:TEMP\nookly-test"; cargo run --release --features selftest --bin nookly -- --selftest
 ```
 
 Every line should start with `OK`. The tab-switch frame-rate check depends

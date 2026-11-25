@@ -1,8 +1,8 @@
 //! Microphone / camera in-use indicator. Windows records every app's use of
 //! the mic and camera under `CapabilityAccessManager\ConsentStore` in the
 //! registry: while an app is using one, its `LastUsedTimeStop` is 0. This
-//! module polls that once a second (no permissions needed, nothing leaves
-//! the PC), shows an orange (mic) or green (camera) dot on the notch while
+//! module reads that when Windows says it changed (no permissions needed,
+//! nothing leaves the PC), shows an orange (mic) or green (camera) dot on the notch while
 //! anything is listening or watching, and drops a short notice naming the
 //! app when it starts.
 
@@ -30,6 +30,60 @@ pub struct Privacy {
     started: bool,
     /// Ticks also run on every background wake-up; scan at most once a second.
     last_scan: f64,
+    watch: Watch,
+    /// From the records, when they last changed: the microphone's and the
+    /// camera's apps.
+    recorded: (Vec<String>, Vec<String>),
+    mics: Vec<windows::Win32::Media::Audio::IAudioSessionManager2>,
+    mics_at: f64,
+    mic_at: f64,
+    mic_apps: Vec<String>,
+}
+
+/// Windows' own note that something under the records changed.
+#[derive(Default)]
+struct Watch {
+    key: HKEY,
+    event: HANDLE,
+    /// When the records were last read.
+    read_at: f64,
+}
+
+impl Watch {
+    /// The records may have changed since the last time it was asked.
+    fn changed(&mut self, now: f64) -> bool {
+        use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
+        let first = self.event.is_invalid();
+        unsafe {
+            if first {
+                self.event = CreateEventW(None, false, false, None).unwrap_or_default();
+                let _ = RegOpenKeyExW(HKEY_CURRENT_USER, &HSTRING::from(ROOT), Some(0), KEY_NOTIFY, &mut self.key);
+            }
+            let armed = !self.event.is_invalid() && !self.key.is_invalid();
+            // (Now and then in any case, should a note be missed.)
+            let fired = first || !armed || now - self.read_at > 30.0 || WaitForSingleObject(self.event, 0) == WAIT_OBJECT_0;
+            if fired && armed {
+                let _ = RegNotifyChangeKeyValue(self.key, true, REG_NOTIFY_CHANGE_NAME | REG_NOTIFY_CHANGE_LAST_SET, Some(self.event), true);
+            }
+            if fired {
+                self.read_at = now;
+            }
+            fired
+        }
+    }
+}
+
+impl Drop for Watch {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.key.is_invalid() {
+                let _ = RegCloseKey(self.key);
+            }
+            if !self.event.is_invalid() {
+                let _ = CloseHandle(self.event);
+            }
+        }
+    }
 }
 
 impl Privacy {
@@ -93,21 +147,27 @@ fn qword(path: &str, name: &str) -> Option<u64> {
     (r == ERROR_SUCCESS).then_some(v)
 }
 
-/// Apps recording from any microphone right now, from Windows' audio
-/// sessions (works on every Windows version; the registry records below
-/// stopped being written on newer builds).
-fn mic_sessions() -> Vec<String> {
-    use windows::core::Interface;
+/// Each microphone's list of the apps that use it.
+fn mics() -> Vec<windows::Win32::Media::Audio::IAudioSessionManager2> {
     use windows::Win32::Media::Audio::*;
     use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+    unsafe {
+        let Ok(en) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) else { return Vec::new() };
+        let Ok(devs) = en.EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE) else { return Vec::new() };
+        (0..devs.GetCount().unwrap_or(0)).filter_map(|d| devs.Item(d).ok()?.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None).ok()).collect()
+    }
+}
+
+/// Apps recording from any of these microphones right now, from Windows'
+/// audio sessions (works on every Windows version; the registry records
+/// below stopped being written on newer builds).
+fn recording(mics: &[windows::Win32::Media::Audio::IAudioSessionManager2]) -> Vec<String> {
+    use windows::core::Interface;
+    use windows::Win32::Media::Audio::*;
     let me = std::process::id();
     let mut out = Vec::new();
     unsafe {
-        let Ok(en) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) else { return out };
-        let Ok(devs) = en.EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE) else { return out };
-        for d in 0..devs.GetCount().unwrap_or(0) {
-            let Ok(dev) = devs.Item(d) else { continue };
-            let Ok(mgr) = dev.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else { continue };
+        for mgr in mics {
             let Ok(list) = mgr.GetSessionEnumerator() else { continue };
             for i in 0..list.GetCount().unwrap_or(0) {
                 let Ok(ctl) = list.GetSession(i) else { continue };
@@ -141,10 +201,13 @@ fn exe_of(pid: u32) -> Option<String> {
 
 /// Apps currently using `cap` ("microphone" or "webcam").
 pub fn in_use(cap: &str) -> Vec<String> {
-    let mut names = in_use_registry(cap);
-    if cap == "microphone" {
-        names.extend(mic_sessions());
-    } else if crate::modules::mirror::RUNNING.load(std::sync::atomic::Ordering::Relaxed) {
+    in_use_by(cap, &in_use_registry(cap), &if cap == "microphone" { recording(&mics()) } else { Vec::new() })
+}
+
+fn in_use_by(cap: &str, recorded: &[String], recording: &[String]) -> Vec<String> {
+    let mut names = recorded.to_vec();
+    names.extend_from_slice(recording);
+    if cap == "webcam" && crate::modules::mirror::RUNNING.load(std::sync::atomic::Ordering::Relaxed) {
         names.push("Nookly Mirror".into());
     }
     names.sort();
@@ -191,7 +254,19 @@ impl Module for Privacy {
             return;
         }
         self.last_scan = now;
-        let (mut mic, cam) = (in_use("microphone"), in_use("webcam"));
+        if self.watch.changed(now) {
+            self.recorded = (in_use_registry("microphone"), in_use_registry("webcam"));
+        }
+        // Listing the microphones costs far more than asking them.
+        if now - self.mics_at > 10.0 || now < self.mics_at {
+            self.mics_at = now;
+            self.mics = mics();
+        }
+        if now - self.mic_at > 1.9 || now < self.mic_at {
+            self.mic_at = now;
+            self.mic_apps = recording(&self.mics);
+        }
+        let (mut mic, cam) = (in_use_by("microphone", &self.recorded.0, &self.mic_apps), in_use_by("webcam", &self.recorded.1, &[]));
         // A call (an app other than Nookly using the mic): reminders wait.
         IN_CALL.store(mic.iter().any(|a| !a.to_lowercase().contains("nookly")), std::sync::atomic::Ordering::Relaxed);
         if self.demo {

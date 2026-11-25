@@ -55,6 +55,16 @@ pub fn describe(code: u32) -> &'static str {
     }
 }
 
+/// Draw `f` faded as one (its parts overlap: each faded alone, they show).
+fn faded(ui: &mut Ui, alpha: f32, f: impl FnOnce(&mut Ui)) {
+    if alpha >= 1.0 {
+        return f(ui);
+    }
+    ui.g.push_layer(None, alpha);
+    f(ui);
+    ui.g.pop_layer();
+}
+
 /// Draw the icon for a weather code into `r` (sun or moon, clouds, rain,
 /// snow, a bolt, fog).
 pub fn draw_icon(ui: &mut Ui, r: Rect, code: u32, day: bool) {
@@ -366,10 +376,9 @@ impl Module for Weather {
             };
             ui.text(&label, c.cut_top(13.0, 1.0), 9.5, if past { col::FAINT } else { col::DIM }, Weight::Semi, Align::Center);
             let icr = c.cut_top(26.0, 1.0);
-            ui.g.alpha = if past { 0.45 } else { 1.0 };
             let hour = (m / 60) as i32;
-            draw_icon(ui, icr.centered(24.0, 24.0), h.2, (6..18).contains(&hour));
-            ui.g.alpha = 1.0;
+            let day = (6..18).contains(&hour);
+            faded(ui, if past { 0.45 } else { 1.0 }, |ui| draw_icon(ui, icr.centered(24.0, 24.0), h.2, day));
             let temp = c.cut_top(14.0, 0.0);
             ui.text(&format!("{:.0}°", h.1), temp, 11.5, if past { col::FAINT } else { col::TEXT }, Weight::Semi, Align::Center);
             if h.3 >= 30.0 && !past {
@@ -394,9 +403,7 @@ impl Module for Weather {
             let mut c = cell.inset_xy(4.0, 5.0);
             ui.text(&name, c.cut_top(13.0, 1.0), 10.0, if past { col::FAINT } else { col::DIM }, Weight::Semi, Align::Center);
             let temps = c.cut_bottom(16.0, 2.0);
-            ui.g.alpha = if past { 0.5 } else { 1.0 };
-            draw_icon(ui, c.centered(30.0, 30.0), d.3, true);
-            ui.g.alpha = 1.0;
+            faded(ui, if past { 0.5 } else { 1.0 }, |ui| draw_icon(ui, c.centered(30.0, 30.0), d.3, true));
             let hi = format!("{:.0}°", d.1);
             let lo = format!(" {:.0}°", d.2);
             let (wh, wl) = (ui.measure(&hi, 11.5, Weight::Semi), ui.measure(&lo, 10.5, Weight::Regular));

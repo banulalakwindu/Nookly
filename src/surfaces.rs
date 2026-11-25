@@ -135,7 +135,7 @@ fn unpack(block: &[u8], known: &dyn Fn(&str, u32) -> bool) -> Vec<(Face, u32, bo
         let dip_w = f32::from_bits(get(block, e + ID_LEN + 8));
         let (at, len) = (get(block, e + ID_LEN + 12) as usize, get(block, e + ID_LEN + 16) as usize);
         let v = get(block, e + ID_LEN + 20);
-        if len != (w * h * 4) as usize || at + len > block.len() {
+        if len as u64 != w as u64 * h as u64 * 4 || at + len > block.len() {
             continue;
         }
         let have = known(&id, v);

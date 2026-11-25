@@ -19,7 +19,8 @@ like it.
 
 - Nookly runs as your user, with no admin rights, and installs only to
   `%LOCALAPPDATA%\Programs\Nookly`.
-- The in-app updater checks every download against the SHA-256 published
-  with the GitHub release before running it.
+- The in-app updater checks every download (the taskbar add-on too)
+  against the SHA-256 published with the GitHub release, and refuses what
+  it can't check.
 - Everything Nookly stores is plain text in `%APPDATA%\Nookly`; see
   [PRIVACY.md](PRIVACY.md) for what it reads and when it goes online.

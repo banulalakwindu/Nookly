@@ -164,7 +164,9 @@ impl Module for Downloads {
         match id {
             A_OPEN => crate::app::open_later(p.display().to_string()),
             A_FOLDER => {
-                let _ = std::process::Command::new("explorer.exe").arg(format!("/select,{}", p.display())).spawn();
+                use std::os::windows::process::CommandExt;
+                // (Only the path in quotes: Explorer reads it its own way.)
+                let _ = std::process::Command::new("explorer.exe").raw_arg(format!("/select,\"{}\"", p.display())).spawn();
             }
             _ => {}
         }

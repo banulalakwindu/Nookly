@@ -140,6 +140,11 @@ pub fn fetch_web() -> std::result::Result<Release, String> {
 
 /// Find the installer link (and its SHA-256) in a release's asset list HTML.
 pub fn parse_assets_html(html: &str, tag: &str) -> Option<Installer> {
+    asset_in_html(html, tag, |name| name.starts_with("nooklysetup") && name.ends_with(".exe"))
+}
+
+/// Find a file (by its lowercase name) in a release's asset list HTML.
+fn asset_in_html(html: &str, tag: &str, wanted: impl Fn(&str) -> bool) -> Option<Installer> {
     let prefix = format!("/{REPO}/releases/download/{tag}/");
     let mut rest = html;
     while let Some(i) = rest.find(&prefix) {
@@ -147,7 +152,7 @@ pub fn parse_assets_html(html: &str, tag: &str) -> Option<Installer> {
         let end = after.find('"')?;
         let path = &after[..end];
         let name = path.rsplit('/').next().unwrap_or("").to_lowercase();
-        if name.starts_with("nooklysetup") && name.ends_with(".exe") {
+        if wanted(&name) {
             // The digest sits in the same row, before the next file's link.
             let row = &after[end..];
             let row = &row[..row[1..].find(&prefix).map_or(row.len(), |n| n + 1)];
@@ -170,8 +175,7 @@ pub fn sha256_hex(data: &[u8]) -> String {
 }
 
 /// Blocking: download the release installer to %TEMP% and check it: the
-/// SHA-256 GitHub publishes for it (or the exact size when that's all we
-/// have), and a Windows exe header.
+/// SHA-256 GitHub publishes for it, and a Windows exe header.
 pub fn download_installer(rel: &Release) -> std::result::Result<std::path::PathBuf, String> {
     let inst = rel.installer.clone().ok_or("release has no installer")?;
     let (host, path) = split_url(&inst.url).ok_or("bad download link")?;
@@ -182,11 +186,11 @@ pub fn download_installer(rel: &Release) -> std::result::Result<std::path::PathB
     if !r.body.starts_with(b"MZ") {
         return Err("downloaded file isn't an installer".into());
     }
-    match (&inst.sha256, inst.size) {
-        (Some(want), _) if sha256_hex(&r.body) != *want => return Err("downloaded file doesn't match the release".into()),
-        (None, Some(size)) if r.body.len() as u64 != size => return Err(format!("download incomplete ({} of {size} bytes)", r.body.len())),
-        (None, None) if r.body.len() < 500_000 => return Err("download incomplete".into()),
-        _ => {}
+    match &inst.sha256 {
+        Some(want) if sha256_hex(&r.body) == *want => {}
+        Some(_) => return Err("downloaded file doesn't match the release".into()),
+        // Never run what can't be checked.
+        None => return Err("the download couldn't be checked, try again later".into()),
     }
     let p = std::env::temp_dir().join(format!("NooklySetup-{}.exe", rel.version));
     std::fs::write(&p, &r.body).map_err(|e| e.to_string())?;
@@ -205,15 +209,22 @@ pub enum AddOn {
 
 pub static ADDON: std::sync::Mutex<AddOn> = std::sync::Mutex::new(AddOn::Idle);
 
-/// The add-on file of this version in its release: (link, SHA-256).
-fn addon_asset(version: &str) -> Option<(String, Option<String>)> {
+/// The add-on file of this version in its release: (link, SHA-256). The
+/// API gives the file's SHA-256 (it may refuse: see `fetch_latest`), and so
+/// do the release pages.
+fn addon_asset(version: &str) -> (String, Option<String>) {
     let name = format!("NooklyTaskbar-{version}.exe");
-    // The API gives the file's SHA-256; the plain link works without it.
     let sha = http::get("api.github.com", &format!("/repos/{REPO}/releases/tags/v{version}")).filter(|r| r.status == 200).and_then(|r| {
         let v: serde_json::Value = serde_json::from_slice(&r.body).ok()?;
         v.get("assets")?.as_array()?.iter().find(|a| a.get("name").and_then(|n| n.as_str()) == Some(name.as_str()))?.get("digest")?.as_str()?.strip_prefix("sha256:").map(|d| d.to_lowercase())
     });
-    Some((format!("https://github.com/{REPO}/releases/download/v{version}/{name}"), sha))
+    let sha = sha.or_else(|| {
+        let tag = format!("v{version}");
+        let r = http::get("github.com", &format!("/{REPO}/releases/expanded_assets/{tag}")).filter(|r| r.status == 200)?;
+        let lower = name.to_lowercase();
+        asset_in_html(&String::from_utf8_lossy(&r.body), &tag, |n| n == lower)?.sha256
+    });
+    (format!("https://github.com/{REPO}/releases/download/v{version}/{name}"), sha)
 }
 
 /// Download the taskbar add-on of this Nookly's version and install it
@@ -230,7 +241,7 @@ pub fn get_addon(dest: std::path::PathBuf, done: impl FnOnce() + Send + 'static)
     std::thread::spawn(move || {
         let version = env!("CARGO_PKG_VERSION");
         let got = (|| -> std::result::Result<(), String> {
-            let (url, sha) = addon_asset(version).ok_or("no release for this version")?;
+            let (url, sha) = addon_asset(version);
             let (host, path) = split_url(&url).ok_or("bad download link")?;
             let r = http::get(&host, &path).ok_or("no connection")?;
             if r.status != 200 {
@@ -239,10 +250,10 @@ pub fn get_addon(dest: std::path::PathBuf, done: impl FnOnce() + Send + 'static)
             if !r.body.starts_with(b"MZ") || r.body.len() < 100_000 {
                 return Err("the download isn't the add-on".into());
             }
-            if let Some(want) = sha {
-                if sha256_hex(&r.body) != want {
-                    return Err("the download doesn't match the release".into());
-                }
+            // Never install what can't be checked.
+            let want = sha.ok_or("the download couldn't be checked, try again later")?;
+            if sha256_hex(&r.body) != want {
+                return Err("the download doesn't match the release".into());
             }
             // Written beside it first, then swapped in (a running old one
             // can't be overwritten, but it can be renamed away).

@@ -1251,7 +1251,7 @@ pub fn image_from_dib(dib: Vec<u8>) -> Option<Image> {
     let bpp = rd16(14)? as usize;
     let comp = rd32(16)?;
     let used = rd32(32).unwrap_or(0) as usize;
-    if hsize < 40 || w <= 0 || h == 0 || !(bpp == 24 || bpp == 32) || !(comp == 0 || comp == 3) {
+    if hsize < 40 || w <= 0 || h == 0 || w > 0xFFFF || h.unsigned_abs() > 0xFFFF || !(bpp == 24 || bpp == 32) || !(comp == 0 || comp == 3) {
         return None;
     }
     let (w, top_down, ah) = (w as usize, h < 0, h.unsigned_abs() as usize);

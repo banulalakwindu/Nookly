@@ -197,6 +197,17 @@ impl Bubble {
         Rect::new(self.cx.pos - g.w / 2.0, g.base - g.h, g.w, g.h)
     }
 
+    /// Everything it can cover from where it is to where it's going, its
+    /// flares and overshoot included (bar coordinates): what its glass needs
+    /// a picture of.
+    pub fn reach(&self) -> Rect {
+        let (g, s) = (self.last, self.shape());
+        let (w, h) = (g.w * 1.15 + 2.0 * EAR, g.h * 1.15);
+        let (l, r) = ((g.cx - w / 2.0).min(s.x - EAR), (g.cx + w / 2.0).max(s.r() + EAR));
+        let t = (g.base - h).min(s.y);
+        Rect::new(l - 8.0, t - 8.0, r - l + 16.0, g.base - t + 8.0)
+    }
+
     /// How visible the content is: it fades in as the bubble grows into
     /// its shape (and out as it closes).
     pub fn content_alpha(&self) -> f32 {
@@ -269,8 +280,6 @@ impl Bubble {
         }
         self.gfx.fill_geometry(&geo, col::NOTCH);
         if theme.glass {
-            let a = if glass_light { 1.0 } else { 0.8 };
-            let white = hex(0xFFFFFF);
             let child = child.map(|(r, cr, ce)| (self.local(r), cr, ce));
             let (both, outline) = match child {
                 Some(_) => (self.gfx.bottom_outline(s, rad, ear, child, true), self.gfx.bottom_outline(s, rad, ear, child, false)),
@@ -281,9 +290,7 @@ impl Bubble {
             self.gfx.push_clip(Rect::new(-1e4, top, 2e4, 2e4));
             self.gfx.push_layer(Some(both.as_ref().unwrap_or(&geo)), 1.0);
             if let Some(outline) = outline {
-                for (w, k) in [(2.0, 0.32), (7.0, 0.10), (16.0, 0.05)] {
-                    self.gfx.stroke_geometry_raw(&outline, white.with_a(k * a), w);
-                }
+                self.gfx.glass_rim(&outline, glass_light, s.h);
             }
             self.gfx.pop_layer();
             self.gfx.pop_clip();

@@ -14,7 +14,7 @@ Free, open source, private, and light enough that you'll forget it's running.</p
   <a href="CHANGELOG.md">What's new</a>
 </p>
 
-<p align="center"><b>~3 MB</b> download · <b>~30 MB</b> RAM · <b>~0%</b> CPU at rest</p>
+<p align="center"><b>~2 MB</b> download · <b>~30 MB</b> RAM · <b>under 0.5%</b> CPU at rest</p>
 
 <p align="center"><img src="docs/images/hero.png" alt="Nookly: every panel at a glance" width="100%"></p>
 
@@ -22,16 +22,16 @@ Free, open source, private, and light enough that you'll forget it's running.</p
 
 | | |
 |---|---|
-| **~3 MB** | The whole download: one small program, with no runtime, framework or browser engine to install alongside it |
-| **~30 MB of memory** | In everyday use, opening it and switching panels; much less than a browser tab |
-| **~0% CPU at rest** | It wakes for what happens (a song changes, you hover, a window moves) and sleeps the rest of the time |
+| **~2 MB** | The whole download: one small program, with no runtime, framework or browser engine to install alongside it |
+| **~30 MB of memory** | In everyday use, opening it and switching panels (about 15 MB at rest, as Task Manager shows it); much less than a browser tab |
+| **Under 0.5% CPU at rest** | It wakes for what happens (a song changes, you hover, a window moves), has a short look once a second, and sleeps the rest of the time |
 | **Only what you switch on** | A feature that's off doesn't run at all |
 
 ## Why Nookly
 
 - **Everything one hover away.** Rest the mouse on the notch and it opens; move away and it tucks itself back. Or press **Win+Alt+N** from anywhere.
 - **Only what you want.** Start from a preset (Minimal, Student, Work, Everything) and switch every feature on or off. What's off doesn't run at all.
-- **Tiny and light.** A ~3 MB download that uses about 30 MB of memory and next to no CPU while it rests. Written in Rust, drawn on the GPU, and it reacts to events instead of polling.
+- **Tiny and light.** A ~2 MB download that uses about 30 MB of memory and next to no CPU while it rests. Written in Rust, drawn on the GPU.
 - **Yours alone.** No account, no ads, no tracking. Your data is plain text on your PC.
 - **Made to look good.** Five notch styles, ten themes plus Liquid Glass and your own, on any edge of any screen.
 - **Settings in its own window.** Every setting in one place, grouped, with a master switch to turn the notch on or off. The installer, uninstaller, About and tray menu wear the same style.
@@ -71,7 +71,7 @@ A taskbar that replaces Windows' own, in the notch's bubble shape and theme (Liq
 
 **Only if you want it.** The taskbar is a separate add-on of under 1 MB. It isn't part of the Nookly download, so if you don't install it, it takes **no space, no memory and no CPU** at all: Nookly stays exactly as light as before. To get it, open **Settings > Taskbar > Download taskbar**: Nookly fetches the add-on of its own version from the GitHub release, checks it against the release's SHA-256, installs it next to itself and switches it on. When Nookly updates, the add-on updates with it. **Remove taskbar** in the same place deletes it again.
 
-**When it's on**, it's a separate small process (about 0.1 to 0.3% CPU at rest and 30 to 45 MB of memory), so a problem in it can never take the notch down. Windows' own taskbar is hidden while it runs and always comes back: when you switch it off, when it quits, and even if it crashes, the notch puts Windows' taskbar back.
+**When it's on**, it's a separate small process (under 0.1% CPU at rest and 15 to 40 MB of memory), so a problem in it can never take the notch down. Windows' own taskbar is hidden while it runs and always comes back: when you switch it off, when it quits, and even if it crashes, the notch puts Windows' taskbar back.
 
 **What's on it**
 - **Start, Search, your apps** (pinned and running, with live window previews; rest on one to see that window on the screen), app **collections** (drag one app onto another), and a ⋯ tile for the apps that don't fit. Drag apps into any order, into and out of the ⋯ tile too.
@@ -128,7 +128,7 @@ Needs Rust (stable) with the MSVC toolchain and Visual Studio's C++ build tools;
 
 ```powershell
 cargo build --release                       # target\release\nookly.exe and nookly-taskbar.exe (the add-on)
-.\target\release\nookly.exe --selftest     # headless checks
+cargo run --release --features selftest --bin nookly -- --selftest   # headless checks
 .\build.ps1                                 # build + icon + self-test + installer (the same exe as NooklySetup-<version>.exe)
 python docs\tools\make_images.py shots      # the screenshots in this README
 python docs\tools\make_logo.py              # the logo and icons

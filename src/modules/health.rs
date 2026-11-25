@@ -30,6 +30,7 @@ pub struct Health {
     total: u32,
     apps: Vec<(String, u32)>,
     saved_at: f64,
+    counted_at: f64,
     /// Seconds used since the last eye break / stand-up.
     eye_run: u32,
     stand_run: u32,
@@ -130,6 +131,7 @@ impl Health {
             total: 0,
             apps: Vec::new(),
             saved_at: 0.0,
+            counted_at: 0.0,
             eye_run: 0,
             stand_run: 0,
             waiting: Vec::new(),
@@ -217,6 +219,12 @@ impl Module for Health {
         if crate::time::demo() {
             return;
         }
+        // Ticks also come in between (a wake-up): a second is counted once.
+        let clock = crate::time::unix_now();
+        if clock - self.counted_at < 0.8 && clock >= self.counted_at {
+            return;
+        }
+        self.counted_at = clock;
         let idle = idle_secs();
         let day = ctx.now.day_key();
         if idle < 120 {

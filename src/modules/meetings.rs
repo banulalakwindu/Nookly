@@ -108,17 +108,15 @@ pub fn parse_ics(text: &str, from: f64, to: f64) -> Vec<Event> {
             lines.push(l.to_string());
         }
     }
-    let mut out = Vec::new();
-    let mut ev: Option<Vec<(String, String, String)>> = None;
+    let mut all: Vec<Props> = Vec::new();
+    let mut ev: Option<Props> = None;
     for l in lines {
         if l == "BEGIN:VEVENT" {
             ev = Some(Vec::new());
             continue;
         }
         if l == "END:VEVENT" {
-            if let Some(props) = ev.take() {
-                expand(&props, from, to, &mut out);
-            }
+            all.extend(ev.take());
             continue;
         }
         if let Some(props) = ev.as_mut() {
@@ -128,21 +126,69 @@ pub fn parse_ics(text: &str, from: f64, to: f64) -> Vec<Event> {
             }
         }
     }
+    // One occurrence of a repeating event that was moved or changed is an
+    // event of its own, saying which one it stands in for.
+    let moved: Vec<(String, f64)> = all.iter().filter_map(|p| Some((prop(p, "UID")?.to_string(), parse_time(prop(p, "RECURRENCE-ID")?)?.0))).collect();
+    let mut out = Vec::new();
+    for p in &all {
+        let uid = prop(p, "UID").unwrap_or("");
+        let gone: Vec<f64> = moved.iter().filter(|m| m.0 == uid).map(|m| m.1).collect();
+        expand(p, &gone, from, to, &mut out);
+    }
     out.sort_by(|a, b| a.start.total_cmp(&b.start));
     out
 }
 
-fn expand(props: &[(String, String, String)], from: f64, to: f64, out: &mut Vec<Event>) {
-    let get = |n: &str| props.iter().find(|p| p.0 == n).map(|p| p.2.clone());
+/// An event's lines: (name, parameters, value).
+type Props = Vec<(String, String, String)>;
+
+fn prop<'a>(p: &'a Props, name: &str) -> Option<&'a str> {
+    p.iter().find(|x| x.0 == name).map(|x| x.2.as_str())
+}
+
+/// The days of a month a rule picks: BYMONTHDAY (from the end when
+/// negative), else BYDAY ("2TU" the second Tuesday, "-1FR" the last Friday,
+/// "MO" every Monday; BYSETPOS picks among them), else the first day's own.
+fn month_days(y: i32, m: u32, d0: u32, bymonthday: &[i32], byday: &[(i32, u32)], setpos: &[i32]) -> Vec<u32> {
+    let len = crate::time::days_in_month(y, m) as i32;
+    let mut v: Vec<i32> = if !bymonthday.is_empty() {
+        bymonthday.iter().map(|&d| if d < 0 { len + 1 + d } else { d }).collect()
+    } else if !byday.is_empty() {
+        let first = (crate::modules::countdown::day_number(y, m, 1) + 3).rem_euclid(7) as i32;
+        byday
+            .iter()
+            .flat_map(|&(nth, wd)| {
+                let days: Vec<i32> = (1..=len).filter(|d| (first + d - 1).rem_euclid(7) == wd as i32).collect();
+                match nth {
+                    0 => days,
+                    n if n > 0 => days.get(n as usize - 1).copied().into_iter().collect(),
+                    n => days.len().checked_sub(n.unsigned_abs() as usize).and_then(|k| days.get(k)).copied().into_iter().collect(),
+                }
+            })
+            .collect()
+    } else {
+        vec![d0 as i32]
+    };
+    v.retain(|d| (1..=len).contains(d));
+    v.sort_unstable();
+    v.dedup();
+    if !setpos.is_empty() {
+        v = setpos.iter().filter_map(|&p| if p > 0 { v.get(p as usize - 1) } else { v.len().checked_sub(p.unsigned_abs() as usize).and_then(|k| v.get(k)) }).copied().collect();
+        v.sort_unstable();
+    }
+    v.into_iter().map(|d| d as u32).collect()
+}
+
+fn expand(props: &Props, moved: &[f64], from: f64, to: f64, out: &mut Vec<Event>) {
+    let get = |n: &str| prop(props, n);
     if get("STATUS").map_or(false, |s| s.eq_ignore_ascii_case("CANCELLED")) {
         return;
     }
-    // Overridden occurrences come as their own events with RECURRENCE-ID.
-    let Some((start, all_day)) = get("DTSTART").and_then(|v| parse_time(&v)) else { return };
-    let end = get("DTEND").and_then(|v| parse_time(&v)).map(|x| x.0).unwrap_or(start + if all_day { 86400.0 } else { 1800.0 });
+    let Some((start, all_day)) = get("DTSTART").and_then(parse_time) else { return };
+    let end = get("DTEND").and_then(parse_time).map(|x| x.0).unwrap_or(start + if all_day { 86400.0 } else { 1800.0 });
     let dur = (end - start).max(0.0);
-    let title = get("SUMMARY").map(|s| unescape(&s)).unwrap_or_else(|| "Event".into());
-    let text = format!("{} {} {}", get("LOCATION").unwrap_or_default(), get("URL").unwrap_or_default(), get("DESCRIPTION").map(|s| unescape(&s)).unwrap_or_default());
+    let title = get("SUMMARY").map(unescape).unwrap_or_else(|| "Event".into());
+    let text = format!("{} {} {}", get("LOCATION").unwrap_or_default(), get("URL").unwrap_or_default(), get("DESCRIPTION").map(unescape).unwrap_or_default());
     let link = find_link(&text);
     let exdates: Vec<f64> = props.iter().filter(|p| p.0 == "EXDATE").flat_map(|p| p.2.split(',').filter_map(|v| parse_time(v).map(|x| x.0)).collect::<Vec<_>>()).collect();
     let mut push = |s: f64| {
@@ -150,85 +196,100 @@ fn expand(props: &[(String, String, String)], from: f64, to: f64, out: &mut Vec<
             out.push(Event { start: s, end: s + dur, title: title.clone(), link: link.clone(), all_day });
         }
     };
-    let Some(rule) = get("RRULE") else {
+    let Some(rule) = get("RRULE").filter(|_| get("RECURRENCE-ID").is_none()) else {
         push(start);
         return;
     };
     let r: std::collections::HashMap<String, String> = rule.split(';').filter_map(|kv| kv.split_once('=')).map(|(k, v)| (k.to_uppercase(), v.to_uppercase())).collect();
-    let interval = r.get("INTERVAL").and_then(|v| v.parse::<i64>().ok()).unwrap_or(1).max(1);
+    let interval = r.get("INTERVAL").and_then(|v| v.parse::<i64>().ok()).unwrap_or(1).clamp(1, 1000);
     let count = r.get("COUNT").and_then(|v| v.parse::<usize>().ok());
     let until = r.get("UNTIL").and_then(|v| parse_time(v)).map(|x| x.0 + if x.1 { 86399.0 } else { 0.0 });
-    let freq = r.get("FREQ").cloned().unwrap_or_default();
-    let byday: Vec<u32> = r
+    let nums = |k: &str| -> Vec<i32> { r.get(k).map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect()).unwrap_or_default() };
+    let (bymonthday, setpos, bymonth) = (nums("BYMONTHDAY"), nums("BYSETPOS"), nums("BYMONTH"));
+    // (which one in the month, weekday with Monday first)
+    let byday: Vec<(i32, u32)> = r
         .get("BYDAY")
-        .map(|v| v.split(',').filter_map(|d| ["MO", "TU", "WE", "TH", "FR", "SA", "SU"].iter().position(|x| d.ends_with(x)).map(|k| k as u32)).collect())
+        .map(|v| {
+            v.split(',')
+                .filter_map(|d| {
+                    let wd = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"].iter().position(|x| d.ends_with(x))?;
+                    Some((d[..d.len() - 2].parse().unwrap_or(0), wd as u32))
+                })
+                .collect()
+        })
         .unwrap_or_default();
     // Work on local days so the wall time stays put across DST.
     let (y0, m0, d0, h0, mi0) = {
         let (y, m, d, mins) = crate::time::local_time(start);
         (y, m, d, mins / 60, mins % 60)
     };
-    let day0 = crate::modules::countdown::day_number(y0, m0, d0);
-    let at = |day: i64| {
-        let (y, m, d) = civil(day);
-        local_to_unix(y, m, d, h0, mi0, 0)
-    };
+    let number = crate::modules::countdown::day_number;
+    let day0 = number(y0, m0, d0);
+    // Straight to the days that matter (a repeat that started years ago),
+    // unless occurrences are counted from the first.
+    let first = if count.is_some() { day0 } else { day0.max((from / 86400.0).floor() as i64 - 2 - (dur / 86400.0) as i64) };
     let mut n = 0usize;
-    let limit = |s: f64, n: usize| until.map_or(false, |u| s > u) || count.map_or(false, |c| n >= c) || s > to;
-    match freq.as_str() {
-        "DAILY" => {
-            let mut day = day0;
-            loop {
-                let s = at(day);
-                if limit(s, n) || n > 3000 {
-                    break;
-                }
+    // The days of the k-th period (day, week, month or year) from the first.
+    for k in 0..20_000i64 {
+        let days: Vec<i64> = match r.get("FREQ").map_or("", String::as_str) {
+            "DAILY" => {
+                let day = day0 + ((first - day0) / interval + k) * interval;
+                let (_, m, _) = civil(day);
+                let wd = (day + 3).rem_euclid(7) as u32;
+                if (byday.is_empty() || byday.iter().any(|b| b.1 == wd)) && (bymonth.is_empty() || bymonth.contains(&(m as i32))) { vec![day] } else { Vec::new() }
+            }
+            "WEEKLY" => {
+                let wd0 = (day0 + 3).rem_euclid(7);
+                let week = day0 - wd0 + ((first - day0) / 7 / interval + k) * 7 * interval;
+                let mut d: Vec<i64> = if byday.is_empty() { vec![week + wd0] } else { byday.iter().map(|b| week + b.1 as i64).collect() };
+                d.sort_unstable();
+                d
+            }
+            f @ ("MONTHLY" | "YEARLY") => {
+                let (fy, fm, _) = civil(first);
+                let step = if f == "MONTHLY" { interval } else { interval * 12 };
+                let since = (fy as i64 - y0 as i64) * 12 + fm as i64 - m0 as i64;
+                let month = y0 as i64 * 12 + m0 as i64 - 1 + ((since.max(0) / step) + k) * step;
+                let months: Vec<i64> = if f == "YEARLY" && !bymonth.is_empty() {
+                    let mut v: Vec<i64> = bymonth.iter().filter(|m| (1..=12).contains(*m)).map(|m| month.div_euclid(12) * 12 + *m as i64 - 1).collect();
+                    v.sort_unstable();
+                    v
+                } else {
+                    vec![month]
+                };
+                months
+                    .into_iter()
+                    .flat_map(|t| {
+                        let (y, m) = (t.div_euclid(12) as i32, t.rem_euclid(12) as u32 + 1);
+                        let wanted = f == "YEARLY" || bymonth.is_empty() || bymonth.contains(&(m as i32));
+                        let d = if wanted { month_days(y, m, d0, &bymonthday, &byday, &setpos) } else { Vec::new() };
+                        d.into_iter().map(move |d| number(y, m, d))
+                    })
+                    .collect()
+            }
+            _ => {
+                push(start);
+                return;
+            }
+        };
+        // A period with no day in it (a 31st) still has to end somewhere.
+        if days.is_empty() && k > 400 && n == 0 {
+            return;
+        }
+        for day in days {
+            if day < day0 {
+                continue;
+            }
+            let (y, m, d) = civil(day);
+            let s = local_to_unix(y, m, d, h0, mi0, 0);
+            if until.is_some_and(|u| s > u) || count.is_some_and(|c| n >= c) || s > to {
+                return;
+            }
+            n += 1;
+            if !moved.iter().any(|x| (x - s).abs() < 60.0) {
                 push(s);
-                n += 1;
-                day += interval;
             }
         }
-        "WEEKLY" => {
-            // Monday-based weekday of the first day: 0 = Monday.
-            let wd0 = ((day0 + 3).rem_euclid(7)) as u32;
-            let days = if byday.is_empty() { vec![wd0] } else { byday.clone() };
-            let week0 = day0 - wd0 as i64;
-            let mut week = week0;
-            'w: loop {
-                for &wd in &days {
-                    let day = week + wd as i64;
-                    if day < day0 {
-                        continue;
-                    }
-                    let s = at(day);
-                    if limit(s, n) || n > 3000 {
-                        break 'w;
-                    }
-                    push(s);
-                    n += 1;
-                }
-                week += 7 * interval;
-            }
-        }
-        "MONTHLY" | "YEARLY" => {
-            let mut k = 0i64;
-            loop {
-                let months = if freq == "MONTHLY" { k * interval } else { k * interval * 12 };
-                let total = (y0 as i64) * 12 + (m0 as i64 - 1) + months;
-                let (y, m) = ((total / 12) as i32, (total % 12) as u32 + 1);
-                k += 1;
-                if d0 > crate::time::days_in_month(y, m) {
-                    continue;
-                }
-                let s = local_to_unix(y, m, d0, h0, mi0, 0);
-                if limit(s, n) || n > 600 {
-                    break;
-                }
-                push(s);
-                n += 1;
-            }
-        }
-        _ => push(start),
     }
 }
 
@@ -398,5 +459,61 @@ impl Module for Meetings {
     }
     fn debug_state(&self) -> String {
         format!("meetings next={:?}", self.next.as_ref().map(|e| e.title.clone()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The days ("M-D") an event with this rule falls on, over 2026.
+    fn days(dtstart: &str, rule: &str, extra: &str) -> Vec<String> {
+        let ics = format!("BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:a\nDTSTART:{dtstart}\nSUMMARY:x\nRRULE:{rule}\nEND:VEVENT\n{extra}END:VCALENDAR");
+        let (from, to) = (local_to_unix(2026, 1, 1, 0, 0, 0), local_to_unix(2026, 12, 31, 0, 0, 0));
+        parse_ics(&ics, from, to)
+            .iter()
+            .map(|e| {
+                let (_, m, d, _) = crate::time::local_time(e.start);
+                format!("{m}-{d}")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn monthly_by_weekday() {
+        // Second Tuesday; last Friday; the last working day.
+        assert_eq!(days("20260113T090000", "FREQ=MONTHLY;BYDAY=2TU", "")[..3], ["1-13", "2-10", "3-10"]);
+        assert_eq!(days("20260130T090000", "FREQ=MONTHLY;BYDAY=-1FR", "")[..3], ["1-30", "2-27", "3-27"]);
+        assert_eq!(days("20260130T090000", "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1", "")[..3], ["1-30", "2-27", "3-31"]);
+        assert_eq!(days("20260131T090000", "FREQ=MONTHLY;BYMONTHDAY=-1", "")[..3], ["1-31", "2-28", "3-31"]);
+        // The 31st: only the months that have one.
+        assert_eq!(days("20260131T090000", "FREQ=MONTHLY", ""), ["1-31", "3-31", "5-31", "7-31", "8-31", "10-31"]);
+    }
+
+    #[test]
+    fn started_long_ago() {
+        assert_eq!(days("20100104T090000", "FREQ=DAILY", "").len(), 364);
+        assert_eq!(days("20100104T090000", "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR", "")[..3], ["1-1", "1-2", "1-5"]);
+        assert_eq!(days("20100104T090000", "FREQ=WEEKLY;BYDAY=FR,MO", "")[..3], ["1-2", "1-5", "1-9"]);
+        assert_eq!(days("19900215T090000", "FREQ=YEARLY", ""), ["2-15"]);
+        // Every other week keeps its own weeks.
+        assert_eq!(days("20251229T090000", "FREQ=WEEKLY;INTERVAL=2", "")[..2], ["1-12", "1-26"]);
+        // Counted ones end where they end.
+        assert_eq!(days("20251231T090000", "FREQ=DAILY;COUNT=3", ""), ["1-1", "1-2"]);
+    }
+
+    #[test]
+    fn moved_once() {
+        let extra = "BEGIN:VEVENT\nUID:a\nRECURRENCE-ID:20260112T090000\nDTSTART:20260113T150000\nSUMMARY:x\nEND:VEVENT\n";
+        assert_eq!(days("20260105T090000", "FREQ=WEEKLY;COUNT=3", extra), ["1-5", "1-13", "1-19"]);
+    }
+
+    #[test]
+    fn nonsense_is_survived() {
+        for rule in ["FREQ=MONTHLY;BYMONTHDAY=40", "FREQ=YEARLY;BYMONTH=13", "FREQ=WEEKLY;BYDAY=ZZ,\u{e9}MO", "FREQ=DAILY;INTERVAL=99999999999", "FREQ=MONTHLY;BYDAY=-9MO", "FREQ=HOURLY", "X"] {
+            days("20260105T090000", rule, "");
+        }
+        days("00000000T000000", "FREQ=DAILY", "");
+        days("99991231T235959", "FREQ=YEARLY", "");
     }
 }

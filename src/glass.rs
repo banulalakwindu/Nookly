@@ -156,74 +156,129 @@ pub fn finish(w: u32, h: u32, mut px: Vec<u8>) -> Backdrop {
     (w, h, px, lum)
 }
 
-/// Refraction, cheaply: near the edges of the glass, each pixel shows what
-/// is a little further in (the edge magnifies and bends what's behind it,
-/// like the rim of a lens), with a touch of light caught in the bend. Only
-/// the edge band is touched, on the small backdrop, so it costs next to
-/// nothing. Each edge bends on its own and near a corner the two bends add
-/// up, so they blend with no seam (choosing the nearest edge instead drew
-/// a diagonal line from each corner). `open` sides (left, top, right,
-/// bottom) run on past the screen edge: no bend there.
-pub fn lens(px: &mut [u8], w: u32, h: u32, open: [bool; 4]) {
-    let (w, h) = (w as i32, h as i32);
-    if w < 6 || h < 6 {
-        return;
-    }
-    let src = px.to_vec();
-    let band = (w.min(h) as f32 * 0.42).max(3.0);
-    // How strongly an edge `d` pixels away bends (0 beyond the band).
-    let pull = |d: f32, open: bool| {
-        if open || d >= band {
-            0.0
-        } else {
-            let k = 1.0 - d.max(0.0) / band;
-            k * k
-        }
-    };
-    for y in 0..h {
-        for x in 0..w {
-            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            let (kl, kr) = (pull(fx, open[0]), pull(w as f32 - fx, open[2]));
-            let (kt, kb) = (pull(fy, open[1]), pull(h as f32 - fy, open[3]));
-            let k = 1.0 - (1.0 - kl) * (1.0 - kr) * (1.0 - kt) * (1.0 - kb);
-            if k <= 0.0 {
-                continue;
+/// Keep what's written on the glass readable: behind dark glass (white
+/// text) the brightest patches are toned down, behind light glass the
+/// darkest are lifted. The rest, most of the picture, is as it was.
+pub fn tame(px: &mut [u8], light: bool) {
+    // Past the knee it rises less and less, with no corner in the curve (one
+    // shows as a contour in a soft picture).
+    const KNEE: f32 = 0.42 * 255.0;
+    const SOFT: f32 = 0.18 * 255.0;
+    let over = |x: f32| SOFT * (1.0 - (-x / SOFT).exp());
+    for p in px.chunks_exact_mut(4) {
+        let l = 0.0722 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.2126 * p[2] as f32;
+        if !light && l > KNEE {
+            let k = (KNEE + over(l - KNEE)) / l;
+            // Toward a cool smoke: white made grey looks dull, even olive.
+            let w = 1.0 - k;
+            for (c, tint) in p.iter_mut().zip([0.30, -0.10, -0.22]) {
+                *c = (*c as f32 * k * (1.0 + tint * w)).min(255.0) as u8;
             }
-            let sx = ((fx + (kl - kr) * band * 0.6) as i32).clamp(0, w - 1);
-            let sy = ((fy + (kt - kb) * band * 0.6) as i32).clamp(0, h - 1);
-            let (i, j) = (((y * w + x) * 4) as usize, ((sy * w + sx) * 4) as usize);
-            let lift = k * 18.0;
-            for c in 0..3 {
-                px[i + c] = (src[j + c] as f32 + lift).min(255.0) as u8;
+        } else if light && l < 255.0 - KNEE {
+            // Toward white, as far as it takes.
+            let want = 255.0 - KNEE - over(255.0 - KNEE - l);
+            let k = (want - l) / (255.0 - l);
+            for c in &mut p[..3] {
+                *c = (*c as f32 + (255.0 - *c as f32) * k) as u8;
             }
         }
     }
 }
 
-/// One horizontal and one vertical box blur pass of radius `r`.
+/// One horizontal and one vertical box blur pass of radius `r` (the alpha
+/// is left as it is; past the edges, the edge pixels go on).
 fn box_blur(px: &mut [u8], w: usize, h: usize, r: usize) {
-    let mut tmp = px.to_vec();
+    if w == 0 || h == 0 {
+        return;
+    }
     let k = (2 * r + 1) as u32;
+    // The sums divided by k, without dividing (exact for sums this small).
+    let m = u32::MAX as u64 / k as u64 + 1;
+    let div = |s: u32| ((s as u64 * m) >> 32) as u8;
+    let stride = w * 4;
+    let mut tmp = px.to_vec();
     for y in 0..h {
-        for c in 0..3 {
-            let row = |x: isize| px[(y * w + x.clamp(0, w as isize - 1) as usize) * 4 + c] as u32;
-            let mut sum: u32 = (-(r as isize)..=r as isize).map(row).sum();
-            for x in 0..w {
-                tmp[(y * w + x) * 4 + c] = (sum / k) as u8;
-                sum += row(x as isize + r as isize + 1);
-                sum -= row(x as isize - r as isize);
+        let row = &px[y * stride..(y + 1) * stride];
+        let out = &mut tmp[y * stride..(y + 1) * stride];
+        let mut sum = [0u32; 3];
+        for d in 0..=2 * r {
+            let x = d.saturating_sub(r).min(w - 1) * 4;
+            for c in 0..3 {
+                sum[c] += row[x + c] as u32;
+            }
+        }
+        for x in 0..w {
+            let (add, sub) = ((x + r + 1).min(w - 1) * 4, x.saturating_sub(r) * 4);
+            for c in 0..3 {
+                out[x * 4 + c] = div(sum[c]);
+                sum[c] = sum[c] + row[add + c] as u32 - row[sub + c] as u32;
             }
         }
     }
-    for x in 0..w {
-        for c in 0..3 {
-            let col = |y: isize| tmp[(y.clamp(0, h as isize - 1) as usize * w + x) * 4 + c] as u32;
-            let mut sum: u32 = (-(r as isize)..=r as isize).map(col).sum();
-            for y in 0..h {
-                px[(y * w + x) * 4 + c] = (sum / k) as u8;
-                sum += col(y as isize + r as isize + 1);
-                sum -= col(y as isize - r as isize);
+    // Down the columns, a whole row of sums at a time.
+    let line = |y: usize| &tmp[y * stride..(y + 1) * stride];
+    let mut sums = vec![0u32; stride];
+    for d in 0..=2 * r {
+        for (s, v) in sums.iter_mut().zip(line(d.saturating_sub(r).min(h - 1))) {
+            *s += *v as u32;
+        }
+    }
+    for y in 0..h {
+        for (o, s) in px[y * stride..(y + 1) * stride].chunks_exact_mut(4).zip(sums.chunks_exact(4)) {
+            for c in 0..3 {
+                o[c] = div(s[c]);
             }
+        }
+        let (add, sub) = (line((y + r + 1).min(h - 1)), line(y.saturating_sub(r)));
+        for ((s, a), b) in sums.iter_mut().zip(add).zip(sub) {
+            *s = *s + *a as u32 - *b as u32;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tames() {
+        // Mid-tones stay; white behind dark glass and black behind light don't.
+        let mut px = vec![80, 80, 80, 255, 255, 255, 255, 255, 0, 0, 0, 255];
+        super::tame(&mut px, false);
+        assert_eq!(px[0], 80);
+        assert!(px[5] < 165 && px[5] > 125, "{}", px[5]);
+        assert_eq!(px[8], 0);
+        let mut px = vec![200, 200, 200, 255, 255, 255, 255, 255, 0, 0, 0, 255];
+        super::tame(&mut px, true);
+        assert_eq!((px[0], px[4]), (200, 255));
+        assert!(px[8] > 85 && px[8] < 125, "{}", px[8]);
+        assert_eq!(px[11], 255);
+    }
+
+    /// The blur against a plain one, pixel by pixel.
+    #[test]
+    fn blurs() {
+        for (w, h, r) in [(7usize, 5usize, 2usize), (3, 2, 6), (1, 1, 2), (40, 23, 3)] {
+            let src: Vec<u8> = (0..w * h * 4).map(|i| (i * 97 % 251) as u8).collect();
+            let k = (2 * r + 1) as u32;
+            let at = |p: &[u8], x: isize, y: isize, c: usize| p[(y.clamp(0, h as isize - 1) as usize * w + x.clamp(0, w as isize - 1) as usize) * 4 + c] as u32;
+            let (mut a, mut b) = (src.clone(), src.clone());
+            let ri = r as isize;
+            for y in 0..h as isize {
+                for x in 0..w as isize {
+                    for c in 0..3 {
+                        a[(y as usize * w + x as usize) * 4 + c] = ((-ri..=ri).map(|d| at(&src, x + d, y, c)).sum::<u32>() / k) as u8;
+                    }
+                }
+            }
+            for y in 0..h as isize {
+                for x in 0..w as isize {
+                    for c in 0..3 {
+                        b[(y as usize * w + x as usize) * 4 + c] = ((-ri..=ri).map(|d| at(&a, x, y + d, c)).sum::<u32>() / k) as u8;
+                    }
+                }
+            }
+            let mut px = src.clone();
+            super::box_blur(&mut px, w, h, r);
+            assert_eq!(px, b, "{w}x{h} r{r}");
         }
     }
 }

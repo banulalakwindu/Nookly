@@ -160,6 +160,8 @@ pub struct Apps {
     icons: HashMap<String, Option<Icon>>,
     pins: Vec<App>,
     pins_read: Option<std::time::Instant>,
+    /// When the folder they're in last changed.
+    pins_time: Option<std::time::SystemTime>,
     me: u32,
     /// Each window's exe and app id, read once (they don't change).
     ids: HashMap<isize, (String, Option<String>)>,
@@ -223,12 +225,23 @@ fn process_aumid(pid: u32) -> Option<String> {
 }
 
 /// A shell item's display name ("Claude" for shell:AppsFolder\Claude_...).
+/// (Asked once: the shell takes its time.)
 fn shell_name(path: &str) -> Option<String> {
-    unsafe {
-        let item: IShellItem = SHCreateItemFromParsingName(&HSTRING::from(path), None).ok()?;
-        let s = wstr(item.GetDisplayName(SIGDN_NORMALDISPLAY).ok()?);
-        (!s.is_empty()).then_some(s)
+    static KNOWN: std::sync::Mutex<Option<HashMap<String, String>>> = std::sync::Mutex::new(None);
+    let mut known = KNOWN.lock().ok()?;
+    let known = known.get_or_insert_with(HashMap::new);
+    if let Some(n) = known.get(path) {
+        return Some(n.clone());
     }
+    let s = unsafe {
+        let item: IShellItem = SHCreateItemFromParsingName(&HSTRING::from(path), None).ok()?;
+        wstr(item.GetDisplayName(SIGDN_NORMALDISPLAY).ok()?)
+    };
+    if s.is_empty() {
+        return None;
+    }
+    known.insert(path.to_string(), s.clone());
+    Some(s)
 }
 
 pub fn exe_of(pid: u32) -> Option<String> {
@@ -299,10 +312,13 @@ fn pretty(s: &str) -> String {
     c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
 }
 
+fn pins_dir() -> std::path::PathBuf {
+    Path::new(&std::env::var("APPDATA").unwrap_or_default()).join(r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar")
+}
+
 /// The shortcuts pinned to Windows' own taskbar.
 fn windows_pins() -> Vec<App> {
-    let Ok(base) = std::env::var("APPDATA") else { return Vec::new() };
-    let dir = Path::new(&base).join(r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar");
+    let dir = pins_dir();
     let mut files: Vec<_> = std::fs::read_dir(&dir).map(|d| d.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("lnk"))).collect()).unwrap_or_default();
     files.sort();
     files
@@ -405,7 +421,7 @@ fn window_icon(h: HWND) -> Option<Icon> {
 
 impl Apps {
     pub fn new() -> Apps {
-        Apps { list: Vec::new(), groups: Vec::new(), active: HWND::default(), icons: HashMap::new(), pins: Vec::new(), pins_read: None, me: std::process::id(), ids: HashMap::new(), order: nookly_core::store::read(ORDER).lines().filter(|l| !l.is_empty()).map(String::from).collect(), attention: Vec::new() }
+        Apps { list: Vec::new(), groups: Vec::new(), active: HWND::default(), icons: HashMap::new(), pins: Vec::new(), pins_read: None, pins_time: None, me: std::process::id(), ids: HashMap::new(), order: nookly_core::store::read(ORDER).lines().filter(|l| !l.is_empty()).map(String::from).collect(), attention: Vec::new() }
     }
 
     /// Nookly's own pins (launch strings) and the Windows pins unpinned
@@ -436,9 +452,13 @@ impl Apps {
 
     /// Read the windows again and rebuild the list.
     pub fn scan(&mut self, st: &Settings) {
-        if self.pins_read.is_none_or(|t| t.elapsed().as_secs() > 30) {
-            self.pins = windows_pins();
+        if self.pins_read.is_none_or(|t| t.elapsed().as_secs() > 5) {
             self.pins_read = Some(std::time::Instant::now());
+            let time = std::fs::metadata(pins_dir()).and_then(|m| m.modified()).ok();
+            if time.is_none() || time != self.pins_time {
+                self.pins_time = time;
+                self.pins = windows_pins();
+            }
         }
         let _ = st;
         let (own, unpinned) = Self::own_pins();

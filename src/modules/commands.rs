@@ -60,6 +60,12 @@ fn label(cmd: &str) -> String {
     w.trim_end_matches(".exe").trim_end_matches(".bat").trim_end_matches(".cmd").to_string()
 }
 
+/// cmd.exe's command line for a command: with /S it drops the outer quotes
+/// and takes the rest as it is.
+fn line_of(cmd: &str) -> String {
+    format!("/D /S /C \"{cmd}\"")
+}
+
 /// Run a command (cmd.exe, no window) and keep its first line of output.
 fn run(cmd: String, out: Out) {
     {
@@ -71,7 +77,8 @@ fn run(cmd: String, out: Out) {
     }
     std::thread::spawn(move || {
         use std::os::windows::process::CommandExt;
-        let res = std::process::Command::new("cmd").args(["/D", "/C", &cmd]).creation_flags(0x0800_0000).output();
+        // (As typed: its quotes are cmd.exe's business.)
+        let res = std::process::Command::new("cmd").raw_arg(line_of(&cmd)).creation_flags(0x0800_0000).stdin(std::process::Stdio::null()).output();
         let line: String = match res {
             Ok(o) => {
                 let text = if o.stdout.iter().any(|b| !b.is_ascii_whitespace()) { o.stdout } else { o.stderr };
@@ -333,5 +340,31 @@ impl Module for Commands {
     }
     fn debug_state(&self) -> String {
         format!("commands n={}", self.list.len())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Runs one, as the panel does.
+    fn first_line(cmd: &str) -> String {
+        let out: Out = Arc::default();
+        run(cmd.to_string(), out.clone());
+        for _ in 0..200 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            let o = out.lock().unwrap();
+            if !o.2 {
+                return o.0.clone();
+            }
+        }
+        "(never ended)".into()
+    }
+
+    #[test]
+    fn quotes_are_kept() {
+        assert_eq!(first_line("echo one two"), "one two");
+        assert_eq!(first_line("echo a b c | findstr /C:\"b c\""), "a b c");
+        assert_eq!(first_line("echo \"x y\" & echo z"), "\"x y\"");
     }
 }

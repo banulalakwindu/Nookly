@@ -1,5 +1,4 @@
 #![windows_subsystem = "windows"]
-#![allow(dead_code)]
 //! Nookly Taskbar: the optional taskbar add-on (`nookly-taskbar.exe`).
 //!
 //! It replaces the Windows taskbar with a bar on the bottom edge that has
@@ -436,6 +435,12 @@ pub struct Bar {
     /// Liquid Glass: blurred strip behind the bar, and when to look again.
     backdrop: Option<ID2D1Bitmap>,
     backdrop_gen: u32,
+    /// A fingerprint of it (the same picture again needs no new frame).
+    backdrop_key: u64,
+    /// Nothing moved at the last step, and nothing is waited for.
+    resting: bool,
+    /// Drawn while slid away (and whether that was for a full-screen app).
+    drawn_away: Option<bool>,
     glass_light: bool,
     probe: Option<u64>,
     next_probe: Instant,
@@ -557,6 +562,7 @@ impl Bar {
     /// reserve the bar's strip (fixed mode) so maximized windows stop above it.
     fn place(&mut self) {
         self.dirty = true;
+        self.drawn_away = None;
         unsafe {
             let hmon = self.monitor();
             let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
@@ -1249,8 +1255,8 @@ impl Bar {
         if !grab {
             return;
         }
-        self.next_grab = now + std::time::Duration::from_secs(3);
-        if let Some((w, h, px, lum)) = glass::capture_behind(self.hwnd, strip) {
+        self.next_grab = now + std::time::Duration::from_secs(8);
+        if let Some((w, h, mut px, lum)) = glass::capture_behind(self.hwnd, strip) {
             let was = self.glass_light;
             if lum > 0.62 {
                 self.glass_light = true;
@@ -1260,8 +1266,14 @@ impl Bar {
             if was != self.glass_light && self.is_main() {
                 want_faces(self.glass_light, self.scale);
             }
-            self.backdrop = self.g().make_bitmap(w, h, &px);
-            self.backdrop_gen = generation;
+            glass::tame(&mut px, self.glass_light);
+            let key = px.iter().fold(0xcbf2_9ce4_8422_2325u64, |k, b| (k ^ *b as u64).wrapping_mul(0x100_0000_01b3));
+            if self.backdrop.is_none() || self.backdrop_gen != generation || key != self.backdrop_key || was != self.glass_light {
+                self.backdrop = self.g().make_bitmap(w, h, &px);
+                self.backdrop_gen = generation;
+                self.backdrop_key = key;
+                self.dirty = true;
+            }
         }
     }
 
@@ -1269,16 +1281,12 @@ impl Bar {
     /// new picture means a new frame.
     fn tick_glass(&mut self) {
         let theme = self.theme();
-        let had = self.backdrop.as_ref().map(|b| b as *const _ as usize);
-        let probe = self.probe;
         self.update_glass(&theme);
-        if self.backdrop.as_ref().map(|b| b as *const _ as usize) != had || self.probe != probe {
-            self.dirty = true;
-        }
     }
 
     fn render(&mut self) {
         self.dirty = false;
+        self.drawn_away = (self.depth.pos < 0.5).then_some(self.fullscreen);
         self.drawn_minute = time::Now::get().min;
         let theme = self.theme();
         let mut g = self.gfx.take().expect("gfx");
@@ -1360,14 +1368,19 @@ impl Bar {
         let (sx, sy) = b.place(self.scale, bar_origin);
         // Liquid Glass: what's behind it (taken once it's shown in place).
         if theme.glass && b.visible && b.backdrop.as_ref().is_none_or(|x| x.2 != b.gfx.generation) {
-            let c = b.content().inset(-24.0);
+            // All of where it's going as well as where it is: it's still
+            // moving, and what it comes to rest on must have its picture too.
+            let c = b.reach();
+            let k = self.scale;
             let r = RECT {
-                left: bar_origin.0 + (c.x * self.scale) as i32,
-                top: bar_origin.1 + (c.y * self.scale) as i32,
-                right: bar_origin.0 + (c.r() * self.scale) as i32,
-                bottom: bar_origin.1 + (c.b() * self.scale) as i32,
+                left: (bar_origin.0 + (c.x * k).floor() as i32).max(self.mon.left),
+                top: (bar_origin.1 + (c.y * k).floor() as i32).max(self.mon.top),
+                right: (bar_origin.0 + (c.r() * k).ceil() as i32).min(self.mon.right),
+                bottom: (bar_origin.1 + (c.b() * k).ceil() as i32).min(self.mon.bottom),
             };
-            if let Some((w, h, px, _)) = glass::capture_behind(b.hwnd, r) {
+            let c = Rect::new((r.left - bar_origin.0) as f32 / k, (r.top - bar_origin.1) as f32 / k, (r.right - r.left) as f32 / k, (r.bottom - r.top) as f32 / k);
+            if let Some((w, h, mut px, _)) = glass::capture_behind(b.hwnd, r) {
+                glass::tame(&mut px, self.glass_light);
                 if let Some(bmp) = b.gfx.make_bitmap(w, h, &px) {
                     b.backdrop = Some((bmp, c, b.gfx.generation));
                 }
@@ -1560,8 +1573,7 @@ impl Bar {
     /// both together (the bar draws its part, below its top edge; the
     /// bubble the rest), so the light runs from one into the other.
     fn draw_glass_rim(&self, g: &mut Gfx, geo: &ID2D1PathGeometry, body: Rect, ear: f32) {
-        let a = if self.glass_light { 1.0 } else { 0.8 };
-        let white = hex(0xFFFFFF);
+        let light = self.glass_light;
         let bump = self.pop_b.as_ref().filter(|b| b.visible && b.active()).map(|b| b.silhouette());
         let rad = RAD.min(body.h / 2.0);
         let (shape, outline) = match bump {
@@ -1571,9 +1583,7 @@ impl Bar {
         g.push_clip(Rect::new(-1e4, body.y, 2e4, 1e4));
         g.push_layer(Some(shape.as_ref().unwrap_or(geo)), 1.0);
         if let Some(outline) = &outline {
-            for (w, k) in [(2.0, 0.32), (7.0, 0.10), (16.0, 0.05)] {
-                g.stroke_geometry_raw(outline, white.with_a(k * a), w);
-            }
+            g.glass_rim(outline, light, body.h);
         }
         g.pop_layer();
         // The light from above, fading away under a bubble (no hard edge).
@@ -1589,11 +1599,7 @@ impl Bar {
         };
         for (r, l, rt) in bands {
             g.push_fade(r, l, rt);
-            for k in 0..5 {
-                let f = k as f32 / 5.0;
-                let band = Rect::new(body.x, body.y + body.h * 0.3 * f, body.w, body.h * 0.3 / 5.0 + 0.5);
-                g.fill_rr_raw(band, 0.0, white.with_a(0.05 * a * (1.0 - f)));
-            }
+            g.glass_sheen(Rect::new(body.x - ear, body.y, body.w + ear * 2.0, body.h * 0.4), if light { 0.14 } else { 0.07 });
             g.pop_layer();
         }
         g.pop_layer();
@@ -2208,6 +2214,24 @@ impl Bar {
         }
     }
 
+    /// Nothing to work out until something happens (each of those marks it
+    /// dirty, or is one of these): the loop wakes for every window that
+    /// comes and goes anywhere, which is often.
+    fn at_rest(&self) -> bool {
+        self.resting
+            && !self.dirty
+            && !self.inside
+            && self.popup.is_none()
+            && self.drag.is_none()
+            && self.down.is_none()
+            && self.keys.is_none()
+            && self.tray_hold.is_none()
+            && self.file_over.is_none()
+            && self.peeked.is_none()
+            && self.left_at.is_none_or(|t| t.elapsed().as_secs_f32() > 1.0)
+            && self.attention_at.is_none_or(|t| t.elapsed().as_secs_f32() > ATTENTION_BEATS + 1.0)
+    }
+
     /// When to wake next with nothing moving: the clock's next minute,
     /// the glass probe, and the auto-hide reveal.
     fn idle_wait(&self) -> u32 {
@@ -2556,6 +2580,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             }
             LRESULT(0)
         }
+        // Signing out or shutting down. When Nookly doesn't start with
+        // Windows, Windows' own taskbar has to be as it was next time.
+        WM_ENDSESSION => {
+            if wp.0 != 0 && me == Some(0) && !shell::starts_with_windows() {
+                each_bar(|b| b.remove_appbar());
+                shell::restore_windows_taskbar();
+            }
+            LRESULT(0)
+        }
         WM_CLOSE if me == Some(0) && !on_bar(me, |b| b.is_pop(hwnd)).unwrap_or(false) => {
             quit();
             LRESULT(0)
@@ -2836,6 +2869,9 @@ impl Bar {
                 appbar: false,
                 backdrop: None,
                 backdrop_gen: 0,
+                backdrop_key: 0,
+                resting: false,
+                drawn_away: None,
                 glass_light: false,
                 probe: None,
                 next_probe: now,
@@ -2907,8 +2943,9 @@ fn create() -> Result<()> {
 fn run_loop() {
     let mut msg = MSG::default();
     let mut last_scan = Instant::now();
+    let mut last_look = Instant::now();
     loop {
-        unsafe {
+                unsafe {
             while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
                 if msg.message == WM_QUIT {
                     return;
@@ -2947,15 +2984,26 @@ fn run_loop() {
         }
         let mut moving = false;
         each_bar(|b| {
-            crumb("step");
-            let m = b.step();
-            b.tick_glass();
             if time::Now::get().min != b.drawn_minute {
                 b.dirty = true;
             }
+            b.tick_glass();
+            let m = if b.at_rest() {
+                // (The springs count from now on.)
+                b.last_step = Instant::now();
+                false
+            } else {
+                crumb("step");
+                b.step()
+            };
+            b.resting = !m;
+            // Slid away, it looks the same whatever its widgets show.
+            if !m && b.drawn_away == Some(b.fullscreen) && b.depth.pos < 0.5 {
+                b.dirty = false;
+                b.drawn_minute = time::Now::get().min;
+            }
             if m || b.dirty || (b.shown() > 0.5 && band::busy()) {
-                crumb("render");
-                b.render();
+                crumb("render");                b.render();
             }
             crumb("idle");
             moving |= m;
@@ -2971,7 +3019,10 @@ fn run_loop() {
                     wait = wait.min(50);
                 }
                 MsgWaitForMultipleObjectsEx(None, wait, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
-                each_bar(|b| {
+                if last_look.elapsed().as_millis() < 60 {
+                    continue;
+                }
+                last_look = Instant::now();                each_bar(|b| {
                     b.check_fullscreen();
                     b.check_strip();
                     if b.inside || b.popup.is_some() || b.shell_open || b.down.is_some() {

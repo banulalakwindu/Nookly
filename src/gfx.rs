@@ -321,6 +321,10 @@ pub struct Gfx {
     brush: ID2D1SolidColorBrush,
     formats: HashMap<(u32, Weight, Align, Family, bool), IDWriteTextFormat>,
     icon_family: HSTRING,
+    /// Text already laid out (the same words are drawn frame after frame),
+    /// and when each was last used.
+    layouts: HashMap<u64, Laid>,
+    frame: u32,
     mem_dc: HDC,
     dib: HBITMAP,
     old_bmp: HGDIOBJ,
@@ -349,6 +353,16 @@ pub struct Gfx {
     shown: Vec<u8>,
     shown_at: Option<(isize, i32, i32, std::time::Instant)>,
 }
+
+/// A piece of text, laid out.
+struct Laid {
+    text: String,
+    layout: IDWriteTextLayout,
+    used: u32,
+}
+
+/// More than this and the ones not drawn lately are dropped.
+const MAX_LAID: usize = 256;
 
 /// The rectangle that differs between two pictures `pw` pixels wide (its x
 /// in steps of 16 pixels), None when they're the same.
@@ -412,6 +426,22 @@ pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().collect()
 }
 
+thread_local! {
+    /// One factory for all of a thread's surfaces: they share its GPU device
+    /// then (each with its own costs megabytes).
+    static FACTORY: std::cell::RefCell<Option<ID2D1Factory>> = const { std::cell::RefCell::new(None) };
+}
+
+fn shared_factory() -> Result<ID2D1Factory> {
+    FACTORY.with(|f| {
+        let mut f = f.borrow_mut();
+        if f.is_none() {
+            *f = Some(unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)? });
+        }
+        f.clone().ok_or_else(|| E_FAIL.into())
+    })
+}
+
 impl Gfx {
     pub fn new(pw: i32, ph: i32) -> Result<Gfx> {
         Self::make(pw, ph, false)
@@ -425,7 +455,7 @@ impl Gfx {
 
     fn make(pw: i32, ph: i32, soft: bool) -> Result<Gfx> {
         unsafe {
-            let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
+            let factory = shared_factory()?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let rt = Self::make_rt(&factory, soft)?;
             let brush = rt.CreateSolidColorBrush(&d2c(col::TEXT, 1.0), None)?;
@@ -452,6 +482,8 @@ impl Gfx {
                 brush,
                 formats: HashMap::new(),
                 icon_family,
+                layouts: HashMap::new(),
+                frame: 0,
                 mem_dc,
                 dib: HBITMAP::default(),
                 old_bmp: HGDIOBJ::default(),
@@ -563,6 +595,11 @@ impl Gfx {
     pub fn begin(&mut self, scale: f32) {
         self.scale = scale;
         self.alpha = 1.0;
+        self.frame = self.frame.wrapping_add(1);
+        if self.layouts.len() > MAX_LAID {
+            let now = self.frame;
+            self.layouts.retain(|_, l| now.wrapping_sub(l.used) < 10);
+        }
         unsafe {
             self.rt.BeginDraw();
             self.rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
@@ -774,6 +811,50 @@ impl Gfx {
     }
 
     // ------------------------------------------------------------ shapes
+
+    /// Liquid Glass's light, the same on every glass surface: a bright rim
+    /// along `outline` that fades inward without a step. (Clip to the shape:
+    /// half of each stroke falls outside.) `h`: how tall the shape is: a
+    /// small one has a narrower rim, or it would be nothing but rim.
+    pub fn glass_rim(&mut self, outline: &ID2D1PathGeometry, light: bool, h: f32) {
+        let wide = (h * 0.4).clamp(6.0, 27.0);
+        let a = if light { 1.0 } else { 0.8 };
+        let white = hex(0xFFFFFF);
+        self.stroke_geometry_raw(outline, white.with_a(0.30 * a), 2.0);
+        // Many faint ones, the widest the faintest: no edge of any shows.
+        const N: usize = 14;
+        for i in 0..N {
+            let f = i as f32 / N as f32;
+            self.stroke_geometry_raw(outline, white.with_a(0.016 * (1.0 - f) * a), 3.0 + f * wide);
+        }
+        // Over something white, white light shows no edge: a hair of shade.
+        if light {
+            for (w, k) in [(2.0, 0.13), (5.0, 0.035), (9.0, 0.02)] {
+                self.stroke_geometry_raw(outline, hex(0x000000).with_a(k), w);
+            }
+        }
+    }
+
+    /// A soft light from above over `r`, gone at its bottom.
+    pub fn glass_sheen(&mut self, r: Rect, strength: f32) {
+        if r.w <= 0.0 || r.h <= 0.0 {
+            return;
+        }
+        // (An even fade has a visible start and end: eased at both.)
+        let stops: Vec<D2D1_GRADIENT_STOP> = (0..=8)
+            .map(|i| {
+                let f = i as f32 / 8.0;
+                let k = 1.0 - f * f * (3.0 - 2.0 * f);
+                D2D1_GRADIENT_STOP { position: f, color: d2c(hex(0xFFFFFF).with_a(strength * k), self.alpha) }
+            })
+            .collect();
+        unsafe {
+            let Ok(coll) = self.rt.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) else { return };
+            let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: pt(r.x, r.y), endPoint: pt(r.x, r.b()) };
+            let Ok(br) = self.rt.CreateLinearGradientBrush(&props, None, &coll) else { return };
+            self.rt.FillRectangle(&r.d2d(), &br);
+        }
+    }
 
     pub fn fill_rect(&mut self, r: Rect, c: Color) {
         self.set(c);
@@ -1131,46 +1212,56 @@ impl Gfx {
         }
     }
 
-    fn draw_str(&mut self, s: &str, r: Rect, f: &IDWriteTextFormat, c: Color) {
-        self.set(c);
-        let w = wide(s);
-        unsafe {
-            self.rt.DrawText(
-                &w,
-                f,
-                &r.d2d(),
-                &self.brush,
-                D2D1_DRAW_TEXT_OPTIONS_CLIP,
-                DWRITE_MEASURING_MODE_NATURAL,
-            )
+    /// Drop the laid out text (it's laid out again as it's drawn).
+    pub fn forget_text(&mut self) {
+        self.layouts = HashMap::new();
+    }
+
+    /// `s` laid out in a `w` by `h` box (kept: laying text out costs far more
+    /// than drawing it).
+    fn laid(&mut self, s: &str, size: f32, weight: Weight, align: Align, fam: Family, wrap: bool, w: f32, h: f32) -> Option<IDWriteTextLayout> {
+        use std::hash::{Hash, Hasher};
+        let mut k = std::collections::hash_map::DefaultHasher::new();
+        (s, (size * 4.0) as u32, weight, align, fam, wrap, w.to_bits(), h.to_bits()).hash(&mut k);
+        let k = k.finish();
+        if let Some(l) = self.layouts.get_mut(&k) {
+            if l.text == s {
+                l.used = self.frame;
+                return Some(l.layout.clone());
+            }
         }
+        let f = self.format(size, weight, align, fam, wrap)?;
+        let layout = unsafe { self.dw.CreateTextLayout(&wide(s), &f, w, h) }.ok()?;
+        self.layouts.insert(k, Laid { text: s.to_string(), layout: layout.clone(), used: self.frame });
+        Some(layout)
+    }
+
+    fn draw_str(&mut self, s: &str, r: Rect, size: f32, weight: Weight, align: Align, fam: Family, wrap: bool, c: Color) {
+        if s.is_empty() || !(r.w > 0.0 && r.h > 0.0) {
+            return;
+        }
+        let Some(l) = self.laid(s, size, weight, align, fam, wrap, r.w, r.h) else { return };
+        self.set(c);
+        unsafe { self.rt.DrawTextLayout(pt(r.x, r.y), &l, &self.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP) }
     }
 
     /// Single line, vertically centred in `r`, trimmed with an ellipsis.
     pub fn text(&mut self, s: &str, r: Rect, size: f32, c: Color, weight: Weight, align: Align) {
-        if let Some(f) = self.format(size, weight, align, Family::Text, false) {
-            self.draw_str(s, r, &f, c);
-        }
+        self.draw_str(s, r, size, weight, align, Family::Text, false, c);
     }
 
     /// Wrapped paragraph starting at the top of `r`.
     pub fn text_wrap(&mut self, s: &str, r: Rect, size: f32, c: Color, weight: Weight, align: Align) {
-        if let Some(f) = self.format(size, weight, align, Family::Text, true) {
-            self.draw_str(s, r, &f, c);
-        }
+        self.draw_str(s, r, size, weight, align, Family::Text, true, c);
     }
 
     /// Tabular-ish digits for timers (Segoe UI digits are already equal-width).
     pub fn digits(&mut self, s: &str, r: Rect, size: f32, c: Color, align: Align) {
-        if let Some(f) = self.format(size, Weight::Semi, align, Family::Mono, false) {
-            self.draw_str(s, r, &f, c);
-        }
+        self.draw_str(s, r, size, Weight::Semi, align, Family::Mono, false, c);
     }
 
     pub fn icon(&mut self, g: &str, r: Rect, size: f32, c: Color) {
-        if let Some(f) = self.format(size, Weight::Regular, Align::Center, Family::Icon, false) {
-            self.draw_str(g, r, &f, c);
-        }
+        self.draw_str(g, r, size, Weight::Regular, Align::Center, Family::Icon, false, c);
     }
 
     pub fn measure(&mut self, s: &str, size: f32, weight: Weight) -> f32 {
@@ -1183,14 +1274,10 @@ impl Gfx {
     }
 
     fn measure_in(&mut self, s: &str, size: f32, weight: Weight, family: Family) -> f32 {
-        let Some(f) = self.format(size, weight, Align::Left, family, false) else {
+        let Some(layout) = self.laid(s, size, weight, Align::Left, family, false, 10000.0, 100.0) else {
             return 0.0;
         };
         unsafe {
-            let w = wide(s);
-            let Ok(layout) = self.dw.CreateTextLayout(&w, &f, 10000.0, 100.0) else {
-                return 0.0;
-            };
             let mut m = DWRITE_TEXT_METRICS::default();
             if layout.GetMetrics(&mut m).is_ok() {
                 m.widthIncludingTrailingWhitespace

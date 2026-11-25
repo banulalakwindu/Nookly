@@ -251,7 +251,7 @@ The **Calendar** tab shows the month. Today has a red circle; days with to-do ta
 - **Themes**: **Black** (the default), **Graphite**, **Midnight**, **Rose**, **Forest**, **Ocean**, **Light**, **Blossom** (light pink), **Paper** (old paper) and **Liquid Glass**. A theme changes the notch and every panel. On the light themes, coloured labels are a little darker so they stay readable.
 <img src="images/glass.png" alt="Liquid Glass">
 
-- **Liquid Glass** is real-looking glass with no outline: a blurred, slightly more colourful view of what's behind the notch, bent near the edges like the rim of a lens, a soft light along the edge, and glints that drift like light through water while you use it (they stay still when the notch rests, so it costs nothing). Being see-through, it has a little less contrast than the solid themes. Over a bright window it turns into light glass with dark text, over a dark one into dark glass with white text. The notch still shows in screenshots and screen recordings (it hides only for the instant it looks behind itself).
+- **Liquid Glass** is real-looking glass with no outline: a blurred, slightly more colourful view of what's behind the notch, with a soft light along the edge and from above. Very bright or dark patches behind it are toned down, so the text stays readable. Being see-through, it has a little less contrast than the solid themes. Over a bright window it turns into light glass with dark text, over a dark one into dark glass with white text. The notch still shows in screenshots and screen recordings (it hides only for the instant it looks behind itself).
 - **Show seconds** puts seconds on the clock (4:20:15). The Slim and Compact notches get a little wider so nothing gets squeezed.
 
 ## Tools
@@ -474,7 +474,7 @@ A taskbar that replaces Windows' own, in the notch's shape and theme. It's a sep
 <img src="images/windows.png" alt="Nookly's own install, uninstall, About and tray menu windows">
 
 - **Settings > Apps > Nookly > Uninstall**, as usual, or **Uninstall Nookly...** in the tray icon's menu. Both open Nookly's own uninstall window.
-- It asks (with a switch to delete your data too), closes Nookly, takes it out of startup, disconnects Claude Code and Codex, removes the Start menu and desktop shortcuts and the Apps entry, then removes the app. From a command line: `nookly.exe --uninstall` (`--keep-data`, `--quiet`).
+- It asks (with a switch to delete your data too), closes Nookly and its taskbar (Windows' own comes back), takes it out of startup, disconnects Hermes, Claude Code and Codex, removes the Start menu and desktop shortcuts and the Apps entry, then removes the app. From a command line: `nookly.exe --uninstall` (`--keep-data`, `--quiet`).
 - Screenshots in Pictures\Screenshots are never deleted.
 
 ## Updates

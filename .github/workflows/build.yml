@@ -14,12 +14,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release
+      - name: Unit tests
+        run: cargo test --release
+      # The self-test is built in with a feature (the released program
+      # doesn't carry it).
       - name: Self-test
         shell: pwsh
         run: |
+          cargo build --release --features selftest --bin nookly --target-dir target/selftest
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           $env:NOOKLY_DATA_DIR = "$env:RUNNER_TEMP\wl"
           $env:NOOKLY_SELFTEST_OUT = "$env:RUNNER_TEMP\selftest.txt"
-          Start-Process .\target\release\nookly.exe -ArgumentList '--selftest' -Wait
+          Start-Process .\target\selftest\release\nookly.exe -ArgumentList '--selftest' -Wait
           # FAIL lines become annotations, readable on the run's summary page.
           Get-Content $env:NOOKLY_SELFTEST_OUT | ForEach-Object { if ($_ -like 'FAIL*') { Write-Host "::error::$_" } else { Write-Host $_ } }
           if (Select-String -Path $env:NOOKLY_SELFTEST_OUT -Pattern '^FAIL' -Quiet) { exit 1 }

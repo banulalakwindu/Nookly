@@ -2,6 +2,36 @@
 
 Versions 0.1.x below were released before the Nookly name.
 
+## 1.0.0: Lighter, smoother and steadier
+
+Nookly was reviewed, measured and tested all over again for this one.
+
+**Lighter**
+
+- **Over 40% smaller**: the download is about 2 MB (it was 3.5), the taskbar add-on about 0.6 MB (it was 0.8).
+- **Less work for your PC**: the notch takes about half the CPU while closed and a third of it while open, and the taskbar about a fifth. Nothing is drawn while a full-screen app hides the notch, and what looks the same isn't drawn again.
+- **Less memory**: the taskbar starts at a quarter less, and keeps about 28 MB less after you've used its pop-ups on two screens.
+- **Typing never waits for Nookly**: it noticed Caps Lock and language switches through a keyboard hook, which every key in every app and game had to pass. That's gone.
+
+**Easier to read**
+
+- **Liquid Glass is smooth on the notch too**, the same glass as the taskbar's: no more lines, rings or streaks in it, and a rim that fades without steps. It's still, so an open panel costs less.
+- Liquid Glass tones down very bright patches behind its text (and lifts very dark ones when it's light), so small text stays readable over any wallpaper.
+
+**Fixed**
+
+- **Calendar**: repeats like "the second Tuesday", "the last Friday" or "the last day" of the month fell on the wrong days; daily meetings that began many years ago were missing; a meeting moved once showed twice.
+- **Commands**: a command with quotes in it didn't run as typed.
+- Part of a taskbar pop-up's left or right side could be without its glass after it moved from one app to another.
+- **Screen time** and the break reminders counted faster than time passes when you typed a lot.
+- **Network speed** jumped for a second when an adapter came or went.
+- **Uninstalling** left the taskbar add-on behind, and could leave Windows' own taskbar hidden.
+- If Nookly doesn't start with Windows, Windows' taskbar is put back as it was when you sign out.
+- **Updates** are refused when they can't be checked against the release's SHA-256, the taskbar add-on too, and a download that breaks off is never taken for a whole one.
+- The mirror could keep a processor busy when a camera went away.
+- A file on a network share on the Shelf no longer holds up the start when the share is off.
+- Bluetooth alerts come from Windows itself now; before, the list of devices was asked for every four seconds.
+
 ## 0.9.0: The taskbar from the keyboard, and on its own
 
 - **Use the taskbar from the keyboard**: **Win+Alt+J** (change it in Settings > Shortcuts) puts the keyboard on it. The arrows move, Enter opens, Up shows an app's windows, Shift+F10 its menu, 1 to 9 go straight to an app and Esc goes back. What it's on is ringed, and its name is given to screen readers.

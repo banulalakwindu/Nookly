@@ -157,6 +157,13 @@ pub fn keep_in_peek(h: HWND) {
     }
 }
 
+/// Does Nookly start with Windows (Settings > General)?
+pub fn starts_with_windows() -> bool {
+    use windows::Win32::System::Registry::*;
+    let mut size = 0u32;
+    unsafe { RegGetValueW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Run"), w!("Nookly"), RRF_RT_REG_SZ, None, None, Some(&mut size)).is_ok() }
+}
+
 /// Put the Windows taskbar back the way it was. Does nothing unless we hid it.
 pub fn restore_windows_taskbar() {
     let kv = crate::store::parse_kv(&crate::store::read(STATE));

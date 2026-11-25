@@ -47,30 +47,41 @@ pub fn cpu_times() -> Option<(u64, u64)> {
     Some((ft(&i), ft(&k) + ft(&u)))
 }
 
-/// Bytes received and sent so far on real network adapters (Wi-Fi,
-/// Ethernet, phone tethering). Loopback and the filter layers Windows
-/// stacks on each adapter are skipped so nothing is counted twice.
-pub fn net_bytes() -> Option<(u64, u64)> {
+/// The real network adapters (Wi-Fi, Ethernet, phone tethering): loopback
+/// and the filter layers Windows stacks on each adapter are skipped so
+/// nothing is counted twice.
+pub fn adapters() -> Vec<u32> {
     unsafe {
         let mut t: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
         if GetIfTable2(&mut t).is_err() || t.is_null() {
-            return None;
+            return Vec::new();
         }
-        let n = (*t).NumEntries as usize;
-        let rows = std::slice::from_raw_parts((*t).Table.as_ptr(), n);
-        let (mut rx, mut tx) = (0u64, 0u64);
-        for r in rows {
-            let flags = r.InterfaceAndOperStatusFlags._bitfield;
-            let hardware = flags & 1 != 0;
-            let filter = flags & 2 != 0;
-            if hardware && !filter && r.Type != 24 {
-                rx += r.InOctets;
-                tx += r.OutOctets;
-            }
-        }
+        let rows = std::slice::from_raw_parts((*t).Table.as_ptr(), (*t).NumEntries as usize);
+        let v = rows
+            .iter()
+            .filter(|r| {
+                let flags = r.InterfaceAndOperStatusFlags._bitfield;
+                let (hardware, filter) = (flags & 1 != 0, flags & 2 != 0);
+                hardware && !filter && r.Type != 24
+            })
+            .map(|r| r.InterfaceIndex)
+            .collect();
         FreeMibTable(t as *const _);
-        Some((rx, tx))
+        v
     }
+}
+
+/// Bytes received and sent so far on these adapters.
+pub fn net_bytes(adapters: &[u32]) -> (u64, u64) {
+    let (mut rx, mut tx) = (0u64, 0u64);
+    for &i in adapters {
+        let mut r = MIB_IF_ROW2 { InterfaceIndex: i, ..Default::default() };
+        if unsafe { GetIfEntry2(&mut r) }.is_ok() {
+            rx += r.InOctets;
+            tx += r.OutOctets;
+        }
+    }
+    (rx, tx)
 }
 
 pub fn memory() -> (u64, u64) {
@@ -136,6 +147,10 @@ pub struct Monitor {
     hist: Vec<Sample>,
     last_cpu: Option<(u64, u64)>,
     last_net: Option<(u64, u64, f64)>,
+    /// The network adapters, and when they were last listed (listing them
+    /// costs far more than reading their counters).
+    nets: Vec<u32>,
+    nets_at: f64,
     disk: (u64, u64),
     disk_at: f64,
     demo: bool,
@@ -143,7 +158,7 @@ pub struct Monitor {
 
 impl Monitor {
     pub fn new() -> Monitor {
-        let mut m = Monitor { hist: Vec::new(), last_cpu: None, last_net: None, disk: (0, 0), disk_at: 0.0, demo: false };
+        let mut m = Monitor { hist: Vec::new(), last_cpu: None, last_net: None, nets: Vec::new(), nets_at: 0.0, disk: (0, 0), disk_at: 0.0, demo: false };
         m.sample();
         m
     }
@@ -154,22 +169,31 @@ impl Monitor {
             return;
         }
         let now = unix_now();
-        let cpu = match (cpu_times(), self.last_cpu) {
+        let times = cpu_times();
+        let cpu = match (times, self.last_cpu) {
             (Some((i, t)), Some((pi, pt))) if t > pt => 100.0 * (1.0 - (i.saturating_sub(pi)) as f64 / (t - pt) as f64),
             _ => -1.0,
         };
-        self.last_cpu = cpu_times();
+        self.last_cpu = times;
         let (mut down, mut up) = (-1.0, -1.0);
-        if let Some((rx, tx)) = net_bytes() {
-            if let Some((prx, ptx, pt)) = self.last_net {
-                let dt = now - pt;
-                if dt > 0.2 {
-                    down = rx.saturating_sub(prx) as f64 / dt;
-                    up = tx.saturating_sub(ptx) as f64 / dt;
-                }
+        if now - self.nets_at > 15.0 {
+            self.nets_at = now;
+            let nets = adapters();
+            if nets != self.nets {
+                // One came or went: its whole total isn't this second's.
+                self.nets = nets;
+                self.last_net = None;
             }
-            self.last_net = Some((rx, tx, now));
         }
+        let (rx, tx) = net_bytes(&self.nets);
+        if let Some((prx, ptx, pt)) = self.last_net {
+            let dt = now - pt;
+            if dt > 0.2 {
+                down = rx.saturating_sub(prx) as f64 / dt;
+                up = tx.saturating_sub(ptx) as f64 / dt;
+            }
+        }
+        self.last_net = Some((rx, tx, now));
         if now - self.disk_at > 30.0 {
             self.disk = disk();
             self.disk_at = now;

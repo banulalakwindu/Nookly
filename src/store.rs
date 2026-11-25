@@ -8,6 +8,11 @@ use std::fs;
 use std::path::PathBuf;
 
 pub fn dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(find_dir).clone()
+}
+
+fn find_dir() -> PathBuf {
     // NOOKLY_DATA_DIR overrides the location (used by `nookly --selftest`).
     let p = match std::env::var("NOOKLY_DATA_DIR") {
         Ok(d) if !d.is_empty() => PathBuf::from(d),
@@ -47,9 +52,16 @@ pub fn read(name: &str) -> String {
 
 pub fn write(name: &str, content: &str) {
     let p = dir().join(name);
-    let tmp = p.with_extension("tmp");
-    if fs::write(&tmp, content).is_ok() {
-        let _ = fs::rename(&tmp, &p);
+    // (Nookly and its taskbar each have their own: some files are written
+    // by both.)
+    let tmp = dir().join(format!("{name}.{}.tmp", std::process::id()));
+    let written = fs::write(&tmp, content).is_ok() && fs::rename(&tmp, &p).is_ok();
+    if !written {
+        // The folder was removed while Nookly ran: put it back and try once more.
+        let _ = fs::create_dir_all(dir());
+        if fs::write(&tmp, content).is_err() || fs::rename(&tmp, &p).is_err() {
+            let _ = fs::remove_file(&tmp);
+        }
     }
 }
 

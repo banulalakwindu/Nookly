@@ -206,7 +206,7 @@ impl Todo {
         order.sort_by(|a, b| {
             a.done
                 .cmp(&b.done)
-                .then(a.due.unwrap_or(f64::MAX).partial_cmp(&b.due.unwrap_or(f64::MAX)).unwrap())
+                .then(a.due.unwrap_or(f64::MAX).total_cmp(&b.due.unwrap_or(f64::MAX)))
                 .then(a.id.cmp(&b.id))
         });
         let row_h = 30.0;

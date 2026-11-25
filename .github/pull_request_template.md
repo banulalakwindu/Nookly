@@ -5,7 +5,7 @@
 ## How I checked it
 
 - [ ] `cargo build --release` passes
-- [ ] `nookly.exe --selftest` shows no new FAIL lines
+- [ ] the self-test (`cargo run --release --features selftest --bin nookly -- --selftest`) shows no new FAIL lines
 - [ ] Tried it in the app (what I clicked, on which edge / style / theme)
 
 ## Screenshots

@@ -109,14 +109,17 @@ Write-Host "Version info embedded ($($vi.ProductName) $($vi.ProductVersion))"
 
 }
 
-# Self-test in a scratch data folder.
+# Self-test in a scratch data folder (a build of its own: the released
+# program doesn't carry the self-test).
 if (-not $NoSelfTest -and -not $InstallerOnly) {
+cargo build --release --features selftest --bin nookly --target-dir target\selftest
+if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 $tmp = Join-Path $env:TEMP "nookly-selftest"
 Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $tmp | Out-Null
 $env:NOOKLY_DATA_DIR = $tmp
 $env:NOOKLY_SELFTEST_OUT = "$tmp\report.txt"
-Start-Process $exe -ArgumentList '--selftest' -Wait
+Start-Process "$PSScriptRoot\target\selftest\release\nookly.exe" -ArgumentList '--selftest' -Wait
 Remove-Item Env:NOOKLY_DATA_DIR, Env:NOOKLY_SELFTEST_OUT
 $report = Get-Content "$tmp\report.txt"
 $fails = @($report | Where-Object { $_ -like 'FAIL*' })

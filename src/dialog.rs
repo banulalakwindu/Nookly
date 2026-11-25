@@ -151,7 +151,7 @@ fn run(w: f32, h: f32, at: Option<POINT>, theme: Theme, spec: Option<Spec>, item
             // The menu opens from the mouse, inside the screen (above the
             // taskbar when the tray is at the bottom).
             Some(a) => {
-                let x = (a.x - pw + 8).clamp(r.left, r.right - pw);
+                let x = (a.x - pw + 8).clamp(r.left, (r.right - pw).max(r.left));
                 let y = if a.y + ph > r.bottom { a.y - ph } else { a.y };
                 (x, y.clamp(r.top, (r.bottom - ph).max(r.top)))
             }

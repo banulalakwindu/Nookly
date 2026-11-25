@@ -133,72 +133,13 @@ fn main() {
         let _ = OleInitialize(None);
 
         let args: Vec<String> = std::env::args().collect();
-        // `--probe-privacy <file> [camera]`: write what Windows reports as
-        // using the microphone and camera, every second for 8 seconds (to
-        // check the mic and camera dots); with `camera`, open the camera
-        // meanwhile.
-        if let Some(i) = args.iter().position(|a| a == "--probe-privacy") {
-            let out = args.get(i + 1).cloned().unwrap_or_else(|| "probe.txt".into());
-            let cam = args.iter().any(|a| a == "camera").then(|| modules::mirror::probe_camera(6.0));
-            let mut log = String::new();
-            for k in 0..8 {
-                let c = cam.as_ref().map(|(f, e)| (f.lock().unwrap().as_ref().map(|x| x.3), e.lock().unwrap().clone()));
-                log += &format!("{k}s mic={:?} camera={:?} frames/err={:?}
-", modules::privacy::in_use("microphone"), modules::privacy::in_use("webcam"), c);
-                std::thread::sleep(std::time::Duration::from_secs(1));
-            }
-            let _ = std::fs::write(out, log);
-            std::process::exit(0);
-        }
-        // Docs renders: demo data, fixed clock, no window shown.
-        if args.iter().any(|a| a == "--selftest" || a == "--render-demo" || a == "--render-docs") {
-            modules::agents::ISOLATED.store(true, std::sync::atomic::Ordering::Relaxed);
-            // His screen may have a maximized window open: renders and tests
-            // assume none unless a test says otherwise.
-            app::MAXIMIZED_OVERRIDE.store(2, std::sync::atomic::Ordering::Relaxed);
-            // Tests and renders change data (tasks, settings...): never
-            // your own unless asked with --real-data.
-            let set = std::env::var("NOOKLY_DATA_DIR").map_or(false, |d| !d.is_empty());
-            if !set && !args.iter().any(|a| a == "--real-data") {
-                let d = std::env::temp_dir().join(format!("nookly-test-{}", std::process::id()));
-                let _ = std::fs::create_dir_all(&d);
-                // Renders start past the welcome tour (the self-test checks
-                // the tour itself, from a fresh folder).
-                if !args.iter().any(|a| a == "--selftest") {
-                    let _ = std::fs::write(d.join("settings.txt"), "onboarded=1\n");
-                }
-                std::env::set_var("NOOKLY_DATA_DIR", &d);
-            }
-        }
-        if let Some(i) = args.iter().position(|a| a == "--render-demo") {
-            time::DEMO.store(true, std::sync::atomic::Ordering::Relaxed);
-            let dir = std::path::PathBuf::from(args.get(i + 1).cloned().unwrap_or_else(|| "demo-render".into()));
-            let _ = app::App::create(false);
-            let log = app::render_demo(&dir);
-            let _ = std::fs::write(dir.join("render.log"), log);
-            app::shutdown();
-            std::process::exit(0);
-        }
-        if let Some(i) = args.iter().position(|a| a == "--render-docs") {
-            time::DEMO.store(true, std::sync::atomic::Ordering::Relaxed);
-            let dir = std::path::PathBuf::from(args.get(i + 1).cloned().unwrap_or_else(|| "docs-render".into()));
-            let _ = app::App::create(false);
-            let log = app::render_docs(&dir);
-            let _ = std::fs::write(dir.join("render.log"), log);
-            app::shutdown();
-            std::process::exit(0);
-        }
-
-        // The self-test never shows a window, so it may run alongside the app.
-        if std::env::args().any(|a| a == "--selftest") {
-            let _ = app::App::create(false);
-            let mut report = app::selftest();
-            report += &format!("INFO lyrics (LRCLIB): {}\n", modules::music::selftest_lyrics());
-            report += &format!("INFO data dir: {}\n", store::dir().display());
-            let out = std::env::var("NOOKLY_SELFTEST_OUT").unwrap_or_else(|_| "selftest.txt".into());
-            let _ = std::fs::write(out, report);
-            app::shutdown();
-            std::process::exit(0);
+        // `--selftest` and the docs renders (a build with the feature
+        // `selftest`; the released program has none of it).
+        #[cfg(feature = "selftest")]
+        app::run_tests(&args);
+        #[cfg(not(feature = "selftest"))]
+        if args.iter().any(|a| matches!(a.as_str(), "--selftest" | "--render-demo" | "--render-docs" | "--probe-privacy")) {
+            std::process::exit(2);
         }
 
         let mutex = CreateMutexW(None, true, w!("Local\\Nookly.SingleInstance"));

@@ -60,9 +60,10 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
+          cargo build --release --features selftest --bin nookly --target-dir target/selftest
           $env:NOOKLY_DATA_DIR = "$env:RUNNER_TEMP\wl"
           $env:NOOKLY_SELFTEST_OUT = "$env:RUNNER_TEMP\selftest.txt"
-          Start-Process .\target\release\nookly.exe -ArgumentList '--selftest' -Wait
+          Start-Process .\target\selftest\release\nookly.exe -ArgumentList '--selftest' -Wait
           Get-Content $env:NOOKLY_SELFTEST_OUT | ForEach-Object { if ($_ -like 'FAIL*') { Write-Host "::warning::$_" } else { Write-Host $_ } }
 
       # The installer is nookly.exe under its setup name (src/setup.rs).

@@ -94,6 +94,10 @@ unsafe fn capture(frame: &Frame, running: &AtomicBool) -> std::result::Result<()
             if reader.ReadSample(stream, 0, None, Some(&mut flags), None, Some(&mut sample)).is_err() {
                 break;
             }
+            // Ended, or gone wrong: there won't be another.
+            if flags & (MF_SOURCE_READERF_ENDOFSTREAM.0 | MF_SOURCE_READERF_ERROR.0) as u32 != 0 {
+                break;
+            }
             let Some(sample) = sample else { continue };
             let Ok(buf) = sample.ConvertToContiguousBuffer() else { continue };
             let mut p: *mut u8 = std::ptr::null_mut();
@@ -115,7 +119,7 @@ unsafe fn capture(frame: &Frame, running: &AtomicBool) -> std::result::Result<()
                     }
                     n += 1;
                     *frame.lock().unwrap() = Some((w, h, out, n));
-                    crate::app::wake();
+                    crate::app::wake_frame();
                 }
                 let _ = buf.Unlock();
             }

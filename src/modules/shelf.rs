@@ -45,9 +45,24 @@ fn human_size(b: u64) -> String {
     }
 }
 
+/// On another computer (a share, or a drive letter for one).
+fn on_network(path: &str) -> bool {
+    if path.starts_with(r"\\") {
+        return !path.starts_with(r"\\?\") && !path.starts_with(r"\\.\");
+    }
+    const REMOTE: u32 = 4;
+    path.get(..3).is_some_and(|root| root.ends_with(":\\") && unsafe { windows::Win32::Storage::FileSystem::GetDriveTypeW(&windows::core::HSTRING::from(root)) } == REMOTE)
+}
+
 impl Item {
     fn from_path(path: &str) -> Option<Item> {
         let p = std::path::Path::new(path);
+        if on_network(path) {
+            // Asking about it can take long when the other side is off (and
+            // it's read at start-up): taken as it is.
+            let name = p.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
+            return Some(Item { path: path.to_string(), name, detail: "On the network".into(), kind: Kind::File });
+        }
         let meta = std::fs::metadata(p).ok()?;
         let name = p.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
         let (kind, detail) = if meta.is_dir() {

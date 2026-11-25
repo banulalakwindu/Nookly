@@ -48,7 +48,9 @@ to delete this folder too.
   microphone or camera. Nookly never accesses the microphone or camera
   itself.
 - **System status:** battery, network, volume, Caps Lock, keyboard language
-  and Bluetooth state, to show alerts.
+  and Bluetooth state, to show alerts. (To show Caps Lock and language
+  switches at once, Windows tells Nookly when a key is let go. It only
+  checks whether it's one of those; no other key is looked at or kept.)
 - **System monitor:** Windows' CPU, memory, network and disk counters, read
   once a second and kept only in memory (the last minute).
 - **AI agents** (off until you connect an agent): when you switch on Hermes,

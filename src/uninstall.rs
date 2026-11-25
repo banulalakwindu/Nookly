@@ -64,11 +64,39 @@ fn close_running() -> bool {
 }
 
 
+/// Close the taskbar add-on beside this exe (wait up to 6 s), and see that
+/// Windows' own taskbar is back: what it was like is in the data folder, so
+/// before that goes.
+fn close_taskbar(dir: &Path) {
+    unsafe {
+        if let Ok(h) = FindWindowW(w!("NooklyTaskbar"), None) {
+            if !h.0.is_null() && window_exe(h).is_some_and(|p| p.parent().is_some_and(|d| same_file(d, dir))) {
+                let _ = PostMessageW(Some(h), WM_CLOSE, WPARAM(0), LPARAM(0));
+                for _ in 0..60 {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    if !IsWindow(Some(h)).as_bool() {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    crate::shell::restore_windows_taskbar();
+}
+
+/// The taskbar add-on's files beside this exe.
+fn taskbar_files(dir: &Path) -> Vec<PathBuf> {
+    ["exe", "old", "new"].iter().map(|x| dir.join(format!("nookly-taskbar.{x}"))).collect()
+}
+
 /// What uninstalling would do, one step per line (also the --dry-run output).
 pub fn plan(keep_data: bool) -> Vec<String> {
     let exe = exe();
     let dir = exe.parent().map(Path::to_path_buf).unwrap_or_default();
     let mut v = vec!["close Nookly if this copy is running".to_string(), "disconnect Hermes, Claude Code and Codex".to_string()];
+    if taskbar_files(&dir).iter().any(|f| f.exists()) {
+        v.insert(1, "close and delete the taskbar add-on (Windows' own taskbar comes back)".into());
+    }
     if crate::tray::startup_points_here() {
         v.push("remove it from Windows startup".into());
     }
@@ -133,6 +161,17 @@ pub fn run(args: &[String]) -> i32 {
         }
         return 2;
     }
+    let dir = exe().parent().map(Path::to_path_buf).unwrap_or_default();
+    close_taskbar(&dir);
+    for f in taskbar_files(&dir) {
+        // (Its program may take a moment to end.)
+        for _ in 0..20 {
+            if !f.exists() || std::fs::remove_file(&f).is_ok() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
     crate::modules::agents::disconnect_all();
     if crate::tray::startup_points_here() {
         crate::tray::set_startup(false);
@@ -141,7 +180,6 @@ pub fn run(args: &[String]) -> i32 {
         let _ = std::fs::remove_dir_all(crate::store::dir());
     }
     let exe = exe();
-    let dir = exe.parent().map(Path::to_path_buf).unwrap_or_default();
     let unins = dir.join("unins000.exe");
     if unins.exists() && dir.join("unins000.dat").exists() {
         // Inno's uninstaller removes the files, shortcuts and registry entry.

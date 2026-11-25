@@ -378,7 +378,8 @@ fn parse_lrc(s: &str) -> Vec<(f64, String)> {
             out.push((t, text.clone()));
         }
     }
-    out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    out.retain(|l| l.0.is_finite());
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
     out
 }
 
