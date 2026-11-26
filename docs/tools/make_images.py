@@ -31,7 +31,9 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-EXE = ROOT / "target" / "release" / "nookly.exe"
+# The renders are in the self-test build (build.ps1 makes it).
+EXE = ROOT / "target" / "selftest" / "release" / "nookly.exe"
+TASKBAR = ROOT / "target" / "release" / "nookly-taskbar.exe"
 IMAGES = ROOT / "docs" / "images"
 WORK = Path(tempfile.gettempdir()) / "nookly-media"
 FONTS = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
@@ -68,7 +70,9 @@ def seed(data: Path):
         (files / name).write_bytes(b"\0" * kb * 1024)
     (data / "settings.txt").write_text(
         "edge=top\nstyle=full\npersonality=1\nmascot=eyes\nvolume_overlay=1\nprivacy_dots=1\n"
-        "clip_on=1\nclip_mode=text\nonboarded=1\nsound=chime\nnotif_on=0\nnotif_text=1\nlyrics=0\n",
+        "clip_on=1\nclip_mode=text\nonboarded=1\nsound=chime\nnotif_on=0\nnotif_text=1\nlyrics=0\n"
+        # The taskbar's pictures (make_taskbar.py).
+        "taskbar_on=1\nbar_autohide=1\nbar_layout=start:l,search:l,apps:m,@weather:m:m,@media:l:m,@system:m:m,lang:r,quick:r,@datetime:m:r,clock:r:off,notifs:r,tray:r\n",
         encoding="utf-8",
     )
     now = time.time()
@@ -450,7 +454,7 @@ def make_demo(data: Path):
 def main():
     what = sys.argv[1] if len(sys.argv) > 1 else "all"
     if not EXE.exists():
-        sys.exit("build first: cargo build --release")
+        sys.exit("build first: cargo build --release --features selftest --bin nookly --target-dir target/selftest")
     WORK.mkdir(exist_ok=True)
     data = WORK / "data"
     seed(data)
@@ -460,6 +464,15 @@ def main():
         import make_shots  # noqa: E402  (docs/tools/make_shots.py)
 
         make_shots.make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font)
+        if TASKBAR.exists():
+            import make_taskbar  # noqa: E402
+
+            make_taskbar.make(data, read_raw, wallpaper, fake_windows, rounded_mask, font)
+        # The cards' small pictures (docs/tools/make_cards.py).
+        import make_cards  # noqa: E402
+
+        for n in make_cards.used():
+            make_cards.card(n)
 
 
 if __name__ == "__main__":

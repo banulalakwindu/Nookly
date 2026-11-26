@@ -2621,6 +2621,58 @@ fn animate(a: &mut App, dir: &std::path::Path, n: &mut u32, steps: u32, crop: (i
 
 /// `nookly --render-docs <dir>`: render every view with demo data for the
 /// README/user guide. Run with `NOOKLY_DATA_DIR` pointing at seeded demo data.
+/// The taskbar's docs render (`nookly-taskbar --render-docs`) shows what
+/// the notch draws for it: every widget face on the bar of `st` (the demo's
+/// layout), and the full views it opens, for each of `themes` (light and
+/// dark glass too), at 2x. Written to `<dir>/bar_faces_<theme>.bin`.
+fn bar_faces(a: &mut App, dir: &std::path::Path, themes: &[(&str, bool)]) {
+    let saved = a.settings.clone();
+    a.surf_docs = true;
+    a.settings.extra.insert("taskbar_on".into(), "1".into());
+    for &(theme, light) in themes {
+        a.settings.extra.insert("bar_theme".into(), theme.into());
+        a.settings.extra.insert("bar_same_theme".into(), "0".into());
+        a.surf_scale = 2.0;
+        a.surf_light = light;
+        a.surf_keys.clear();
+        a.surf_cache.clear();
+        a.push_faces();
+        let mut faces = a.surf_faces.clone();
+        // The full views the pictures open: a widget's bubble.
+        for id in ["weather", "media", "date"] {
+            let Some(k) = crate::barcfg::CATALOG.iter().position(|d| d.id == id) else { continue };
+            a.full = None;
+            a.open_full(k + 1);
+            if let Some(f) = a.full.as_ref().and_then(|f| f.face.clone()) {
+                faces.push(f);
+            }
+        }
+        a.full = None;
+        let mut out = Vec::new();
+        out.extend_from_slice(&(faces.len() as u32).to_le_bytes());
+        for f in &faces {
+            out.extend_from_slice(&(f.id.len() as u32).to_le_bytes());
+            out.extend_from_slice(f.id.as_bytes());
+            for v in [f.w, f.h, f.dip_w.to_bits(), f.px.len() as u32] {
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+            out.extend_from_slice(&f.px);
+        }
+        let _ = std::fs::write(dir.join(format!("bar_faces_{theme}{}.bin", if light { "_light" } else { "" })), out);
+    }
+    // The feed: every widget's name and value.
+    let (_, widgets) = a.notch_items();
+    let items: Vec<crate::feed::Item> = widgets
+        .into_iter()
+        .map(|(w, _)| crate::feed::Item { id: w.id.to_string(), name: w.name.to_string(), icon: w.icon.to_string(), color: w.color, value: w.value, short: w.short, ring: w.ring, quiet: w.quiet })
+        .collect();
+    let _ = std::fs::write(dir.join("bar_feed.txt"), crate::feed::encode(&items));
+    a.surf_docs = false;
+    a.surf_faces.clear();
+    a.surf_keys.clear();
+    a.settings = saved;
+}
+
 pub fn render_docs(dir: &std::path::Path) -> String {
     let _ = std::fs::create_dir_all(dir);
     with_app(|a| {
@@ -2653,6 +2705,14 @@ pub fn render_docs(dir: &std::path::Path) -> String {
         let act = |a: &mut App, i: usize, id: u32| a.call(i, |m, c| m.action(id, (0.0, 0.0), c));
         let tick = |a: &mut App, i: usize| a.call(i, |m, c| m.tick(c));
         tick(a, music);
+        // The demos' data first (the taskbar's widgets show it).
+        for (t, id) in [("System Monitor", crate::modules::monitor::A_DEMO), ("Widgets", crate::modules::widgets::A_DEMO)] {
+            if let Some(i) = find(a, t) {
+                act(a, i, id);
+            }
+        }
+        bar_faces(a, dir, &[("default", false), ("paper", false), ("ocean", false), ("glass", false), ("glass", true)]);
+        log += "bar faces\n";
 
         // Collapsed looks.
         shot(a, dir, "collapsed_full_music");

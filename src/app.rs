@@ -441,6 +441,8 @@ pub struct App {
     full: Option<FullView>,
     surf_gfx: Option<Gfx>,
     surf_light: bool,
+    /// Drawing the taskbar's faces for the docs (no taskbar running).
+    surf_docs: bool,
     /// The scale the taskbar draws at (its DPI times Settings > Size);
     /// 0 until it says.
     surf_scale: f32,
@@ -723,6 +725,7 @@ impl App {
                 full: None,
                 surf_gfx: None,
                 surf_light: false,
+                surf_docs: false,
                 surf_scale: 0.0,
                 face_info: Default::default(),
                 dock_x: None,
@@ -1221,7 +1224,8 @@ impl App {
     /// tell the taskbar, when one of them shows something new: each says
     /// what it shows with a key, so at rest nothing is drawn.
     pub fn push_faces(&mut self) {
-        let Some(bar) = bar_window() else {
+        let bar = bar_window().or(self.surf_docs.then(HWND::default));
+        let Some(bar) = bar else {
             self.surf = None;
             self.surf_gfx = None;
             self.surf_keys.clear();
@@ -1229,7 +1233,7 @@ impl App {
             return;
         };
         // Slid away: nobody sees them (they're drawn when it comes out).
-        if !self.bar_out && self.surf.is_some() && !self.surf_keys.is_empty() {
+        if !self.bar_out && self.surf.is_some() && !self.surf_keys.is_empty() && !self.surf_docs {
             return;
         }
         let want = crate::barcfg::faces(&self.settings);
@@ -1385,7 +1389,7 @@ impl App {
     /// Draw the open full view (when it looks different, write it).
     fn push_full(&mut self) {
         let Some(mut f) = self.full.take() else { return };
-        let Some(bar) = bar_window() else {
+        let Some(bar) = bar_window().or(self.surf_docs.then(HWND::default)) else {
             self.full = Some(f);
             return;
         };

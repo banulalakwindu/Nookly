@@ -18,7 +18,7 @@ fetch("https://api.github.com/repos/banulalakwindu/Nookly/releases/latest")
   var lb = document.getElementById("lb");
   if (!lb) return;
   document.querySelectorAll(".card img, div.shot img").forEach(function (img) {
-    img.addEventListener("click", function () { lb.querySelector("img").src = img.src; lb.classList.add("on"); });
+    img.addEventListener("click", function () { lb.querySelector("img").src = img.dataset.full || img.src; lb.classList.add("on"); });
   });
   lb.addEventListener("click", function () { lb.classList.remove("on"); });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") lb.classList.remove("on"); });

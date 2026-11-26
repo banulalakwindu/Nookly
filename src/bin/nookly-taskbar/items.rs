@@ -843,12 +843,14 @@ pub fn draw_windows(bar: &mut Bar, ui: &mut Ui, app: &apps::App, r: Rect, ids: I
             let mut inner = card.inset(6.0);
             title_row(bar, ui, inner.cut_top(24.0, 4.0), h, ids.close + j as u32, 11.5);
             let slot = inner;
-            let iconic = unsafe { windows::Win32::UI::WindowsAndMessaging::IsIconic(h).as_bool() };
+            let iconic = crate::render::minimized(h) || unsafe { windows::Win32::UI::WindowsAndMessaging::IsIconic(h).as_bool() };
             if iconic {
                 // Minimized windows have no picture: the app's icon.
                 ui.fill_rr(slot, 8.0, col::TEXT.with_a(0.05));
                 app_icon(&mut bar.icons, ui, app, slot.centered(36.0, 36.0), &mut bar.apps);
                 ui.text("Minimized", Rect::new(slot.x, slot.b() - 22.0, slot.w, 18.0), 10.0, col::FAINT, Weight::Regular, Align::Center);
+            } else if crate::DEMO.load(std::sync::atomic::Ordering::Relaxed) {
+                crate::render::preview(ui, slot, h);
             } else {
                 bar.thumb_slots.push((h, slot));
             }
@@ -1111,6 +1113,9 @@ pub fn widget_panel(bar: &Bar, pos: usize) -> bool {
 
 /// Tell the notch which widget's full view is open (None: none).
 pub fn tell_full(bar: &Bar, pos: Option<usize>) {
+    if crate::DEMO.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
     // (Of several bars, the one that opened it closes it.)
     static OWNER: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
     let me = bar.hwnd.0 as isize;

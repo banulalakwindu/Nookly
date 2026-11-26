@@ -32,6 +32,11 @@ fn now() -> i64 {
     ((f.dwHighDateTime as i64) << 32) | f.dwLowDateTime as i64
 }
 
+/// The pictures' number.
+pub fn demo(n: u32) {
+    COUNT.store(n, Ordering::Relaxed);
+}
+
 pub fn count() -> u32 {
     COUNT.load(Ordering::Relaxed)
 }

@@ -152,6 +152,14 @@ fn note(msg: u32, window: isize, l: isize, badge: Option<Icon>) {
     }
 }
 
+/// The pictures' progress and badges.
+pub fn demo(window: HWND, state: State, value: f32, badge: Option<Icon>) {
+    if let Ok(mut g) = TOLD.lock() {
+        let ver = VER.fetch_add(1, Ordering::Relaxed);
+        g.get_or_insert_with(HashMap::new).insert(window.0 as isize, Told { state, value, badge: badge.map(|b| (ver, b)) });
+    }
+}
+
 /// An app's progress: its windows', the one that matters most (an error, a
 /// pause, then the least done).
 pub fn progress(windows: &[HWND]) -> Option<(State, f32)> {

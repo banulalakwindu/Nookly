@@ -229,7 +229,6 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
     single("shelf", "panel_shelf", "File shelf", "Drop files on the notch to keep them handy, drag them out when you need them.", ["Drag in", "Drag out", "Open with a click"])
     single("clipboard", "panel_clipboard", "Clipboard history", "Everything you copy, newest first. Off until you turn it on.", ["Text, files or images", "Pin to keep", "Skips password managers"])
     window("settings", "settings_general", "Settings", "Its own window: the gear, a right-click on the notch or the tray icon opens it.", ["Notch on / off", "Appearance", "Theme", "Mascot", "Features", "Widgets", "Shortcuts"])
-    window("settings-taskbar", "settings_taskbar", "Taskbar: coming soon", "A custom Nookly taskbar in the same style, with its own on / off switch.", ["Coming soon", "Taskbar mascot today"])
     single("prayer", "panel_prayer", "Prayer times", "Worked out on your PC for your city, with optional reminders.", ["16 cities or any place", "Hanafi or Shafi Asr", "Minute nudges"])
     single("agents", "panel_agents", "AI agents", "See when Hermes, Claude Code or Codex is working, needs your OK, or is done.", ["Connect with one click", "Status only, stays on your PC", "Alerts when it needs you"])
     single("monitor", "panel_monitor", "System monitor", "CPU, memory and network speed, with a minute of history.", ["Free disk space", "Optional on the closed notch"])
@@ -243,7 +242,7 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
     single("calendar", "panel_calendar", "Calendar", "The month at a glance, with the days your tasks are due.", ["Today in red", "Due-task dots", "Wheel for months"])
     window("themes", "settings_look", "Themes", "Ten themes, Liquid Glass included, and your own colours, checked for readable contrast.", ["Black", "Rose", "Forest", "Paper", "Liquid Glass", "Yours"])
     # Liquid Glass on the very scene it was rendered over, lined up, so the
-    # blur and the bent edges show against what's around it.
+    # blur shows against what's around it.
     scene_png = Path(data) / "scene.png"
     if scene_png.exists() and (out / "glass_scene.raw").exists():
         bg = Image.open(scene_png).convert("RGBA")
@@ -253,10 +252,10 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
         bg = bg.resize((cw, round(bg.height * k)), Image.LANCZOS)
         glass = glass.resize((cw, round(glass.height * k)), Image.LANCZOS)
         bg.alpha_composite(glass)
-        page(bg, rounded_mask(cw, bg.height, 26), "Liquid Glass", "Real glass: what's behind is blurred and bent at the edges, with light that moves like water. No outline.", ["Lens edges", "Rim light", "Drifting glints", "Adapts to light and dark"]).save(IMAGES / "glass.png")
+        page(bg, rounded_mask(cw, bg.height, 26), "Liquid Glass", "Real glass: a smooth, blurred view of what's behind, with soft light along its edge. No outline.", ["Smooth blur", "Rim light", "Readable on any wallpaper", "Adapts to light and dark"]).save(IMAGES / "glass.png")
         print("   glass")
     else:
-        single("glass", "glass_color", "Liquid Glass", "Real glass: what's behind, blurred and bent at the edges, with light that moves like water. No outline.", ["Lens edges", "Rim light", "Drifting glints", "Adapts to light and dark"])
+        single("glass", "glass_color", "Liquid Glass", "Real glass: a smooth, blurred view of what's behind, with soft light along its edge. No outline.", ["Smooth blur", "Rim light", "Readable on any wallpaper", "Adapts to light and dark"])
     window("settings-panels", "settings_panels", "Your panel order", "Settings > Panels: drag the panels into the order the notch shows them.", ["Drag to reorder", "Numbered", "Reset order"])
     window("settings-location", "settings_location", "Location", "Settings > Location: your place, once, for the weather and prayer times.", ["Time zone (offline)", "Windows location", "Search a city"])
     window("settings-features", "settings_features", "Features", "Switch on only what you use; what's off doesn't run at all.", ["Minimal", "Student", "Work", "Everything", "Profiles"])
@@ -365,4 +364,7 @@ def make(data, run, read_raw, wallpaper, fake_windows, rounded_mask, font):
     d.text((c.width // 2, c.height // 2 + 34), "to any edge of any screen, like the taskbar", font=font(30), fill=TEXT, anchor="mm")
     page(c, m, "Top, bottom, left or right", "Or pick one in Settings > Appearance. Panels always open upright.", []).save(IMAGES / "positions.png")
     print("   positions")
+    # The taskbar's widget faces, for its own pictures (make_taskbar.py).
+    for f in out.glob("bar_*"):
+        shutil.copy(f, Path(data) / f.name)
     shutil.rmtree(out)

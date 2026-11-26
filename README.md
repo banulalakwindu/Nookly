@@ -67,6 +67,8 @@ And more: **Downloads finished** (click to open), **Mirror** (a camera check bef
 
 A taskbar that replaces Windows' own, in the notch's bubble shape and theme (Liquid Glass included), that grows and shrinks to fit what's on it. **[See it and try a demo on its own page](https://banulalakwindu.github.io/Nookly/taskbar.html).**
 
+<img src="docs/images/taskbar-windows.png" alt="Nookly Taskbar: an app's windows with live previews">
+
 <img src="docs/images/taskbar-widgets.png" alt="Nookly Taskbar widgets: every widget at every size">
 
 **Only if you want it.** The taskbar is a separate add-on of under 1 MB. It isn't part of the Nookly download, so if you don't install it, it takes **no space, no memory and no CPU** at all: Nookly stays exactly as light as before. To get it, open **Settings > Taskbar > Download taskbar**: Nookly fetches the add-on of its own version from the GitHub release, checks it against the release's SHA-256, installs it next to itself and switches it on. When Nookly updates, the add-on updates with it. **Remove taskbar** in the same place deletes it again.

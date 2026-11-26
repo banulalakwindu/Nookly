@@ -64,6 +64,13 @@ pub fn icons() -> Vec<TrayIcon> {
     ICONS.lock().map(|l| l.iter().filter(|i| !i.hidden && i.icon.is_some()).cloned().collect()).unwrap_or_default()
 }
 
+/// The pictures' icons.
+pub fn demo(list: Vec<TrayIcon>) {
+    if let Ok(mut l) = ICONS.lock() {
+        *l = list;
+    }
+}
+
 /// Running?
 pub fn running() -> bool {
     WND.load(Ordering::Relaxed) != 0

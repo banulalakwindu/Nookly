@@ -9,7 +9,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
@@ -29,7 +29,7 @@ jobs:
           # FAIL lines become annotations, readable on the run's summary page.
           Get-Content $env:NOOKLY_SELFTEST_OUT | ForEach-Object { if ($_ -like 'FAIL*') { Write-Host "::error::$_" } else { Write-Host $_ } }
           if (Select-String -Path $env:NOOKLY_SELFTEST_OUT -Pattern '^FAIL' -Quiet) { exit 1 }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: nookly
           path: target/release/nookly.exe

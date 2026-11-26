@@ -28,7 +28,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       new: ${{ steps.v.outputs.new }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - id: v
@@ -48,7 +48,7 @@ jobs:
     if: needs.check.outputs.new == 'true'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
 
       # No build cache for releases: always a clean build from source.
@@ -109,8 +109,51 @@ jobs:
           $out += 'Windows may say "Windows protected your PC": click More info, then Run anyway (the app is not code-signed yet).'
           Set-Content -Path notes.md -Value $out -Encoding utf8
 
+      # GitHub's own servers can be busy (500, 502, 504: the 1.0.0 release
+      # waited out an outage): two more tries, a few minutes apart. The
+      # release stays a draft until its files are all up, and a try after
+      # a failed one carries on from it.
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+        id: publish
+        continue-on-error: true
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ needs.check.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Nookly ${{ needs.check.outputs.version }}
+          body_path: notes.md
+          files: |
+            ${{ steps.pick.outputs.file }}
+            ${{ steps.pick.outputs.bar }}
+          make_latest: true
+
+      - name: Wait, then publish again
+        if: steps.publish.outcome == 'failure'
+        continue-on-error: true
+        shell: pwsh
+        run: Start-Sleep -Seconds 180
+      - name: Publish GitHub release (second try)
+        id: again
+        if: steps.publish.outcome == 'failure'
+        continue-on-error: true
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ needs.check.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Nookly ${{ needs.check.outputs.version }}
+          body_path: notes.md
+          files: |
+            ${{ steps.pick.outputs.file }}
+            ${{ steps.pick.outputs.bar }}
+          make_latest: true
+
+      - name: Wait longer, then publish again
+        if: steps.publish.outcome == 'failure' && steps.again.outcome == 'failure'
+        shell: pwsh
+        run: Start-Sleep -Seconds 600
+      - name: Publish GitHub release (last try)
+        if: steps.publish.outcome == 'failure' && steps.again.outcome == 'failure'
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ needs.check.outputs.version }}
           target_commitish: ${{ github.sha }}

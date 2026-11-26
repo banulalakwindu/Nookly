@@ -256,6 +256,9 @@ pub fn exe_of(pid: u32) -> Option<String> {
 }
 
 pub fn title(h: HWND) -> String {
+    if let Some(t) = crate::render::title(h) {
+        return t;
+    }
     let mut buf = [0u16; 256];
     let n = unsafe { GetWindowTextW(h, &mut buf) };
     String::from_utf16_lossy(&buf[..n.max(0) as usize])

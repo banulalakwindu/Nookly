@@ -28,6 +28,7 @@ mod jump;
 mod layout;
 mod menu;
 mod peek;
+mod render;
 mod tray;
 mod unread;
 
@@ -51,12 +52,20 @@ use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::*;
 
+/// Drawing the website's pictures (`--render-docs`): made-up apps, nothing
+/// shown or touched on the screen (see render.rs).
+pub static DEMO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn demo() -> bool {
+    DEMO.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Window class; the notch finds the bar by it.
 pub const CLASS: PCWSTR = w!("NooklyTaskbar");
 /// The bars on the other screens (the notch deals with the main one).
 pub const MORE_CLASS: PCWSTR = w!("NooklyTaskbarMore");
 /// Bar height (DIPs at 100%), corner radius.
-const BAR_H: f32 = 48.0;
+pub const BAR_H: f32 = 48.0;
 const RAD: f32 = 16.0;
 /// A bubble keeps this far inside the ends of what it grows out of (room
 /// for its flares and the parent's rounded corners).
@@ -506,6 +515,9 @@ impl Bar {
 
     /// Should the bar be out right now?
     fn wanted(&self) -> bool {
+        if demo() {
+            return true;
+        }
         if self.fullscreen {
             return false;
         }
@@ -523,7 +535,7 @@ impl Bar {
         time::SECONDS.store(false, std::sync::atomic::Ordering::Relaxed);
         self.order = if self.is_main() { items::order(&self.settings) } else { items::other_order(&self.settings) };
         self.placed = nookly_core::barcfg::placed(&self.settings);
-        if !self.is_main() {
+        if !self.is_main() || demo() {
             return;
         }
         self.apps.scan(&self.settings);
@@ -1059,6 +1071,10 @@ impl Bar {
     /// pop-up; leave both the tile and the pop-up to close it. Returns
     /// true while a timer runs (so frames keep coming).
     fn step_hover(&mut self) -> bool {
+        // The pictures open their pop-ups themselves, and keep them.
+        if demo() {
+            return false;
+        }
         let in_pop = self.pop_b.as_ref().is_some_and(|b| b.inside);
         let in_sub = self.sub_b.as_ref().is_some_and(|b| b.inside);
         let id = if self.inside || in_pop || in_sub { self.hit_at(self.mouse.0, self.mouse.1) } else { None };
@@ -1256,7 +1272,8 @@ impl Bar {
             return;
         }
         self.next_grab = now + std::time::Duration::from_secs(8);
-        if let Some((w, h, mut px, lum)) = glass::capture_behind(self.hwnd, strip) {
+        let got = if demo() { render::scene(strip) } else { glass::capture_behind(self.hwnd, strip) };
+        if let Some((w, h, mut px, lum)) = got {
             let was = self.glass_light;
             if lum > 0.62 {
                 self.glass_light = true;
@@ -1379,7 +1396,8 @@ impl Bar {
                 bottom: (bar_origin.1 + (c.b() * k).ceil() as i32).min(self.mon.bottom),
             };
             let c = Rect::new((r.left - bar_origin.0) as f32 / k, (r.top - bar_origin.1) as f32 / k, (r.right - r.left) as f32 / k, (r.bottom - r.top) as f32 / k);
-            if let Some((w, h, mut px, _)) = glass::capture_behind(b.hwnd, r) {
+            let got = if demo() { render::scene(r) } else { glass::capture_behind(b.hwnd, r) };
+            if let Some((w, h, mut px, _)) = got {
                 glass::tame(&mut px, self.glass_light);
                 if let Some(bmp) = b.gfx.make_bitmap(w, h, &px) {
                     b.backdrop = Some((bmp, c, b.gfx.generation));
@@ -1421,11 +1439,14 @@ impl Bar {
         }
         b.gfx.end_and_present(b.hwnd, sx, sy);
         // Live previews only once it's grown (DWM draws them unclipped).
-        if alpha > 0.9 {
+        if alpha > 0.9 && !demo() {
             self.sync_thumbs(&mut b, alpha);
         } else {
             self.thumb_slots.clear();
             b.clear_thumbs();
+        }
+        if !b.visible && demo() {
+            b.visible = true;
         }
         if !b.visible {
             unsafe {
@@ -1827,6 +1848,9 @@ impl Bar {
             (Some((h, since)), on) => {
                 if on.is_none() && since.elapsed().as_secs_f32() < PEEK_WAIT {
                     return true;
+                }
+                if demo() {
+                    return false;
                 }
                 crumb(format!("peek at window {:?}", h.0));
                 peek::start(h, self.hwnd);
@@ -2260,6 +2284,34 @@ impl Bar {
             ms = ms.min(250);
         }
         ms.max(15)
+    }
+
+    /// Pop-ups closed a while (half a minute) give their windows and
+    /// pictures back; the next one makes them again.
+    fn free_pops(&mut self) {
+        if self.popup.is_some() || self.pop_since.elapsed().as_secs() < 30 {
+            return;
+        }
+        let mut freed = false;
+        for slot in [&mut self.pop_b, &mut self.sub_b] {
+            if slot.as_ref().is_some_and(|b| !b.active() && !b.visible) {
+                if let Some(mut b) = slot.take() {
+                    b.clear_thumbs();
+                    unsafe {
+                        let _ = windows::Win32::System::Ole::RevokeDragDrop(b.hwnd);
+                        let _ = DestroyWindow(b.hwnd);
+                    }
+                    freed = true;
+                }
+            }
+        }
+        if freed {
+            self.sub_app = None;
+            if let Some(g) = self.gfx.as_mut() {
+                g.forget_text();
+            }
+            nookly_core::shell::trim_memory();
+        }
     }
 
     /// Where the mouse really is: Windows doesn't always say the mouse left
@@ -2900,6 +2952,25 @@ impl Bar {
     }
 }
 
+/// The windows' classes.
+fn register_classes() -> Result<()> {
+    unsafe {
+        let hinst = GetModuleHandleW(None)?;
+        let wc = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            lpfnWndProc: Some(wndproc),
+            hInstance: hinst.into(),
+            lpszClassName: CLASS,
+            hCursor: LoadCursorW(None, IDC_ARROW)?,
+            ..Default::default()
+        };
+        RegisterClassExW(&wc);
+        RegisterClassExW(&WNDCLASSEXW { lpszClassName: bubble::CLASS, ..wc });
+        RegisterClassExW(&WNDCLASSEXW { lpszClassName: MORE_CLASS, ..wc });
+        Ok(())
+    }
+}
+
 fn create() -> Result<()> {
     unsafe {
         let hinst = GetModuleHandleW(None)?;
@@ -3025,6 +3096,7 @@ fn run_loop() {
                 last_look = Instant::now();                each_bar(|b| {
                     b.check_fullscreen();
                     b.check_strip();
+                    b.free_pops();
                     if b.inside || b.popup.is_some() || b.shell_open || b.down.is_some() {
                         b.verify_mouse();
                     }
@@ -3052,6 +3124,14 @@ fn main() {
         if args.iter().any(|a| a == "--restore") {
             shell::restore_windows_taskbar();
             return;
+        }
+        // `--render-docs <dir>`: the website's pictures (render.rs).
+        if let Some(i) = args.iter().position(|a| a == "--render-docs") {
+            let dir = std::path::PathBuf::from(args.get(i + 1).cloned().unwrap_or_else(|| "taskbar-render".into()));
+            let code = render::run(&dir);
+            // (As at the end of main: Windows' own unloading would crash.)
+            let _ = windows::Win32::System::Threading::TerminateProcess(windows::Win32::System::Threading::GetCurrentProcess(), code as u32);
+            std::process::exit(code);
         }
         // `--icon-test <path> <px>`: what the shell gives for an icon.
         if let Some(i) = args.iter().position(|a| a == "--icon-test") {

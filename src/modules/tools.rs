@@ -688,6 +688,45 @@ pub mod tz {
         unsafe { SystemTimeToTzSpecificLocalTimeEx(Some(&d), &u, &mut out) }.ok()?;
         Some(out)
     }
+    /// Wall time `local` in zone `key` as UTC (a FILETIME count).
+    pub fn utc(key: &str, local: &SYSTEMTIME) -> Option<i64> {
+        let d = zones().0.iter().find(|(k, _)| k == key)?.1;
+        let mut out = SYSTEMTIME::default();
+        unsafe { TzSpecificLocalTimeToSystemTimeEx(Some(&d), local, &mut out) }.ok()?;
+        Some(ft(&out))
+    }
+
+    /// Windows' name for a time zone given as calendars name it: Windows'
+    /// own ("Eastern Standard Time", as Outlook writes), or the IANA one
+    /// ("America/New_York", as Google writes), which Windows' copy of ICU
+    /// translates. None when neither knows it.
+    pub fn windows_key(id: &str) -> Option<String> {
+        let id = id.trim().trim_matches('"');
+        if known(id) {
+            return Some(id.to_string());
+        }
+        // Some write it inside a longer path ("/mozilla.org/.../Europe/London").
+        let parts: Vec<&str> = id.split('/').filter(|p| !p.is_empty()).collect();
+        (0..parts.len()).find_map(|i| from_iana(&parts[i..].join("/")))
+    }
+
+    fn from_iana(id: &str) -> Option<String> {
+        type Get = unsafe extern "C" fn(*const u16, i32, *mut u16, i32, *mut i32) -> i32;
+        static F: OnceLock<Option<usize>> = OnceLock::new();
+        let f = (*F.get_or_init(|| unsafe {
+            use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+            let m = LoadLibraryW(windows::core::w!("icu.dll")).ok()?;
+            GetProcAddress(m, windows::core::s!("ucal_getWindowsTimeZoneID")).map(|f| f as usize)
+        }))?;
+        let f: Get = unsafe { std::mem::transmute::<usize, Get>(f) };
+        let w: Vec<u16> = id.encode_utf16().collect();
+        let mut out = [0u16; 128];
+        let mut status = 0i32;
+        let n = unsafe { f(w.as_ptr(), w.len() as i32, out.as_mut_ptr(), out.len() as i32, &mut status) };
+        let key = String::from_utf16_lossy(&out[..(n.max(0) as usize).min(out.len())]);
+        (status <= 0 && n > 0 && known(&key)).then_some(key)
+    }
+
     /// This PC's zone, as Windows names it ("Bangladesh Standard Time").
     pub fn local_key() -> String {
         let mut d = DYNAMIC_TIME_ZONE_INFORMATION::default();

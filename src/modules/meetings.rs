@@ -67,18 +67,65 @@ fn utc_to_unix(y: i32, m: u32, d: u32, h: u32, mi: u32, s: u32) -> f64 {
     crate::modules::countdown::day_number(y, m, d) as f64 * 86400.0 + (h * 3600 + mi * 60 + s) as f64
 }
 
-/// DTSTART value: (unix, all day). "20261112T090000Z" is UTC, without the
-/// Z it's local wall time (a TZID other than yours is read as yours),
-/// "20261112" is a whole day.
-fn parse_time(v: &str) -> Option<(f64, bool)> {
+/// Whose clock a time is on: this PC's, UTC ("...Z"), or a time zone the
+/// calendar names (TZID, by Windows' name for it).
+#[derive(Clone, Debug, PartialEq)]
+enum Clock {
+    Local,
+    Utc,
+    Zone(String),
+}
+
+impl Clock {
+    /// The clock of a value with these parameters. A zone that can't be
+    /// told counts as this PC's.
+    fn of(v: &str, params: &str) -> Clock {
+        if v.trim().ends_with('Z') {
+            return Clock::Utc;
+        }
+        params
+            .split(';')
+            .find_map(|p| p.split_once('=').filter(|(k, _)| k.eq_ignore_ascii_case("TZID")).map(|x| x.1))
+            .and_then(crate::modules::tools::tz::windows_key)
+            .map_or(Clock::Local, Clock::Zone)
+    }
+
+    /// A wall time on this clock, as unix seconds.
+    fn unix(&self, y: i32, m: u32, d: u32, h: u32, mi: u32, s: u32) -> f64 {
+        match self {
+            Clock::Local => local_to_unix(y, m, d, h, mi, s),
+            Clock::Utc => utc_to_unix(y, m, d, h, mi, s),
+            Clock::Zone(k) => {
+                let st = windows::Win32::Foundation::SYSTEMTIME { wYear: y as u16, wMonth: m as u16, wDay: d as u16, wHour: h as u16, wMinute: mi as u16, wSecond: s as u16, ..Default::default() };
+                crate::modules::tools::tz::utc(k, &st).map_or_else(|| local_to_unix(y, m, d, h, mi, s), crate::time::filetime_to_unix)
+            }
+        }
+    }
+}
+
+/// A date-time value's parts: (year, month, day, hour, minute, second, all
+/// day). "20261112T090000" or "20261112" (a whole day).
+fn wall(v: &str) -> Option<(i32, u32, u32, u32, u32, u32, bool)> {
     let v = v.trim();
     let n = |a: usize, b: usize| v.get(a..b)?.parse::<u32>().ok();
     let (y, m, d) = (n(0, 4)? as i32, n(4, 6)?, n(6, 8)?);
     if v.len() == 8 {
-        return Some((local_to_unix(y, m, d, 0, 0, 0), true));
+        return Some((y, m, d, 0, 0, 0, true));
     }
-    let (h, mi, s) = (n(9, 11)?, n(11, 13)?, n(13, 15).unwrap_or(0));
-    Some((if v.ends_with('Z') { utc_to_unix(y, m, d, h, mi, s) } else { local_to_unix(y, m, d, h, mi, s) }, false))
+    Some((y, m, d, n(9, 11)?, n(11, 13)?, n(13, 15).unwrap_or(0), false))
+}
+
+/// A date-time value: (unix, all day). "20261112T090000Z" is UTC; with a
+/// TZID it's that zone's wall time, without one this PC's; "20261112" is a
+/// whole day (here).
+fn parse_time_in(v: &str, params: &str) -> Option<(f64, bool)> {
+    let (y, m, d, h, mi, s, all_day) = wall(v)?;
+    let clock = if all_day { Clock::Local } else { Clock::of(v, params) };
+    Some((clock.unix(y, m, d, h, mi, s), all_day))
+}
+
+fn parse_time(v: &str) -> Option<(f64, bool)> {
+    parse_time_in(v, "")
 }
 
 /// A Teams, Zoom, Meet or Webex link in the text, if any.
@@ -128,7 +175,7 @@ pub fn parse_ics(text: &str, from: f64, to: f64) -> Vec<Event> {
     }
     // One occurrence of a repeating event that was moved or changed is an
     // event of its own, saying which one it stands in for.
-    let moved: Vec<(String, f64)> = all.iter().filter_map(|p| Some((prop(p, "UID")?.to_string(), parse_time(prop(p, "RECURRENCE-ID")?)?.0))).collect();
+    let moved: Vec<(String, f64)> = all.iter().filter_map(|p| Some((prop(p, "UID")?.to_string(), timed(p, "RECURRENCE-ID")?.0))).collect();
     let mut out = Vec::new();
     for p in &all {
         let uid = prop(p, "UID").unwrap_or("");
@@ -141,6 +188,11 @@ pub fn parse_ics(text: &str, from: f64, to: f64) -> Vec<Event> {
 
 /// An event's lines: (name, parameters, value).
 type Props = Vec<(String, String, String)>;
+
+/// A date-time property, in its own time zone.
+fn timed(p: &Props, name: &str) -> Option<(f64, bool)> {
+    p.iter().find(|x| x.0 == name).and_then(|x| parse_time_in(&x.2, &x.1))
+}
 
 fn prop<'a>(p: &'a Props, name: &str) -> Option<&'a str> {
     p.iter().find(|x| x.0 == name).map(|x| x.2.as_str())
@@ -184,13 +236,13 @@ fn expand(props: &Props, moved: &[f64], from: f64, to: f64, out: &mut Vec<Event>
     if get("STATUS").map_or(false, |s| s.eq_ignore_ascii_case("CANCELLED")) {
         return;
     }
-    let Some((start, all_day)) = get("DTSTART").and_then(parse_time) else { return };
-    let end = get("DTEND").and_then(parse_time).map(|x| x.0).unwrap_or(start + if all_day { 86400.0 } else { 1800.0 });
+    let Some((start, all_day)) = timed(props, "DTSTART") else { return };
+    let end = timed(props, "DTEND").map(|x| x.0).unwrap_or(start + if all_day { 86400.0 } else { 1800.0 });
     let dur = (end - start).max(0.0);
     let title = get("SUMMARY").map(unescape).unwrap_or_else(|| "Event".into());
     let text = format!("{} {} {}", get("LOCATION").unwrap_or_default(), get("URL").unwrap_or_default(), get("DESCRIPTION").map(unescape).unwrap_or_default());
     let link = find_link(&text);
-    let exdates: Vec<f64> = props.iter().filter(|p| p.0 == "EXDATE").flat_map(|p| p.2.split(',').filter_map(|v| parse_time(v).map(|x| x.0)).collect::<Vec<_>>()).collect();
+    let exdates: Vec<f64> = props.iter().filter(|p| p.0 == "EXDATE").flat_map(|p| p.2.split(',').filter_map(|v| parse_time_in(v, &p.1).map(|x| x.0)).collect::<Vec<_>>()).collect();
     let mut push = |s: f64| {
         if s < to && s + dur > from && !exdates.iter().any(|x| (x - s).abs() < 60.0) {
             out.push(Event { start: s, end: s + dur, title: title.clone(), link: link.clone(), all_day });
@@ -219,10 +271,11 @@ fn expand(props: &Props, moved: &[f64], from: f64, to: f64, out: &mut Vec<Event>
         })
         .unwrap_or_default();
     // Work on local days so the wall time stays put across DST.
-    let (y0, m0, d0, h0, mi0) = {
-        let (y, m, d, mins) = crate::time::local_time(start);
-        (y, m, d, mins / 60, mins % 60)
-    };
+    // On the event's own clock (a zone's day and hour stay put across its
+    // summer time, not this PC's).
+    let dt = props.iter().find(|x| x.0 == "DTSTART");
+    let clock = dt.filter(|_| !all_day).map_or(Clock::Local, |x| Clock::of(&x.2, &x.1));
+    let Some((y0, m0, d0, h0, mi0, _, _)) = dt.and_then(|x| wall(&x.2)) else { return };
     let number = crate::modules::countdown::day_number;
     let day0 = number(y0, m0, d0);
     // Straight to the days that matter (a repeat that started years ago),
@@ -281,7 +334,7 @@ fn expand(props: &Props, moved: &[f64], from: f64, to: f64, out: &mut Vec<Event>
                 continue;
             }
             let (y, m, d) = civil(day);
-            let s = local_to_unix(y, m, d, h0, mi0, 0);
+            let s = clock.unix(y, m, d, h0, mi0, 0);
             if until.is_some_and(|u| s > u) || count.is_some_and(|c| n >= c) || s > to {
                 return;
             }
@@ -500,6 +553,33 @@ mod tests {
         assert_eq!(days("20251229T090000", "FREQ=WEEKLY;INTERVAL=2", "")[..2], ["1-12", "1-26"]);
         // Counted ones end where they end.
         assert_eq!(days("20251231T090000", "FREQ=DAILY;COUNT=3", ""), ["1-1", "1-2"]);
+    }
+
+    /// UTC hours of an event, in this zone, over 2026.
+    fn utc_hours(dtstart: &str, rule: &str) -> Vec<String> {
+        let ics = format!("BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:a\nDTSTART;{dtstart}\nSUMMARY:x\n{rule}END:VEVENT\nEND:VCALENDAR");
+        parse_ics(&ics, utc_to_unix(2026, 1, 1, 0, 0, 0), utc_to_unix(2026, 12, 31, 0, 0, 0))
+            .iter()
+            .map(|e| {
+                let s = e.start as i64;
+                let (_, m, d) = civil(s.div_euclid(86400));
+                format!("{m}-{d} {}:{:02}", s.rem_euclid(86400) / 3600, s.rem_euclid(3600) / 60)
+            })
+            .take(3)
+            .collect()
+    }
+
+    #[test]
+    fn other_time_zones() {
+        // Google writes IANA names, Outlook Windows' own: 9:00 in New York
+        // is 14:00 UTC in winter and 13:00 in summer.
+        assert_eq!(utc_hours("TZID=America/New_York:20260601T090000", ""), ["6-1 13:00"]);
+        assert_eq!(utc_hours("TZID=Eastern Standard Time:20260115T090000", ""), ["1-15 14:00"]);
+        assert_eq!(utc_hours("TZID=\"Europe/London\":20260115T090000", ""), ["1-15 9:00"]);
+        // A weekly one keeps its 9:00 there across the change (8 March).
+        assert_eq!(utc_hours("TZID=America/New_York:20260302T090000", "RRULE:FREQ=WEEKLY;COUNT=2\n"), ["3-2 14:00", "3-9 13:00"]);
+        // Unknown zones count as this PC's (as before), never dropped.
+        assert_eq!(utc_hours("TZID=Customized Time Zone:20260601T090000", "").len(), 1);
     }
 
     #[test]

@@ -99,7 +99,7 @@ impl Row {
 }
 
 impl Menu {
-    fn for_app(app: apps::App, group: Option<usize>) -> Menu {
+    pub fn for_app(app: apps::App, group: Option<usize>) -> Menu {
         // A permission prompt (or another window Nookly can't look into):
         // only to be shown.
         if app.launch.is_empty() {
@@ -399,6 +399,9 @@ fn hotkey(hwnd: HWND, (id, vk): (i32, VIRTUAL_KEY), on: bool) {
 /// Take the arrows and Enter (while the mouse is on the menu or the bar: away
 /// from them they're for what you're typing in).
 pub fn take_keys(hwnd: HWND, on: bool) {
+    if crate::DEMO.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
     for k in KEYS {
         hotkey(hwnd, k, on);
     }
@@ -406,6 +409,9 @@ pub fn take_keys(hwnd: HWND, on: bool) {
 
 /// Listen (or stop listening) for what closes the menu.
 pub fn listen(hwnd: HWND, on: bool) {
+    if crate::DEMO.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
     unsafe {
         hotkey(hwnd, ESC, on);
         let dev = RAWINPUTDEVICE { usUsagePage: 1, usUsage: 2, dwFlags: if on { RIDEV_INPUTSINK } else { RIDEV_REMOVE }, hwndTarget: if on { hwnd } else { HWND::default() } };

@@ -2,6 +2,13 @@
 
 Versions 0.1.x below were released before the Nookly name.
 
+## 1.0.1: Meetings in every time zone
+
+- **Calendar**: a meeting set in another time zone (Google and Outlook name it on the event) shows at your time now, summer time included on both sides. Before, its hour was read as yours.
+- The taskbar gives back the memory of a pop-up closed for half a minute.
+- **The website**: the taskbar's page shows the real thing, pop-ups and all (drawn by the taskbar itself, with made-up apps), and the pictures on the cards aren't cut off any more. The Liquid Glass picture shows the new, smooth glass.
+- Releases try again by themselves when GitHub's servers are busy (1.0.0 had to wait out an outage).
+
 ## 1.0.0: Lighter, smoother and steadier
 
 Nookly was reviewed, measured and tested all over again for this one.
